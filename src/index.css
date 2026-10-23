@@ -4,15 +4,15 @@
 
 @layer base {
   :root {
-    /* Black canvas + vivid yellow accent */
+    /* Black canvas + vivid red accent */
     --background: 0 0% 4%;
     --foreground: 0 0% 98%;
     --card: 0 0% 8%;
     --card-foreground: 0 0% 98%;
     --popover: 0 0% 9%;
     --popover-foreground: 0 0% 98%;
-    --primary: 52 100% 55%;
-    --primary-foreground: 0 0% 5%;
+    --primary: 0 100% 57%;
+    --primary-foreground: 0 0% 100%;
     --secondary: 0 0% 13%;
     --secondary-foreground: 0 0% 98%;
     --muted: 0 0% 13%;
@@ -23,8 +23,8 @@
     --destructive-foreground: 0 0% 100%;
     --border: 0 0% 18%;
     --input: 0 0% 18%;
-    --ring: 52 100% 55%;
-    --chart-1: 52 100% 55%;
+    --ring: 0 100% 57%;
+    --chart-1: 0 100% 57%;
     --chart-2: 200 85% 58%;
     --chart-3: 30 95% 58%;
     --chart-4: 265 80% 68%;
@@ -36,12 +36,12 @@
     --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     --sidebar-background: 0 0% 6%;
     --sidebar-foreground: 0 0% 92%;
-    --sidebar-primary: 52 100% 55%;
-    --sidebar-primary-foreground: 0 0% 5%;
+    --sidebar-primary: 0 100% 57%;
+    --sidebar-primary-foreground: 0 0% 100%;
     --sidebar-accent: 0 0% 13%;
     --sidebar-accent-foreground: 0 0% 98%;
     --sidebar-border: 0 0% 15%;
-    --sidebar-ring: 52 100% 55%;
+    --sidebar-ring: 0 100% 57%;
   }
 }
 
