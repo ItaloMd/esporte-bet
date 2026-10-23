@@ -4,7 +4,7 @@ import { base44 } from "@/api/base44Client";
 const DEFAULT_SETTINGS = {
   brand_name: "Placar",
   tagline: "Odds informativas e simulações esportivas",
-  accent_color: "#C3F53C",
+  accent_color: "#FFE01A",
   demo_mode: true,
   support_email: "",
 };

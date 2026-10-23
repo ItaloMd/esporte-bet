@@ -13,7 +13,7 @@ import { setLocalSettings } from "@/lib/appSettings";
 const EMPTY = {
   brand_name: "Placar",
   tagline: "",
-  accent_color: "#C3F53C",
+  accent_color: "#FFE01A",
   logo_url: "",
   favicon_url: "",
   support_email: "",
