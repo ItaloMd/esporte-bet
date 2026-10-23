@@ -1,0 +1,119 @@
+{
+  "name": "UserProfile",
+  "type": "object",
+  "properties": {
+    "user_id": {
+      "type": "string"
+    },
+    "display_name": {
+      "type": "string"
+    },
+    "full_name": {
+      "type": "string"
+    },
+    "cpf": {
+      "type": "string"
+    },
+    "cpf_masked": {
+      "type": "string"
+    },
+    "birth_date": {
+      "type": "string"
+    },
+    "state": {
+      "type": "string"
+    },
+    "city": {
+      "type": "string"
+    },
+    "identity_status": {
+      "type": "string",
+      "enum": [
+        "unverified",
+        "pending",
+        "verified",
+        "rejected"
+      ],
+      "default": "unverified"
+    },
+    "cpf_checked": {
+      "type": "boolean",
+      "default": false
+    },
+    "referral_code": {
+      "type": "string"
+    },
+    "referred_by_code": {
+      "type": "string"
+    },
+    "favorite_sports": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "favorite_teams": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "favorite_competitions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "terms_accepted_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "privacy_accepted_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "onboarding_complete": {
+      "type": "boolean",
+      "default": false
+    }
+  },
+  "required": [
+    "user_id",
+    "full_name",
+    "cpf"
+  ],
+  "rls": {
+    "read": {
+      "$or": [
+        {
+          "data.user_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "create": {
+      "data.user_id": "{{user.id}}"
+    },
+    "update": {
+      "$or": [
+        {
+          "data.user_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

@@ -6,7 +6,26 @@ import PageNotFound from './lib/PageNotFound';
 import { AuthProvider, useAuth } from '@/lib/AuthContext';
 import UserNotRegisteredError from '@/components/UserNotRegisteredError';
 import ScrollToTop from './components/ScrollToTop';
-// Add page imports here
+import { Navigate } from 'react-router-dom';
+import Layout from '@/components/layout/Layout';
+import ProtectedRoute from '@/components/ProtectedRoute';
+import Login from '@/pages/Login';
+import Register from '@/pages/Register';
+import ForgotPassword from '@/pages/ForgotPassword';
+import ResetPassword from '@/pages/ResetPassword';
+import Home from '@/pages/Home';
+import SportsIndex from '@/pages/SportsIndex';
+import SportPage from '@/pages/SportPage';
+import Live from '@/pages/Live';
+import Competitions from '@/pages/Competitions';
+import EventDetail from '@/pages/EventDetail';
+import SearchPage from '@/pages/SearchPage';
+import MySimulations from '@/pages/MySimulations';
+import Affiliate from '@/pages/Affiliate';
+import Profile from '@/pages/Profile';
+import SettingsPage from '@/pages/SettingsPage';
+import Admin from '@/pages/Admin';
+import { Terms, Privacy } from '@/pages/Legal';
 
 const AuthenticatedApp = () => {
   const { isLoadingAuth, isLoadingPublicSettings, authError, navigateToLogin } = useAuth();
@@ -34,7 +53,31 @@ const AuthenticatedApp = () => {
   // Render the main app
   return (
     <Routes>
-      {/* Add your page Route elements here */}
+      <Route path="/login" element={<Login />} />
+      <Route path="/register" element={<Register />} />
+      <Route path="/forgot-password" element={<ForgotPassword />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
+
+      <Route element={<Layout />}>
+        <Route path="/" element={<Home />} />
+        <Route path="/esportes" element={<SportsIndex />} />
+        <Route path="/esporte/:slug" element={<SportPage />} />
+        <Route path="/ao-vivo" element={<Live />} />
+        <Route path="/competicoes" element={<Competitions />} />
+        <Route path="/partida/:id" element={<EventDetail />} />
+        <Route path="/busca" element={<SearchPage />} />
+        <Route path="/termos" element={<Terms />} />
+        <Route path="/privacidade" element={<Privacy />} />
+
+        <Route element={<ProtectedRoute unauthenticatedElement={<Navigate to="/login" replace />} />}>
+          <Route path="/minhas-simulacoes" element={<MySimulations />} />
+          <Route path="/indique-e-ganhe" element={<Affiliate />} />
+          <Route path="/perfil" element={<Profile />} />
+          <Route path="/configuracoes" element={<SettingsPage />} />
+          <Route path="/admin" element={<Admin />} />
+        </Route>
+      </Route>
+
       <Route path="*" element={<PageNotFound />} />
     </Routes>
   );

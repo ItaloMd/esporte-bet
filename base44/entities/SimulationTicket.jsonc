@@ -1,0 +1,85 @@
+{
+  "name": "SimulationTicket",
+  "type": "object",
+  "properties": {
+    "user_id": {
+      "type": "string"
+    },
+    "stake_points": {
+      "type": "number"
+    },
+    "total_odd": {
+      "type": "number"
+    },
+    "potential_points": {
+      "type": "number"
+    },
+    "selection_count": {
+      "type": "number"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "open",
+        "won",
+        "lost",
+        "void",
+        "partial"
+      ],
+      "default": "open"
+    },
+    "settled_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "note": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "user_id",
+    "stake_points",
+    "total_odd"
+  ],
+  "rls": {
+    "read": {
+      "$or": [
+        {
+          "data.user_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "create": {
+      "data.user_id": "{{user.id}}"
+    },
+    "update": {
+      "$or": [
+        {
+          "data.user_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "delete": {
+      "$or": [
+        {
+          "data.user_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    }
+  }
+}

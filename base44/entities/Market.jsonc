@@ -1,0 +1,72 @@
+{
+  "name": "Market",
+  "type": "object",
+  "properties": {
+    "event_id": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "code": {
+      "type": "string"
+    },
+    "market_group": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "open",
+        "suspended",
+        "closed"
+      ],
+      "default": "open"
+    },
+    "sort_order": {
+      "type": "number",
+      "default": 0
+    },
+    "is_main": {
+      "type": "boolean",
+      "default": false
+    },
+    "source": {
+      "type": "string",
+      "enum": [
+        "demo",
+        "provider"
+      ],
+      "default": "demo"
+    },
+    "external_id": {
+      "type": "string"
+    },
+    "last_sync_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "required": [
+    "event_id",
+    "name"
+  ],
+  "rls": {
+    "read": {},
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

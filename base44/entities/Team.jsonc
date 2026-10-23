@@ -1,0 +1,52 @@
+{
+  "name": "Team",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "short_name": {
+      "type": "string"
+    },
+    "sport_slug": {
+      "type": "string"
+    },
+    "competition_slug": {
+      "type": "string"
+    },
+    "country": {
+      "type": "string"
+    },
+    "crest_url": {
+      "type": "string"
+    },
+    "crew_primary_color": {
+      "type": "string"
+    },
+    "external_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "name",
+    "sport_slug"
+  ],
+  "rls": {
+    "read": {},
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

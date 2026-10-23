@@ -1,0 +1,109 @@
+{
+  "name": "Event",
+  "type": "object",
+  "properties": {
+    "sport_slug": {
+      "type": "string"
+    },
+    "competition_id": {
+      "type": "string"
+    },
+    "competition_name": {
+      "type": "string"
+    },
+    "country": {
+      "type": "string"
+    },
+    "home_team_id": {
+      "type": "string"
+    },
+    "home_team_name": {
+      "type": "string"
+    },
+    "home_team_crest": {
+      "type": "string"
+    },
+    "away_team_id": {
+      "type": "string"
+    },
+    "away_team_name": {
+      "type": "string"
+    },
+    "away_team_crest": {
+      "type": "string"
+    },
+    "start_time": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "scheduled",
+        "live",
+        "finished",
+        "postponed",
+        "cancelled"
+      ],
+      "default": "scheduled"
+    },
+    "minute": {
+      "type": "number"
+    },
+    "home_score": {
+      "type": "number"
+    },
+    "away_score": {
+      "type": "number"
+    },
+    "venue": {
+      "type": "string"
+    },
+    "is_featured": {
+      "type": "boolean",
+      "default": false
+    },
+    "popularity": {
+      "type": "number"
+    },
+    "source": {
+      "type": "string",
+      "enum": [
+        "demo",
+        "provider"
+      ],
+      "default": "demo"
+    },
+    "external_id": {
+      "type": "string"
+    },
+    "last_sync_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "required": [
+    "sport_slug",
+    "home_team_name",
+    "away_team_name",
+    "start_time"
+  ],
+  "rls": {
+    "read": {},
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

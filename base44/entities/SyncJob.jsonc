@@ -1,0 +1,88 @@
+{
+  "name": "SyncJob",
+  "type": "object",
+  "properties": {
+    "provider": {
+      "type": "string"
+    },
+    "trigger": {
+      "type": "string",
+      "enum": [
+        "manual",
+        "scheduled",
+        "on_demand",
+        "webhook"
+      ],
+      "default": "scheduled"
+    },
+    "job_type": {
+      "type": "string",
+      "enum": [
+        "events",
+        "odds",
+        "results",
+        "catalog",
+        "full"
+      ],
+      "default": "full"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "running",
+        "success",
+        "error",
+        "skipped"
+      ],
+      "default": "running"
+    },
+    "started_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "finished_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "requests_used": {
+      "type": "number",
+      "default": 0
+    },
+    "records_upserted": {
+      "type": "number",
+      "default": 0
+    },
+    "error_message": {
+      "type": "string"
+    },
+    "triggered_by": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "provider",
+    "job_type"
+  ],
+  "rls": {
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

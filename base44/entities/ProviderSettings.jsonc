@@ -1,0 +1,109 @@
+{
+  "name": "ProviderSettings",
+  "type": "object",
+  "properties": {
+    "provider": {
+      "type": "string",
+      "enum": [
+        "demo",
+        "the_odds_api",
+        "api_football",
+        "sportradar",
+        "custom"
+      ],
+      "default": "demo"
+    },
+    "provider_label": {
+      "type": "string"
+    },
+    "enabled": {
+      "type": "boolean",
+      "default": false
+    },
+    "base_url": {
+      "type": "string"
+    },
+    "sports": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "competitions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "refresh_live_seconds": {
+      "type": "number",
+      "default": 60
+    },
+    "refresh_upcoming_seconds": {
+      "type": "number",
+      "default": 900
+    },
+    "refresh_finished_seconds": {
+      "type": "number",
+      "default": 1800
+    },
+    "cache_ttl_seconds": {
+      "type": "number",
+      "default": 300
+    },
+    "batch_odds": {
+      "type": "boolean",
+      "default": true
+    },
+    "webhook_enabled": {
+      "type": "boolean",
+      "default": false
+    },
+    "daily_request_limit": {
+      "type": "number",
+      "default": 1000
+    },
+    "credentials_configured": {
+      "type": "boolean",
+      "default": false
+    },
+    "last_sync_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "last_status": {
+      "type": "string"
+    },
+    "last_error": {
+      "type": "string"
+    },
+    "notes": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "provider"
+  ],
+  "rls": {
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

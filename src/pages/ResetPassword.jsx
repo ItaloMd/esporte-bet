@@ -20,7 +20,7 @@ export default function ResetPassword() {
     e.preventDefault();
     setError("");
     if (newPassword !== confirmPassword) {
-      setError("Passwords do not match");
+      setError("As senhas não coincidem.");
       return;
     }
     setLoading(true);
@@ -28,7 +28,7 @@ export default function ResetPassword() {
       await base44.auth.resetPassword({ resetToken, newPassword });
       window.location.href = "/login";
     } catch (err) {
-      setError(err.message || "Failed to reset password");
+      setError(err.message || "Não foi possível redefinir a senha.");
     } finally {
       setLoading(false);
     }
@@ -38,37 +38,29 @@ export default function ResetPassword() {
     return (
       <AuthLayout
         icon={AlertTriangle}
-        title="Invalid reset link"
-        subtitle="This password reset link is missing or invalid"
+        title="Link inválido"
+        subtitle="Este link de redefinição está incompleto ou expirou"
         footer={
-          <Link to="/forgot-password" className="text-primary font-medium hover:underline">
-            Request a new link
+          <Link to="/forgot-password" className="font-medium text-primary hover:underline">
+            Solicitar um novo link
           </Link>
         }
       >
-        <p className="text-sm text-foreground text-center">
-          The link you used appears to be incomplete. Please request a new password reset email.
+        <p className="text-center text-sm text-foreground">
+          O link utilizado parece incompleto. Solicite um novo e-mail de redefinição de senha.
         </p>
       </AuthLayout>
     );
   }
 
   return (
-    <AuthLayout
-      icon={Lock}
-      title="New password"
-      subtitle="Enter your new password below"
-    >
-      {error && (
-        <div className="mb-4 p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
-          {error}
-        </div>
-      )}
+    <AuthLayout icon={Lock} title="Nova senha" subtitle="Crie uma senha forte para sua conta">
+      {error && <div className="mb-4 rounded-lg bg-destructive/10 p-3 text-sm text-destructive">{error}</div>}
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="space-y-2">
-          <Label htmlFor="password">New Password</Label>
+          <Label htmlFor="password">Nova senha</Label>
           <div className="relative">
-            <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" aria-hidden="true" />
+            <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
             <Input
               id="password"
               type="password"
@@ -77,15 +69,15 @@ export default function ResetPassword() {
               placeholder="••••••••"
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
-              className="pl-10 h-12"
+              className="h-12 pl-10"
               required
             />
           </div>
         </div>
         <div className="space-y-2">
-          <Label htmlFor="confirm">Confirm Password</Label>
+          <Label htmlFor="confirm">Confirmar nova senha</Label>
           <div className="relative">
-            <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" aria-hidden="true" />
+            <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
             <Input
               id="confirm"
               type="password"
@@ -93,19 +85,19 @@ export default function ResetPassword() {
               placeholder="••••••••"
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
-              className="pl-10 h-12"
+              className="h-12 pl-10"
               required
             />
           </div>
         </div>
-        <Button type="submit" className="w-full h-12 font-medium" disabled={loading}>
+        <Button type="submit" className="h-12 w-full font-medium" disabled={loading}>
           {loading ? (
             <>
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-              Resetting...
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Redefinindo...
             </>
           ) : (
-            "Reset password"
+            "Redefinir senha"
           )}
         </Button>
       </form>

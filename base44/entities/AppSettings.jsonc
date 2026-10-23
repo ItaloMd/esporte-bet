@@ -1,0 +1,82 @@
+{
+  "name": "AppSettings",
+  "type": "object",
+  "properties": {
+    "brand_name": {
+      "type": "string",
+      "default": "Placar"
+    },
+    "tagline": {
+      "type": "string"
+    },
+    "accent_color": {
+      "type": "string"
+    },
+    "logo_url": {
+      "type": "string"
+    },
+    "favicon_url": {
+      "type": "string"
+    },
+    "support_email": {
+      "type": "string"
+    },
+    "demo_mode": {
+      "type": "boolean",
+      "default": true
+    },
+    "min_age": {
+      "type": "number",
+      "default": 18
+    },
+    "terms_text": {
+      "type": "string"
+    },
+    "privacy_text": {
+      "type": "string"
+    },
+    "responsible_gaming_text": {
+      "type": "string"
+    },
+    "affiliate_enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "affiliate_attribution_days": {
+      "type": "number",
+      "default": 30
+    },
+    "affiliate_max_referrals": {
+      "type": "number",
+      "default": 50
+    },
+    "affiliate_approval_required": {
+      "type": "boolean",
+      "default": true
+    },
+    "affiliate_commission_rule": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "brand_name"
+  ],
+  "rls": {
+    "read": {},
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

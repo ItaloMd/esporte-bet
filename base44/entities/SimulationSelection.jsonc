@@ -1,0 +1,120 @@
+{
+  "name": "SimulationSelection",
+  "type": "object",
+  "properties": {
+    "ticket_id": {
+      "type": "string"
+    },
+    "user_id": {
+      "type": "string"
+    },
+    "event_id": {
+      "type": "string"
+    },
+    "event_label": {
+      "type": "string"
+    },
+    "sport_slug": {
+      "type": "string"
+    },
+    "competition_name": {
+      "type": "string"
+    },
+    "market_id": {
+      "type": "string"
+    },
+    "market_name": {
+      "type": "string"
+    },
+    "odd_id": {
+      "type": "string"
+    },
+    "odd_label": {
+      "type": "string"
+    },
+    "odd_value": {
+      "type": "number"
+    },
+    "odd_status_at_placement": {
+      "type": "string",
+      "enum": [
+        "open",
+        "suspended",
+        "closed"
+      ],
+      "default": "open"
+    },
+    "event_start_time": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "open",
+        "won",
+        "lost",
+        "void"
+      ],
+      "default": "open"
+    },
+    "settled_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "source": {
+      "type": "string",
+      "enum": [
+        "demo",
+        "provider"
+      ],
+      "default": "demo"
+    }
+  },
+  "required": [
+    "ticket_id",
+    "user_id",
+    "odd_value"
+  ],
+  "rls": {
+    "read": {
+      "$or": [
+        {
+          "data.user_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "create": {
+      "data.user_id": "{{user.id}}"
+    },
+    "update": {
+      "$or": [
+        {
+          "data.user_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "delete": {
+      "$or": [
+        {
+          "data.user_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    }
+  }
+}
