@@ -43,17 +43,40 @@ export function decorateOdds(odds, event) {
   return odds.map((odd) => decorateOdd(odd, event));
 }
 
+/**
+ * A mesma seleção pode chegar de várias casas de apostas. Mantém a melhor
+ * cotação disponível por seleção, para não repetir o mesmo botão no cartão.
+ */
+export function bestBySelection(odds) {
+  const byCode = new Map();
+  odds.forEach((odd) => {
+    const key = odd.code || odd.id;
+    const current = byCode.get(key);
+    if (!current) {
+      byCode.set(key, odd);
+      return;
+    }
+    const currentOpen = current.status === "open";
+    const nextOpen = odd.status === "open";
+    if (nextOpen !== currentOpen) {
+      if (nextOpen) byCode.set(key, odd);
+      return;
+    }
+    if (Number(odd.value) > Number(current.value)) byCode.set(key, odd);
+  });
+  return [...byCode.values()].sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+}
+
 export async function fetchMainOddsForEvents(events) {
   const ids = events.filter(Boolean).map((event) => event.id);
   if (!ids.length) return {};
   const page = await base44.entities.Odd.filter(
-    { event_id: { $in: ids } },
-    { limit: 400, sort: "sort_order" },
+    { event_id: { $in: ids }, market_group: "principal" },
+    { limit: 500, sort: "sort_order" },
   );
   const byId = new Map(events.map((event) => [event.id, event]));
   const mainByEvent = {};
   (page.items || []).forEach((odd) => {
-    if (odd.market_group !== "principal") return;
     const event = byId.get(odd.event_id);
     if (!event) return;
     if (!mainByEvent[odd.event_id]) mainByEvent[odd.event_id] = [];
@@ -64,7 +87,7 @@ export async function fetchMainOddsForEvents(events) {
   Object.entries(mainByEvent).forEach(([eventId, list]) => {
     const open = list.filter((odd) => odd.status === "open");
     const suspended = list.filter((odd) => odd.status === "suspended");
-    const chosen = open.length ? open : suspended;
+    const chosen = bestBySelection(open.length ? open : suspended);
     if (chosen.length) byEvent[eventId] = chosen.slice(0, MAX_CARD_ODDS);
   });
   return byEvent;

@@ -1,0 +1,48 @@
+{
+  "definition": {
+    "document": {
+      "dsl": "1.0.0",
+      "name": "odds_hoje",
+      "version": "1.0",
+      "namespace": "base44"
+    },
+    "do": [
+      {
+        "sincronizar_odds_de_hoje": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "syncOdds",
+            "args": {
+              "mode": "today",
+              "trigger": "scheduled"
+            }
+          },
+          "then": "end",
+          "x-base44": {
+            "title": "Atualizar odds de hoje",
+            "description": "The Odds API \u00b7 pr\u00e9-jogo"
+          }
+        }
+      }
+    ]
+  },
+  "description": "Atualiza a cada hora as odds dos jogos de hoje, sem coletar odds ao vivo.",
+  "name": "Odds Hoje",
+  "trigger": {
+    "condition": null,
+    "config": {
+      "trigger_type": "scheduled",
+      "events": [],
+      "schedule_mode": "recurring",
+      "cron_expression": "0 * * * *",
+      "one_time_date": null,
+      "timezone": "America/Bahia",
+      "interval_value": null,
+      "interval_unit": null,
+      "interval_anchor": null,
+      "ends_type": "never",
+      "ends_on_date": null,
+      "ends_after_count": null
+    }
+  }
+}

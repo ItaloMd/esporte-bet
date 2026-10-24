@@ -36,6 +36,9 @@
       "type": "string",
       "format": "date-time"
     },
+    "local_date": {
+      "type": "string"
+    },
     "status": {
       "type": "string",
       "enum": [
@@ -46,6 +49,40 @@
         "cancelled"
       ],
       "default": "scheduled"
+    },
+    "tracking": {
+      "type": "string",
+      "enum": [
+        "today",
+        "upcoming",
+        "finished"
+      ],
+      "default": "upcoming"
+    },
+    "odds_status": {
+      "type": "string",
+      "enum": [
+        "available",
+        "unavailable",
+        "stale"
+      ],
+      "default": "unavailable"
+    },
+    "odds_updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "discovered_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "last_checked_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "next_check_at": {
+      "type": "string",
+      "format": "date-time"
     },
     "minute": {
       "type": "number"

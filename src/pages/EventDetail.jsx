@@ -6,7 +6,7 @@ import MarketSection from "@/components/odds/MarketSection";
 import SportIcon from "@/components/sports/SportIcon";
 import { ErrorState } from "@/components/state/States";
 import { marketGroupLabel, sportName } from "@/lib/sports";
-import { decorateOdds } from "@/lib/eventQueries";
+import { bestBySelection, decorateOdds } from "@/lib/eventQueries";
 
 export default function EventDetail() {
   const { id } = useParams();
@@ -21,13 +21,13 @@ export default function EventDetail() {
         const event = await base44.entities.Event.get(id);
         const [marketsPage, oddsPage] = await Promise.all([
           base44.entities.Market.filter({ event_id: id }, { sort: "sort_order", limit: 60 }),
-          base44.entities.Odd.filter({ event_id: id }, { sort: "sort_order", limit: 200 }),
+          base44.entities.Odd.filter({ event_id: id }, { sort: "sort_order", limit: 500 }),
         ]);
         if (!active) return;
         const decorated = decorateOdds(oddsPage.items || [], event);
         const markets = (marketsPage.items || []).map((market) => ({
           ...market,
-          odds: decorated.filter((odd) => odd.market_id === market.id),
+          odds: bestBySelection(decorated.filter((odd) => odd.market_id === market.id)),
         }));
         setState({ loading: false, error: "", event, markets });
       } catch (error) {

@@ -21,6 +21,16 @@
       "type": "boolean",
       "default": false
     },
+    "credits_used": {
+      "type": "number",
+      "default": 0
+    },
+    "params": {
+      "type": "string"
+    },
+    "note": {
+      "type": "string"
+    },
     "error_message": {
       "type": "string"
     }

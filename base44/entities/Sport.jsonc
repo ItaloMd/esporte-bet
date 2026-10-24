@@ -23,6 +23,28 @@
       "type": "boolean",
       "default": true
     },
+    "in_season": {
+      "type": "boolean",
+      "default": false
+    },
+    "odds_available": {
+      "type": "boolean",
+      "default": false
+    },
+    "markets_available": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "event_count": {
+      "type": "number",
+      "default": 0
+    },
+    "last_catalog_at": {
+      "type": "string",
+      "format": "date-time"
+    },
     "external_id": {
       "type": "string"
     }

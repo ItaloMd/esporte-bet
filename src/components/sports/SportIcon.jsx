@@ -1,5 +1,5 @@
 import React from "react";
-import { CircleDot, Trophy, Swords, Flag, Shield, Activity, Dumbbell } from "lucide-react";
+import { CircleDot, Trophy, Swords, Flag, Shield, Activity, Dumbbell, Star } from "lucide-react";
 
 const ICONS = {
   futebol: CircleDot,
@@ -9,6 +9,16 @@ const ICONS = {
   "futebol-americano": Shield,
   mma: Swords,
   automobilismo: Flag,
+  hockey: Shield,
+  beisebol: CircleDot,
+  boxe: Swords,
+  golfe: Flag,
+  criquete: CircleDot,
+  handebol: Activity,
+  "australian-rules": Shield,
+  "tenis-de-mesa": Trophy,
+  lacrosse: Swords,
+  politica: Star,
   outros: CircleDot,
 };
 

@@ -14,11 +14,20 @@
     "market_group": {
       "type": "string"
     },
+    "market_key": {
+      "type": "string"
+    },
+    "bookmaker": {
+      "type": "string"
+    },
     "label": {
       "type": "string"
     },
     "code": {
       "type": "string"
+    },
+    "line": {
+      "type": "number"
     },
     "value": {
       "type": "number"
@@ -55,6 +64,10 @@
         "provider"
       ],
       "default": "demo"
+    },
+    "source_updated_at": {
+      "type": "string",
+      "format": "date-time"
     },
     "external_id": {
       "type": "string"

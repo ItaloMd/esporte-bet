@@ -11,6 +11,9 @@
     "code": {
       "type": "string"
     },
+    "market_key": {
+      "type": "string"
+    },
     "market_group": {
       "type": "string"
     },
@@ -30,6 +33,10 @@
     "is_main": {
       "type": "boolean",
       "default": false
+    },
+    "bookmaker_count": {
+      "type": "number",
+      "default": 0
     },
     "source": {
       "type": "string",

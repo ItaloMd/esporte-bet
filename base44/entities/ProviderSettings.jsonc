@@ -23,6 +23,26 @@
     "base_url": {
       "type": "string"
     },
+    "regions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [
+        "eu"
+      ]
+    },
+    "markets": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [
+        "h2h",
+        "spreads",
+        "totals"
+      ]
+    },
     "sports": {
       "type": "array",
       "items": {
@@ -35,21 +55,96 @@
         "type": "string"
       }
     },
+    "max_sports_per_run": {
+      "type": "number",
+      "default": 10
+    },
+    "max_bookmakers": {
+      "type": "number",
+      "default": 8
+    },
+    "budget_credits": {
+      "type": "number",
+      "default": 0
+    },
+    "credits_used": {
+      "type": "number",
+      "default": 0
+    },
+    "credits_remaining": {
+      "type": "number"
+    },
+    "credits_last": {
+      "type": "number",
+      "default": 0
+    },
+    "credits_today": {
+      "type": "number",
+      "default": 0
+    },
+    "credits_today_date": {
+      "type": "string"
+    },
+    "credits_period_start": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "alert_level": {
+      "type": "number",
+      "default": 0
+    },
+    "skipped_queries": {
+      "type": "number",
+      "default": 0
+    },
+    "skipped_reason": {
+      "type": "string"
+    },
+    "catalog_sync_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "today_sync_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "upcoming_sync_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "next_today_run_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "next_upcoming_run_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "locked_until": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "lock_owner": {
+      "type": "string"
+    },
+    "last_run_summary": {
+      "type": "string"
+    },
     "refresh_live_seconds": {
       "type": "number",
       "default": 60
     },
     "refresh_upcoming_seconds": {
       "type": "number",
-      "default": 900
+      "default": 3600
     },
     "refresh_finished_seconds": {
       "type": "number",
-      "default": 1800
+      "default": 86400
     },
     "cache_ttl_seconds": {
       "type": "number",
-      "default": 300
+      "default": 600
     },
     "batch_odds": {
       "type": "boolean",
@@ -61,7 +156,7 @@
     },
     "daily_request_limit": {
       "type": "number",
-      "default": 1000
+      "default": 500
     },
     "credentials_configured": {
       "type": "boolean",
