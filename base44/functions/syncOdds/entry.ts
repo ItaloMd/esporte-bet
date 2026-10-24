@@ -23,6 +23,7 @@ import {
   applyHouseMargin,
   isBrazilianCompetition,
 } from '../../shared/oddsApi.ts';
+import { markStartedEventsLive } from '../../shared/matchLifecycle.ts';
 
 const TIME_ZONE = 'America/Bahia';
 const CATALOG_TTL_MS = 24 * 60 * 60 * 1000;
@@ -558,29 +559,10 @@ async function runSync({ db, settings, apiKey, mode, now, force }) {
   });
   await writeInChunks(db, 'Event', eventStatusUpdates, 'update');
 
-  // Partidas cujo início já passou deixam de ser "próximos jogos" e viram histórico,
-  // para que a listagem de próximos eventos nunca mostre jogos já encerrados.
-  const pastEvents = [];
-  let pastCursor = null;
-  for (let round = 0; round < 6; round += 1) {
-    const pastPage = await db.Event.filter(
-      {
-        source: 'provider',
-        start_time: { $lt: now.toISOString() },
-        $or: [{ status: { $in: ['scheduled', 'live'] } }, { published: true }],
-      },
-      { limit: 500, ...(pastCursor ? { cursor: pastCursor } : {}) },
-    );
-    pastEvents.push(...(pastPage.items || []));
-    pastCursor = pastPage.next_cursor;
-    if (!pastPage.has_more) break;
-  }
-  await writeInChunks(
-    db,
-    'Event',
-    pastEvents.map((row) => ({ id: row.id, status: 'finished', tracking: 'finished', published: false })),
-    'update',
-  );
+  // Partidas iniciadas saem do catálogo de apostas e passam a "ao vivo" pelo
+  // horário previsto. O resultado é confirmado depois, pela rotina de liquidação,
+  // sem que a sincronização de odds consulte nada durante a partida.
+  await markStartedEventsLive(db, now.toISOString());
 
   if (selected.length) {
     await writeInChunks(

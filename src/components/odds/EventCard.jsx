@@ -63,7 +63,11 @@ export default function EventCard({ event, odds = [], showCompetition = true }) 
       </Link>
 
       <div className="flex flex-col gap-1.5 border-t border-border/70 px-3.5 py-2.5">
-        {odds.length ? (
+        {event.status === "live" ? (
+          <p className="py-1 text-xs text-muted-foreground">
+            Apostas encerradas — partida em andamento.
+          </p>
+        ) : odds.length ? (
           <>
             {odds.every((odd) => odd.status !== "open") && (
               <p className="text-[10px] font-medium uppercase tracking-wide text-amber-400">

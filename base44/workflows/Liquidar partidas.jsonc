@@ -1,0 +1,47 @@
+{
+  "name": "Liquidar partidas",
+  "description": "A cada 10 minutos fecha as apostas das partidas iniciadas, marca-as como ao vivo e confirma o resultado pela fonte para liquidar os boletins.",
+  "trigger": {
+    "condition": null,
+    "config": {
+      "trigger_type": "scheduled",
+      "events": [],
+      "schedule_mode": "recurring",
+      "cron_expression": "*/10 * * * *",
+      "one_time_date": null,
+      "timezone": "America/Bahia",
+      "interval_value": null,
+      "interval_unit": null,
+      "interval_anchor": null,
+      "ends_type": "never",
+      "ends_on_date": null,
+      "ends_after_count": null
+    }
+  },
+  "definition": {
+    "document": {
+      "dsl": "1.0.0",
+      "name": "liquidar_partidas",
+      "version": "1.0",
+      "namespace": "base44"
+    },
+    "do": [
+      {
+        "liquidar_partidas": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "settleMatches",
+            "args": {
+              "trigger": "scheduled"
+            }
+          },
+          "then": "end",
+          "x-base44": {
+            "title": "Fechar apostas e liquidar",
+            "description": "Status ao vivo + placar confirmado"
+          }
+        }
+      }
+    ]
+  }
+}

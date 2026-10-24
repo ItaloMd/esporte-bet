@@ -26,7 +26,13 @@
     "market_name": {
       "type": "string"
     },
+    "market_key": {
+      "type": "string"
+    },
     "odd_id": {
+      "type": "string"
+    },
+    "odd_code": {
       "type": "string"
     },
     "odd_label": {

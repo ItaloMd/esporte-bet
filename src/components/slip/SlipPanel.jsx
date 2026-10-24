@@ -12,7 +12,7 @@ import { formatOdds } from "@/lib/format";
 
 export default function SlipPanel({ onDone }) {
   const { selections, totalOdd, removeSelection, clear } = useSlip();
-  const { user, isAuthenticated, navigateToLogin } = useAuth();
+  const { isAuthenticated, navigateToLogin } = useAuth();
   const navigate = useNavigate();
   const [points, setPoints] = useState("10");
   const [submitting, setSubmitting] = useState(false);
@@ -33,69 +33,18 @@ export default function SlipPanel({ onDone }) {
     }
     setSubmitting(true);
     try {
-      const oddIds = selections.map((item) => item.odd_id);
-      const eventIds = [...new Set(selections.map((item) => item.event_id))];
-      const [oddsPage, eventsPage] = await Promise.all([
-        base44.entities.Odd.filter({ id: { $in: oddIds } }, { limit: oddIds.length }),
-        base44.entities.Event.filter({ id: { $in: eventIds } }, { limit: eventIds.length }),
-      ]);
-      const freshOdds = new Map((oddsPage.items || []).map((odd) => [odd.id, odd]));
-      const events = new Map((eventsPage.items || []).map((event) => [event.id, event]));
-
-      const usable = [];
-      const blocked = [];
-      selections.forEach((item) => {
-        const odd = freshOdds.get(item.odd_id);
-        const event = events.get(item.event_id);
-        const started = event?.start_time ? new Date(event.start_time).getTime() <= Date.now() : false;
-        const closed = !odd || odd.status !== "open" || ["live", "finished", "cancelled"].includes(event?.status) || started;
-        if (closed) blocked.push(item.odd_label);
-        else usable.push({ ...item, odd_value: odd.value, status: odd.status });
+      // A validação (cotação aberta, partida publicada e fora da janela de 10
+      // minutos) acontece no servidor, para que nenhuma aposta entre atrasada.
+      const response = await base44.functions.invoke("placeWager", {
+        stake,
+        odd_ids: selections.map((item) => item.odd_id),
       });
-
-      if (!usable.length) {
-        setError("As odds selecionadas não estão mais disponíveis para novas simulações.");
+      const data = response?.data || {};
+      if (data.error) {
+        if (data.blocked?.length) data.blocked.forEach((oddId) => removeSelection(oddId));
+        setError(data.error);
         return;
       }
-      if (blocked.length) {
-        blocked.forEach((item) => removeSelection(item.odd_id));
-        toast({
-          title: "Algumas seleções foram removidas",
-          description: "Odds suspensas, encerradas ou de partidas já iniciadas não podem ser simuladas.",
-        });
-        return;
-      }
-
-      const combined = usable.reduce((acc, item) => acc * Number(item.odd_value || 1), 1);
-      const ticket = await base44.entities.SimulationTicket.create({
-        user_id: user.id,
-        stake_points: stake,
-        total_odd: Number(combined.toFixed(4)),
-        potential_points: Number((stake * combined).toFixed(2)),
-        selection_count: usable.length,
-        status: "open",
-        note: "Simulação registrada com odds e horário capturados no momento da confirmação.",
-      });
-
-      await base44.entities.SimulationSelection.bulkCreate(
-        usable.map((item) => ({
-          ticket_id: ticket.id,
-          user_id: user.id,
-          event_id: item.event_id,
-          event_label: item.event_label,
-          sport_slug: item.sport_slug,
-          competition_name: item.competition_name,
-          market_id: item.market_id,
-          market_name: item.market_name,
-          odd_id: item.odd_id,
-          odd_label: item.odd_label,
-          odd_value: Number(item.odd_value),
-          odd_status_at_placement: item.status,
-          event_start_time: item.event_start_time,
-          status: "open",
-          source: "demo",
-        })),
-      );
 
       await base44.functions.invoke("registerWager", { stake }).catch(() => null);
 
@@ -104,7 +53,16 @@ export default function SlipPanel({ onDone }) {
       onDone?.();
       navigate("/minhas-simulacoes");
     } catch (err) {
-      setError(err.message || "Não foi possível registrar a simulação.");
+      const data = err?.response?.data;
+      if (data?.blocked?.length) {
+        data.blocked.forEach((oddId) => removeSelection(oddId));
+        toast({
+          title: "Algumas seleções foram removidas",
+          description: data.error,
+        });
+        return;
+      }
+      setError(data?.error || err.message || "Não foi possível registrar a simulação.");
     } finally {
       setSubmitting(false);
     }

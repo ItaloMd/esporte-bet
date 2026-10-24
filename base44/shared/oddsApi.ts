@@ -160,7 +160,7 @@ export function apiBase(settings) {
   return String(settings?.base_url || DEFAULT_BASE_URL).replace(/\/+$/, "");
 }
 
-function slugify(value) {
+export function slugify(value) {
   return String(value || "")
     .trim()
     .toLowerCase()
@@ -334,6 +334,20 @@ export function listOdds(apiKey, base, { sportKey, regions, markets, from, to })
   if (fromIso) params.set("commenceTimeFrom", fromIso);
   if (toIso) params.set("commenceTimeTo", toIso);
   return request(`${base}/sports/${encodeURIComponent(sportKey)}/odds/?${params.toString()}`);
+}
+
+/**
+ * Placares de uma modalidade. Traz também partidas já encerradas dentro da
+ * janela consultada, então uma única chamada cobre todos os eventos pendentes
+ * daquela modalidade. Só é chamado para eventos que já começaram.
+ */
+export function listScores(apiKey, base, sportKey, { daysFrom = 3 } = {}) {
+  const params = new URLSearchParams({
+    apiKey,
+    daysFrom: String(daysFrom),
+    dateFormat: "iso",
+  });
+  return request(`${base}/sports/${encodeURIComponent(sportKey)}/scores/?${params.toString()}`);
 }
 
 /** Executa tarefas independentes em lotes pequenos, respeitando o limite de conexões. */

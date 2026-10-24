@@ -12,6 +12,20 @@ export function buildEventFilter({ sportSlug, competitionId, dayRange, status, s
   if (status) filter.status = status;
   if (featured) filter.is_featured = true;
   if (dayRange) filter.start_time = { $gte: dayRange.start, $lte: dayRange.end };
+  // Partidas ao vivo já começaram e não recebem mais apostas: ficam fora do
+  // catálogo publicável, mas continuam listadas enquanto a fonte não confirma o resultado.
+  if (status === "live") {
+    filter.start_time = { $lte: new Date().toISOString() };
+    const liveTerm = (search || "").trim();
+    if (liveTerm) {
+      filter.$or = [
+        { home_team_name: { $regex: liveTerm, $options: "i" } },
+        { away_team_name: { $regex: liveTerm, $options: "i" } },
+        { competition_name: { $regex: liveTerm, $options: "i" } },
+      ];
+    }
+    return filter;
+  }
   // Nenhuma listagem exibe partidas que já começaram: a comparação é feita em
   // UTC e a exibição converte para America/Bahia.
   filter.start_time = { ...(filter.start_time || {}), $gte: from || new Date().toISOString() };
