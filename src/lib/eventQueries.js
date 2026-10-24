@@ -3,7 +3,7 @@ import { OTHERS_SLUGS } from "@/lib/sports";
 
 export const MAX_CARD_ODDS = 3;
 
-export function buildEventFilter({ sportSlug, competitionId, dayRange, status, search, featured, country } = {}) {
+export function buildEventFilter({ sportSlug, competitionId, dayRange, status, search, featured, country, from } = {}) {
   const filter = {};
   if (sportSlug === "outros") filter.sport_slug = { $in: OTHERS_SLUGS };
   else if (sportSlug) filter.sport_slug = sportSlug;
@@ -12,6 +12,9 @@ export function buildEventFilter({ sportSlug, competitionId, dayRange, status, s
   if (status) filter.status = status;
   if (featured) filter.is_featured = true;
   if (dayRange) filter.start_time = { $gte: dayRange.start, $lte: dayRange.end };
+  // `from` descarta partidas que já começaram, para que listagens de "próximos
+  // jogos" nunca mostrem eventos que não estão mais por vir.
+  if (from) filter.start_time = { ...(filter.start_time || {}), $gte: from };
   const term = (search || "").trim();
   if (term) {
     filter.$or = [

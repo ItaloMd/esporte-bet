@@ -51,6 +51,35 @@ const SPORT_NAMES = {
 export const DEFAULT_REGIONS = ["eu"];
 export const DEFAULT_MARKETS = ["h2h", "spreads", "totals"];
 
+/**
+ * Ligas de maior apelo, usadas para marcar "eventos em destaque" na home.
+ * A marcação é aplicada na sincronização; o painel continua livre para
+ * ativar ou desativar cada competição individualmente.
+ */
+export const FEATURED_LEAGUES = new Set([
+  "soccer_uefa_champs_league",
+  "soccer_uefa_europa_league",
+  "soccer_epl",
+  "soccer_efl_champ",
+  "soccer_spain_la_liga",
+  "soccer_italy_serie_a",
+  "soccer_germany_bundesliga",
+  "soccer_france_ligue_one",
+  "soccer_brazil_campeonato",
+  "soccer_brazil_serie_b",
+  "soccer_argentina_primera_division",
+  "soccer_usa_mls",
+  "soccer_portugal_primeira_liga",
+  "soccer_netherlands_eredivisie",
+  "soccer_mexico_ligamx",
+  "basketball_nba",
+  "basketball_euroleague",
+  "americanfootball_nfl",
+  "icehockey_nhl",
+  "mma_mixed_martial_arts",
+  "boxing_boxing",
+]);
+
 export function apiBase(settings) {
   return String(settings?.base_url || DEFAULT_BASE_URL).replace(/\/+$/, "");
 }

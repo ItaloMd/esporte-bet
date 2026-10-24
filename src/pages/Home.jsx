@@ -18,7 +18,6 @@ import { SPORTS } from "@/lib/sports";
 import { dayRangeFromInput } from "@/lib/format";
 
 const LIVE_ONLY = { status: "live" };
-const NEXT_UP = { status: "scheduled" };
 const PAST = { status: "finished" };
 
 function CompetitionChips() {
@@ -51,8 +50,16 @@ export default function Home() {
   const [filters, setFilters] = useState({ search: "", sport: "", country: "", competition: "", date: "" });
   const { competitions } = useCompetitions({ limit: 50 });
 
+  // Marca o instante da montagem: a partir dele nenhuma partida já iniciada
+  // entra nas listas de próximos jogos.
+  const nowIso = useMemo(() => new Date().toISOString(), []);
+  const featuredFilter = useMemo(
+    () => ({ status: "scheduled", is_featured: true, start_time: { $gte: nowIso } }),
+    [nowIso],
+  );
+
   const liveFeed = useEventFeed(LIVE_ONLY, { limit: 6 });
-  const featuredFeed = useEventFeed(NEXT_UP, { limit: 4, sort: "start_time" });
+  const featuredFeed = useEventFeed(featuredFilter, { limit: 4, sort: "start_time" });
   const resultsFeed = useEventFeed(PAST, { limit: 4, sort: "-start_time" });
 
   const feedFilter = useMemo(
@@ -63,8 +70,9 @@ export default function Home() {
         country: filters.country,
         dayRange: dayRangeFromInput(filters.date),
         status: "scheduled",
+        from: nowIso,
       }),
-    [filters.sport, filters.competition, filters.country, filters.date],
+    [filters.sport, filters.competition, filters.country, filters.date, nowIso],
   );
   const feed = useEventFeed(feedFilter, { limit: 10 });
 
@@ -126,7 +134,13 @@ export default function Home() {
       )}
 
       <section>
-        <SectionHeading icon={Star} title="Eventos em destaque" to="/competicoes" actionLabel="Competições" />
+        <SectionHeading
+          icon={Star}
+          title="Eventos em destaque"
+          subtitle="Principais ligas e torneios monitorados"
+          to="/competicoes"
+          actionLabel="Competições"
+        />
         {featuredFeed.loading ? (
           <CardListSkeleton count={2} />
         ) : featured.length ? (

@@ -16,6 +16,7 @@ import {
   localDayRange,
   DEFAULT_REGIONS,
   DEFAULT_MARKETS,
+  FEATURED_LEAGUES,
 } from '../../shared/oddsApi.ts';
 
 const TIME_ZONE = 'America/Bahia';
@@ -283,6 +284,7 @@ async function runSync({ db, settings, apiKey, mode, now, force }) {
       local_date: localDate,
       status: 'scheduled',
       tracking: localDate === today ? 'today' : 'upcoming',
+      is_featured: FEATURED_LEAGUES.has(entry.competition.external_id),
       source: 'provider',
       external_id: externalId,
       last_sync_at: now.toISOString(),
@@ -424,6 +426,26 @@ async function runSync({ db, settings, apiKey, mode, now, force }) {
     eventStatusUpdates.push(payload);
   });
   await writeInChunks(db, 'Event', eventStatusUpdates, 'update');
+
+  // Partidas cujo início já passou deixam de ser "próximos jogos" e viram histórico,
+  // para que a listagem de próximos eventos nunca mostre jogos já encerrados.
+  const pastEvents = [];
+  let pastCursor = null;
+  for (let round = 0; round < 6; round += 1) {
+    const pastPage = await db.Event.filter(
+      { source: 'provider', status: { $in: ['scheduled', 'live'] }, start_time: { $lt: now.toISOString() } },
+      { limit: 500, ...(pastCursor ? { cursor: pastCursor } : {}) },
+    );
+    pastEvents.push(...(pastPage.items || []));
+    pastCursor = pastPage.next_cursor;
+    if (!pastPage.has_more) break;
+  }
+  await writeInChunks(
+    db,
+    'Event',
+    pastEvents.map((row) => ({ id: row.id, status: 'finished', tracking: 'finished' })),
+    'update',
+  );
 
   if (selected.length) {
     await writeInChunks(
