@@ -74,37 +74,73 @@ export default async function (req) {
       return Response.json({ error: 'Não foi possível calcular a odd combinada.' }, { status: 400 });
     }
 
-    const ticket = await db.SimulationTicket.create({
-      user_id: user.id,
-      stake_points: stake,
-      total_odd: Number(combined.toFixed(4)),
-      potential_points: Number((stake * combined).toFixed(2)),
-      selection_count: usable.length,
-      status: 'open',
-      note: 'Simulação registrada com odds e horário capturados no momento da confirmação.',
-    });
+    // O saldo só existe para quem depositou via PIX: a aposta debita o valor
+    // disponível e é recusada quando o jogador não tem saldo suficiente.
+    const walletPage = await db.Wallet.filter({ user_id: user.id }, { limit: 1 });
+    const wallet = walletPage.items?.[0];
+    const balance = round2(wallet?.balance);
+    if (!wallet || balance < stake) {
+      const formatted = balance.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+      return Response.json(
+        {
+          error: `Saldo insuficiente. Você tem ${formatted} disponível. Faça um depósito via PIX para apostar.`,
+          code: 'insufficient_balance',
+          balance,
+        },
+        { status: 402 },
+      );
+    }
 
-    await db.SimulationSelection.bulkCreate(
-      usable.map(({ odd, event }) => ({
-        ticket_id: ticket.id,
+    const debitedBalance = round2(balance - stake);
+    await db.Wallet.update(wallet.id, { balance: debitedBalance });
+
+    let ticket;
+    try {
+      ticket = await db.SimulationTicket.create({
         user_id: user.id,
-        event_id: event.id,
-        event_label: `${event.home_team_name} x ${event.away_team_name}`,
-        sport_slug: event.sport_slug,
-        competition_name: event.competition_name,
-        market_id: odd.market_id,
-        market_name: odd.market_name,
-        market_key: odd.market_key,
-        odd_id: odd.id,
-        odd_code: odd.code,
-        odd_label: odd.label,
-        odd_value: Number(odd.value),
-        odd_status_at_placement: odd.status,
-        event_start_time: event.start_time,
+        stake_points: stake,
+        total_odd: Number(combined.toFixed(4)),
+        potential_points: Number((stake * combined).toFixed(2)),
+        selection_count: usable.length,
         status: 'open',
-        source: 'provider',
-      })),
-    );
+        note: 'Aposta registrada com odds e horário capturados no momento da confirmação.',
+      });
+
+      await db.SimulationSelection.bulkCreate(
+        usable.map(({ odd, event }) => ({
+          ticket_id: ticket.id,
+          user_id: user.id,
+          event_id: event.id,
+          event_label: `${event.home_team_name} x ${event.away_team_name}`,
+          sport_slug: event.sport_slug,
+          competition_name: event.competition_name,
+          market_id: odd.market_id,
+          market_name: odd.market_name,
+          market_key: odd.market_key,
+          odd_id: odd.id,
+          odd_code: odd.code,
+          odd_label: odd.label,
+          odd_value: Number(odd.value),
+          odd_status_at_placement: odd.status,
+          event_start_time: event.start_time,
+          status: 'open',
+          source: 'provider',
+        })),
+      );
+    } catch (error) {
+      // Devolve o valor debitado para que o jogador não perca saldo sem aposta.
+      await db.Wallet.update(wallet.id, { balance }).catch(() => null);
+      throw error;
+    }
+
+    await db.WalletTransaction.create({
+      user_id: user.id,
+      kind: 'bet',
+      amount: -stake,
+      balance_after: debitedBalance,
+      reference_id: ticket.id,
+      label: `${usable.length} seleção(ões)`,
+    });
 
     return Response.json({
       status: 'placed',
@@ -112,6 +148,7 @@ export default async function (req) {
       total_odd: Number(combined.toFixed(4)),
       potential_points: Number((stake * combined).toFixed(2)),
       selection_count: usable.length,
+      balance: debitedBalance,
       registered_at: nowIso,
     });
   } catch (error) {

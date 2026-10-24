@@ -8,17 +8,20 @@ import { Label } from "@/components/ui/label";
 import { toast } from "@/components/ui/use-toast";
 import { useSlip } from "@/lib/SlipProvider";
 import { useAuth } from "@/lib/AuthContext";
-import { formatOdds } from "@/lib/format";
+import { formatCurrency, formatOdds } from "@/lib/format";
+import { useWallet } from "@/lib/WalletProvider";
 
 export default function SlipPanel({ onDone }) {
   const { selections, totalOdd, removeSelection, clear } = useSlip();
   const { isAuthenticated, navigateToLogin } = useAuth();
+  const { balance, setBalance } = useWallet();
   const navigate = useNavigate();
-  const [points, setPoints] = useState("10");
+  const [stake, setStake] = useState("10");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
-  const potential = useMemo(() => Number(points || 0) * totalOdd, [points, totalOdd]);
+  const potential = useMemo(() => Number(stake || 0) * totalOdd, [stake, totalOdd]);
+  const insufficient = Number(stake || 0) > balance;
 
   const confirm = async () => {
     setError("");
@@ -26,17 +29,21 @@ export default function SlipPanel({ onDone }) {
       navigateToLogin();
       return;
     }
-    const stake = Math.floor(Number(points));
-    if (!Number.isFinite(stake) || stake < 1 || stake > 10000) {
-      setError("Informe uma quantidade de pontos entre 1 e 10.000.");
+    const amount = Math.round(Number(stake || 0) * 100) / 100;
+    if (!Number.isFinite(amount) || amount < 1 || amount > 10000) {
+      setError("Informe um valor de aposta entre R$ 1,00 e R$ 10.000,00.");
+      return;
+    }
+    if (amount > balance) {
+      setError(`Saldo insuficiente. Você tem ${formatCurrency(balance)} disponível.`);
       return;
     }
     setSubmitting(true);
     try {
       // A validação (cotação aberta, partida publicada e fora da janela de 10
-      // minutos) acontece no servidor, para que nenhuma aposta entre atrasada.
+      // minutos) e o débito do saldo acontecem no servidor.
       const response = await base44.functions.invoke("placeWager", {
-        stake,
+        stake: amount,
         odd_ids: selections.map((item) => item.odd_id),
       });
       const data = response?.data || {};
@@ -46,10 +53,14 @@ export default function SlipPanel({ onDone }) {
         return;
       }
 
-      await base44.functions.invoke("registerWager", { stake }).catch(() => null);
+      if (typeof data.balance === "number") setBalance(data.balance);
+      await base44.functions.invoke("registerWager", { stake: amount }).catch(() => null);
 
       clear();
-      toast({ title: "Simulação registrada" });
+      toast({
+        title: "Aposta registrada",
+        description: `${formatCurrency(amount)} debitados do seu saldo.`,
+      });
       onDone?.();
       navigate("/minhas-simulacoes");
     } catch (err) {
@@ -62,7 +73,7 @@ export default function SlipPanel({ onDone }) {
         });
         return;
       }
-      setError(data?.error || err.message || "Não foi possível registrar a simulação.");
+      setError(data?.error || err.message || "Não foi possível registrar a aposta.");
     } finally {
       setSubmitting(false);
     }
@@ -111,18 +122,23 @@ export default function SlipPanel({ onDone }) {
         <div className="grid grid-cols-2 gap-2 rounded-lg border border-border bg-secondary/40 p-3 text-sm">
           <span className="text-muted-foreground">Odd combinada</span>
           <span className="score-num text-right font-semibold text-primary">{formatOdds(totalOdd)}</span>
-          <Label htmlFor="slip-points" className="self-center text-muted-foreground">Aposta (pts)</Label>
+          <Label htmlFor="slip-stake" className="self-center text-muted-foreground">Valor da aposta (R$)</Label>
           <Input
-            id="slip-points"
+            id="slip-stake"
             type="number"
             min={1}
             max={10000}
-            value={points}
-            onChange={(event) => setPoints(event.target.value)}
+            step="0.01"
+            value={stake}
+            onChange={(event) => setStake(event.target.value)}
             className="h-8 text-right"
           />
           <span className="text-muted-foreground">Retorno potencial</span>
-          <span className="score-num text-right font-semibold">{potential.toFixed(2)} pts</span>
+          <span className="score-num text-right font-semibold">{formatCurrency(potential)}</span>
+          <span className="text-muted-foreground">Saldo disponível</span>
+          <span className={`score-num text-right font-semibold ${insufficient ? "text-destructive" : ""}`}>
+            {formatCurrency(balance)}
+          </span>
         </div>
 
         <div className="flex items-start gap-2 rounded-lg border border-border bg-secondary/30 px-3 py-2 text-[11px] text-muted-foreground">
@@ -143,7 +159,7 @@ export default function SlipPanel({ onDone }) {
           </Button>
           <Button className="flex-[2]" onClick={confirm} disabled={submitting}>
             {submitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-            {isAuthenticated ? "Confirmar simulação" : "Entrar para simular"}
+            {isAuthenticated ? "Confirmar aposta" : "Entrar para apostar"}
           </Button>
         </div>
       </div>

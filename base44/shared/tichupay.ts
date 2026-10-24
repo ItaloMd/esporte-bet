@@ -82,9 +82,11 @@ export async function creditPaidDeposit(service, deposit, remote) {
   const page = await service.Wallet.filter({ user_id: deposit.user_id }, { limit: 1 });
   const wallet = page.items?.[0];
 
+  let balanceAfter = amount;
   if (wallet) {
+    balanceAfter = round2(Number(wallet.balance || 0) + amount);
     await service.Wallet.update(wallet.id, {
-      balance: round2(Number(wallet.balance || 0) + amount),
+      balance: balanceAfter,
       total_deposited: round2(Number(wallet.total_deposited || 0) + amount),
       rollover_required: round2(Number(wallet.rollover_required || 0) + rollover),
     });
@@ -96,6 +98,15 @@ export async function creditPaidDeposit(service, deposit, remote) {
       rollover_required: rollover,
     });
   }
+
+  await service.WalletTransaction.create({
+    user_id: deposit.user_id,
+    kind: 'deposit',
+    amount,
+    balance_after: balanceAfter,
+    reference_id: deposit.id,
+    label: 'Depósito PIX confirmado',
+  });
 
   return updated;
 }

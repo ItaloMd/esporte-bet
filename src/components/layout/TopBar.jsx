@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
-import { Menu, Search, ShieldCheck } from "lucide-react";
+import { Menu, Search, ShieldCheck, Wallet as WalletIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import BrandMark from "@/components/brand/BrandMark";
@@ -8,10 +8,13 @@ import MoreSheet from "@/components/layout/MoreSheet";
 import UserMenu from "@/components/layout/UserMenu";
 import { useAppSettings } from "@/lib/appSettings";
 import { useAuth } from "@/lib/AuthContext";
+import { useWallet } from "@/lib/WalletProvider";
+import { formatCurrency } from "@/lib/format";
 
 export default function TopBar() {
   const settings = useAppSettings();
-  const { user } = useAuth();
+  const { user, isAuthenticated } = useAuth();
+  const { balance } = useWallet();
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
   const [term, setTerm] = useState("");
@@ -52,6 +55,16 @@ export default function TopBar() {
         </form>
 
         <div className="ml-auto flex items-center gap-2 md:ml-0">
+          {isAuthenticated && (
+            <Link
+              to="/carteira"
+              className="flex items-center gap-1.5 rounded-lg border border-primary/40 bg-primary/10 px-2.5 py-1.5 text-xs font-semibold text-primary transition-colors hover:border-primary"
+              aria-label="Saldo disponível na carteira"
+            >
+              <WalletIcon className="h-3.5 w-3.5" aria-hidden="true" />
+              <span className="score-num">{formatCurrency(balance)}</span>
+            </Link>
+          )}
           {user?.role === "admin" && (
             <NavLink
               to="/admin"

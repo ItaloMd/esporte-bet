@@ -1,6 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.54';
 import { secrets } from 'base44:runtime';
 import { apiBase, listScores } from '../../shared/oddsApi.ts';
+import { round2 } from '../../shared/tichupay.ts';
 import {
   SCORE_RECHECK_MS,
   SCORE_BACKOFF_MS,
@@ -227,6 +228,7 @@ export default async function (req) {
 
     const ticketIds = [...touchedTickets].filter(Boolean);
     let settledTickets = 0;
+    let prizesPaid = 0;
     if (ticketIds.length) {
       const selectionsByTicket = new Map();
       for (const ids of chunkArray(ticketIds, 100)) {
@@ -264,6 +266,35 @@ export default async function (req) {
       }
       if (results.length) await db.SimulationResult.bulkCreate(results);
       settledTickets = results.length;
+
+      // 4) Credita o prêmio dos boletins ganhos. O marcador prize_paid garante
+      // que o mesmo prêmio nunca seja pago duas vezes.
+      const wonIds = results.filter((row) => row.result === 'won').map((row) => row.ticket_id);
+      for (const ids of chunkArray(wonIds, 100)) {
+        const page = await db.SimulationTicket.filter({ id: { $in: ids } }, { limit: ids.length });
+        for (const ticket of page.items || []) {
+          if (ticket.prize_paid || ticket.status !== 'won') continue;
+          const prize = round2(ticket.potential_points);
+          if (!Number.isFinite(prize) || prize <= 0) continue;
+
+          const walletPage = await db.Wallet.filter({ user_id: ticket.user_id }, { limit: 1 });
+          const wallet = walletPage.items?.[0];
+          if (!wallet) continue;
+
+          const balanceAfter = round2(Number(wallet.balance || 0) + prize);
+          await db.Wallet.update(wallet.id, { balance: balanceAfter });
+          await db.SimulationTicket.update(ticket.id, { prize_paid: true });
+          await db.WalletTransaction.create({
+            user_id: ticket.user_id,
+            kind: 'prize',
+            amount: prize,
+            balance_after: balanceAfter,
+            reference_id: ticket.id,
+            label: 'Prêmio de boletim ganho',
+          });
+          prizesPaid += 1;
+        }
+      }
     }
 
     const summary = [
@@ -316,6 +347,7 @@ export default async function (req) {
       results_confirmed: finishedUpdates.length,
       selections_settled: selectionUpdates.length,
       tickets_settled: settledTickets,
+      prizes_paid: prizesPaid,
       failures,
       usage,
       elapsedMs: Date.now() - nowMs,

@@ -24,13 +24,30 @@
         "won",
         "lost",
         "void",
-        "partial"
+        "partial",
+        "cashed_out"
       ],
       "default": "open"
     },
     "settled_at": {
       "type": "string",
       "format": "date-time"
+    },
+    "cashed_out": {
+      "type": "boolean",
+      "default": false
+    },
+    "cashed_out_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "cashed_out_amount": {
+      "type": "number",
+      "default": 0
+    },
+    "prize_paid": {
+      "type": "boolean",
+      "default": false
     },
     "note": {
       "type": "string"

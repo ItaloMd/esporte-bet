@@ -8,14 +8,17 @@ import DepositPanel from "@/components/wallet/DepositPanel";
 import WithdrawPanel from "@/components/wallet/WithdrawPanel";
 import WalletHistory from "@/components/wallet/WalletHistory";
 import { formatCurrency } from "@/lib/format";
+import { useWallet } from "@/lib/WalletProvider";
 
 export default function Wallet() {
   const { user, isAuthenticated, isLoadingAuth, authChecked, navigateToLogin } = useAuth();
+  const { reload: reloadBalance } = useWallet();
   const [state, setState] = useState({
     loading: true,
     wallet: null,
     deposits: [],
     withdrawals: [],
+    transactions: [],
     settings: {},
     kycLatest: null,
     kycApproved: false,
@@ -26,10 +29,11 @@ export default function Wallet() {
 
   const load = useCallback(async () => {
     if (!user?.id) return;
-    const [walletPage, depositPage, withdrawalPage, settingsPage, kycPage, kycApprovedPage, profilePage] = await Promise.all([
+    const [walletPage, depositPage, withdrawalPage, transactionPage, settingsPage, kycPage, kycApprovedPage, profilePage] = await Promise.all([
       base44.entities.Wallet.filter({ user_id: user.id }, { limit: 1 }),
       base44.entities.Deposit.filter({ user_id: user.id }, { sort: "-created_date", limit: 8 }),
       base44.entities.Withdrawal.filter({ user_id: user.id, kind: "player" }, { sort: "-created_date", limit: 8 }),
+      base44.entities.WalletTransaction.filter({ user_id: user.id }, { sort: "-created_date", limit: 15 }),
       base44.entities.AppSettings.list({ limit: 1 }),
       base44.entities.KycSubmission.filter({ user_id: user.id }, { sort: "-created_date", limit: 1 }),
       base44.entities.KycSubmission.filter({ user_id: user.id, status: "approved" }, { limit: 1 }),
@@ -40,12 +44,14 @@ export default function Wallet() {
       wallet: walletPage.items?.[0] || null,
       deposits: depositPage.items || [],
       withdrawals: withdrawalPage.items || [],
+      transactions: transactionPage.items || [],
       settings: settingsPage.items?.[0] || {},
       kycLatest: kycPage.items?.[0] || null,
       kycApproved: Boolean(kycApprovedPage.items?.length),
       profile: profilePage.items?.[0] || null,
     });
-  }, [user?.id]);
+    reloadBalance();
+  }, [user?.id, reloadBalance]);
 
   useEffect(() => {
     if (!authChecked || isLoadingAuth) return;
@@ -160,7 +166,11 @@ export default function Wallet() {
         </p>
       </div>
 
-      <WalletHistory deposits={state.deposits} withdrawals={state.withdrawals} />
+      <WalletHistory
+        deposits={state.deposits}
+        withdrawals={state.withdrawals}
+        transactions={state.transactions}
+      />
     </div>
   );
 }

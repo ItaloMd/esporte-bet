@@ -6,63 +6,11 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { EmptyState, ErrorState } from "@/components/state/States";
 import { CardListSkeleton } from "@/components/state/LoadingBlocks";
-import { formatDateTime, formatNumber, formatOdds } from "@/lib/format";
+import { formatNumber } from "@/lib/format";
 import { useAuth } from "@/lib/AuthContext";
+import TicketCard from "@/components/simulations/TicketCard";
 
 const PAGE_SIZE = 10;
-
-const STATUS_LABEL = {
-  open: "Em aberto",
-  won: "Ganha",
-  lost: "Perdida",
-  void: "Anulada",
-  partial: "Parcial",
-};
-
-function TicketCard({ ticket, selections }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <article className="card-surface overflow-hidden">
-      <button type="button" className="w-full px-4 py-3 text-left" onClick={() => setOpen((value) => !value)}>
-        <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-sm font-medium">
-              {ticket.selection_count} seleç{ticket.selection_count === 1 ? "ão" : "ões"} · {formatNumber(ticket.stake_points)} pts
-            </p>
-            <p className="text-[11px] text-muted-foreground">Registrada em {formatDateTime(ticket.created_date)}</p>
-          </div>
-          <div className="text-right">
-            <p className="score-num text-lg font-semibold text-primary">{formatOdds(ticket.total_odd)}</p>
-            <p className="text-[11px] text-muted-foreground">retorno {formatNumber(ticket.potential_points)} pts</p>
-          </div>
-        </div>
-        <span className="mt-2 inline-block rounded-full border border-border px-2 py-0.5 text-[10px] text-muted-foreground">
-          {STATUS_LABEL[ticket.status] || ticket.status}
-        </span>
-      </button>
-
-      {open && (
-        <div className="space-y-2 border-t border-border px-4 py-3">
-          {selections.length ? (
-            selections.map((selection) => (
-              <div key={selection.id} className="flex items-center justify-between gap-3 text-xs">
-                <div className="min-w-0">
-                  <p className="truncate font-medium">{selection.event_label}</p>
-                  <p className="truncate text-muted-foreground">
-                    {selection.market_name} · {selection.odd_label} · odd registrada {formatOdds(selection.odd_value)}
-                  </p>
-                </div>
-                <span className="shrink-0 text-muted-foreground">{STATUS_LABEL[selection.status] || selection.status}</span>
-              </div>
-            ))
-          ) : (
-            <p className="text-xs text-muted-foreground">Seleções não encontradas.</p>
-          )}
-        </div>
-      )}
-    </article>
-  );
-}
 
 export default function MySimulations() {
   const { user } = useAuth();
@@ -171,7 +119,12 @@ export default function MySimulations() {
         <div className="space-y-3">
           {stats.total > 0 && <Progress value={(stats.settled / Math.max(stats.total, 1)) * 100} className="h-1.5" />}
           {tickets.map((ticket) => (
-            <TicketCard key={ticket.id} ticket={ticket} selections={selectionsByTicket[ticket.id] || []} />
+            <TicketCard
+              key={ticket.id}
+              ticket={ticket}
+              selections={selectionsByTicket[ticket.id] || []}
+              onChanged={() => load()}
+            />
           ))}
           {hasMore && (
             <div className="flex justify-center">

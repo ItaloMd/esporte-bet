@@ -31,7 +31,14 @@ function Row({ title, subtitle, value, status }) {
   );
 }
 
-export default function WalletHistory({ deposits, withdrawals }) {
+const TRANSACTION_LABEL = {
+  deposit: "Depósito",
+  bet: "Aposta",
+  cashout: "Cashout",
+  prize: "Prêmio",
+};
+
+export default function WalletHistory({ deposits, withdrawals, transactions = [] }) {
   return (
     <div className="grid gap-4 lg:grid-cols-2">
       <section className="card-surface space-y-2 p-4">
@@ -65,6 +72,23 @@ export default function WalletHistory({ deposits, withdrawals }) {
           ))
         ) : (
           <p className="text-xs text-muted-foreground">Nenhum saque solicitado ainda.</p>
+        )}
+      </section>
+
+      <section className="card-surface space-y-2 p-4 lg:col-span-2">
+        <h2 className="text-sm font-semibold">Movimentações do saldo</h2>
+        {transactions.length ? (
+          transactions.map((transaction) => (
+            <Row
+              key={transaction.id}
+              title={TRANSACTION_LABEL[transaction.kind] || transaction.kind}
+              subtitle={`${formatDateTime(transaction.created_date)}${transaction.label ? ` · ${transaction.label}` : ""}`}
+              value={`${Number(transaction.amount) >= 0 ? "+" : "-"}${formatCurrency(Math.abs(Number(transaction.amount)))}`}
+              status={`saldo ${formatCurrency(transaction.balance_after)}`}
+            />
+          ))
+        ) : (
+          <p className="text-xs text-muted-foreground">Nenhuma movimentação registrada ainda.</p>
         )}
       </section>
     </div>
