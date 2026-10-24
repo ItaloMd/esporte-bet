@@ -179,12 +179,11 @@ export default function Affiliate() {
           <li>• Janela de atribuição: {formatNumber(settings.affiliate_attribution_days || 30)} dias após o clique.</li>
           <li>• Limite de indicações por conta: {formatNumber(settings.affiliate_max_referrals || 50)}.</li>
           <li>• Aprovação das indicações: {settings.affiliate_approval_required === false ? "automática" : "manual, pelo administrador"}.</li>
-          <li>• Política de comissões: {settings.affiliate_commission_rule || "recompensas demonstrativas, sujeitas a validação jurídica."}</li>
+          <li>• Política de comissões: {settings.affiliate_commission_rule || "sujeita a validação jurídica."}</li>
           <li>• Não é permitido indicar menores de 18 anos nem usar o programa para incentivar apostas.</li>
         </ul>
         <p className="mt-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200/90">
-          Fase de protótipo: as recompensas são apenas demonstrativas. Não há pagamento, crédito ou conversão em
-          dinheiro, e nenhuma comissão é paga nesta etapa.
+          As comissões do programa dependem de validação jurídica e não são pagas automaticamente nesta etapa.
         </p>
       </section>
 

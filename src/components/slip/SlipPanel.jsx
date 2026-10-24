@@ -100,7 +100,7 @@ export default function SlipPanel({ onDone }) {
       await base44.functions.invoke("registerWager", { stake }).catch(() => null);
 
       clear();
-      toast({ title: "Simulação registrada", description: "Sem valor real: os pontos são fictícios." });
+      toast({ title: "Simulação registrada" });
       onDone?.();
       navigate("/minhas-simulacoes");
     } catch (err) {
@@ -153,7 +153,7 @@ export default function SlipPanel({ onDone }) {
         <div className="grid grid-cols-2 gap-2 rounded-lg border border-border bg-secondary/40 p-3 text-sm">
           <span className="text-muted-foreground">Odd combinada</span>
           <span className="score-num text-right font-semibold text-primary">{formatOdds(totalOdd)}</span>
-          <Label htmlFor="slip-points" className="self-center text-muted-foreground">Pontos fictícios</Label>
+          <Label htmlFor="slip-points" className="self-center text-muted-foreground">Aposta (pts)</Label>
           <Input
             id="slip-points"
             type="number"
@@ -163,13 +163,13 @@ export default function SlipPanel({ onDone }) {
             onChange={(event) => setPoints(event.target.value)}
             className="h-8 text-right"
           />
-          <span className="text-muted-foreground">Retorno simulado</span>
+          <span className="text-muted-foreground">Retorno potencial</span>
           <span className="score-num text-right font-semibold">{potential.toFixed(2)} pts</span>
         </div>
 
         <div className="flex items-start gap-2 rounded-lg border border-border bg-secondary/30 px-3 py-2 text-[11px] text-muted-foreground">
           <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-          Simulação sem valor real. Não há saldo, depósito, saque ou prêmio em dinheiro. Os pontos não têm valor monetário.
+          As odds e o horário ficam registrados no momento da confirmação e não podem ser alterados depois.
         </div>
 
         {error && (

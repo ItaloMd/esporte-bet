@@ -119,10 +119,6 @@ export default function AdminSettings({ actor }) {
             <Label htmlFor="min_age">Idade mínima</Label>
             <Input id="min_age" type="number" value={settings.min_age} onChange={(event) => update({ min_age: Number(event.target.value) })} />
           </div>
-          <label className="flex items-center justify-between gap-3 self-end rounded-lg border border-border px-3 py-2 text-sm">
-            Modo demonstrativo visível no site
-            <Switch checked={Boolean(settings.demo_mode)} onCheckedChange={(value) => update({ demo_mode: value })} />
-          </label>
         </div>
       </section>
 
@@ -154,7 +150,7 @@ export default function AdminSettings({ actor }) {
           </label>
         </div>
         <div className="space-y-2">
-          <Label htmlFor="commission_rule">Política de comissões (texto demonstrativo)</Label>
+          <Label htmlFor="commission_rule">Política de comissões</Label>
           <Input id="commission_rule" value={settings.affiliate_commission_rule} onChange={(event) => update({ affiliate_commission_rule: event.target.value })} placeholder="Sujeita a validação jurídica" />
         </div>
       </section>
@@ -163,7 +159,7 @@ export default function AdminSettings({ actor }) {
         <h2 className="text-sm font-semibold">Textos institucionais</h2>
         <div className="space-y-2">
           <Label htmlFor="responsible">Aviso de jogo responsável</Label>
-          <Input id="responsible" value={settings.responsible_gaming_text} onChange={(event) => update({ responsible_gaming_text: event.target.value })} placeholder="Plataforma de simulação, sem apostas com dinheiro real." />
+          <Input id="responsible" value={settings.responsible_gaming_text} onChange={(event) => update({ responsible_gaming_text: event.target.value })} placeholder="Uso restrito a maiores de 18 anos. Aposte com responsabilidade." />
         </div>
         <div className="space-y-2">
           <Label htmlFor="terms">Termos de uso</Label>

@@ -7,7 +7,7 @@ import EventFilters from "@/components/odds/EventFilters";
 import EventGrid from "@/components/odds/EventGrid";
 import ResultRow from "@/components/odds/ResultRow";
 import SectionHeading from "@/components/common/SectionHeading";
-import DemoNotice from "@/components/state/DemoNotice";
+import PixActions from "@/components/wallet/PixActions";
 import { CardListSkeleton } from "@/components/state/LoadingBlocks";
 import useEventFeed from "@/lib/useEventFeed";
 import useCompetitions from "@/lib/useCompetitions";
@@ -75,14 +75,14 @@ export default function Home() {
       <section className="card-surface relative overflow-hidden px-4 py-5 md:px-6 md:py-7">
         <div className="absolute inset-0 -z-10 bg-[radial-gradient(35rem_18rem_at_85%_0%,hsl(var(--primary)/0.16),transparent)]" />
         <Badge variant="outline" className="border-primary/40 text-primary">
-          Simulação esportiva
+          Acompanhamento esportivo
         </Badge>
         <h1 className="mt-3 text-2xl font-semibold md:text-3xl">
           {settings.brand_name} — odds informativas de vários esportes
         </h1>
         <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
           {settings.tagline ||
-            "Acompanhe partidas, competições e mercados em um só lugar. Monte boletins de simulação com pontos fictícios, sem valor real."}
+            "Acompanhe partidas, competições e mercados em um só lugar, com odds atualizadas."}
         </p>
         <div className="mt-4 flex flex-wrap gap-2">
           <Button asChild>
@@ -98,7 +98,7 @@ export default function Home() {
         </div>
       </section>
 
-      {settings.demo_mode && <DemoNotice />}
+      <PixActions />
 
       <section>
         <EventFilters

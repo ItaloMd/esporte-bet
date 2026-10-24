@@ -109,8 +109,7 @@ export default function ProfileSetupForm({ onDone, defaultName = "", defaultEmai
         <span>
           Declaro ter 18 anos ou mais e aceito os{" "}
           <Link to="/termos" className="text-primary hover:underline">termos de uso</Link> e a{" "}
-          <Link to="/privacidade" className="text-primary hover:underline">política de privacidade</Link>. Entendo que
-          a plataforma é de simulação, sem apostas com dinheiro real.
+          <Link to="/privacidade" className="text-primary hover:underline">política de privacidade</Link>.
         </span>
       </label>
 

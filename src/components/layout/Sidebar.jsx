@@ -56,7 +56,7 @@ export default function Sidebar() {
       )}
 
       <p className="border-t border-border px-5 py-3 text-[10px] leading-relaxed text-muted-foreground">
-        Plataforma de simulação. Sem apostas com dinheiro real.
+        Uso restrito a maiores de 18 anos. Aposte com responsabilidade.
       </p>
     </aside>
   );

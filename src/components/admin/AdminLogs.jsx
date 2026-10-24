@@ -120,8 +120,8 @@ export default function AdminLogs({ actor }) {
           </div>
         ) : (
           <p className="mt-2 text-xs text-muted-foreground">
-            Nenhuma chamada externa registrada. Em modo demonstrativo, nenhum provedor é consultado e nenhum crédito
-            de integração é consumido.
+            Nenhuma chamada externa registrada. Sem provedor externo habilitado, nenhuma consulta é feita e nenhum
+            crédito de integração é consumido.
           </p>
         )}
       </section>

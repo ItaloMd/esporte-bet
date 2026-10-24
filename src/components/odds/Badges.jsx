@@ -25,11 +25,3 @@ export function StatusBadge({ status }) {
     <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${item.className}`}>{item.label}</span>
   );
 }
-
-export function DemoBadge({ text = "Dados demonstrativos" }) {
-  return (
-    <span className="rounded-full border border-border bg-secondary/70 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
-      {text}
-    </span>
-  );
-}

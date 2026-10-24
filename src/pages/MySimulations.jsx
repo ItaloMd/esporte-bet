@@ -134,7 +134,7 @@ export default function MySimulations() {
           </span>
           <div>
             <h1 className="text-xl font-semibold">Minhas simulações</h1>
-            <p className="text-xs text-muted-foreground">Boletins fictícios com pontos sem valor real</p>
+            <p className="text-xs text-muted-foreground">Boletins registrados e o resultado de cada seleção</p>
           </div>
         </div>
         <Button variant="outline" size="sm" asChild>
@@ -145,9 +145,8 @@ export default function MySimulations() {
       <div className="flex items-start gap-2 rounded-xl border border-primary/25 bg-primary/5 px-3.5 py-2.5 text-xs text-foreground/85">
         <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
         <p>
-          Ambiente de simulação: não há saldo, depósito, saque ou prêmio em dinheiro. As odds e o horário são
-          registrados no momento da confirmação e não podem ser alterados depois. Um resultado só é considerado
-          encerrado quando a fonte oficial confirma o placar.
+          As odds e o horário são registrados no momento da confirmação e não podem ser alterados depois. Um
+          resultado só é considerado encerrado quando a fonte oficial confirma o placar.
         </p>
       </div>
 
@@ -185,7 +184,7 @@ export default function MySimulations() {
       ) : (
         <EmptyState
           title="Você ainda não registrou simulações"
-          description="Escolha mercados nas partidas, monte um boletim e registre pontos fictícios para acompanhar o resultado."
+          description="Escolha mercados nas partidas, monte um boletim e acompanhe o resultado de cada seleção."
         />
       )}
     </div>

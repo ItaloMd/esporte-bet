@@ -89,7 +89,7 @@ export default function AdminDashboard() {
           <Radio className="h-4 w-4 text-primary" aria-hidden="true" /> Status da integração de dados
         </h2>
         <p className="mt-1 text-xs text-muted-foreground">
-          Provedor em modo demonstrativo. Os eventos exibidos são dados de simulação identificados na interface, e
+          Nenhum provedor externo está habilitado: os eventos e odds são cadastrados na própria plataforma, e
           nenhuma credencial de provedor está armazenada em tabelas acessíveis ao jogador.
         </p>
         <p className="mt-2 text-[11px] text-muted-foreground">
@@ -135,7 +135,7 @@ export default function AdminDashboard() {
               ))
             ) : (
               <p className="text-xs text-muted-foreground">
-                Nenhuma sincronização executada. Em modo demonstrativo, os dados são cadastrados manualmente.
+                Nenhuma sincronização executada. Sem provedor externo, os dados são cadastrados manualmente.
               </p>
             )}
           </div>

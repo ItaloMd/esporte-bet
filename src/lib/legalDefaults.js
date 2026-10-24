@@ -1,10 +1,10 @@
-export const DEFAULT_TERMS = `TERMOS DE USO — PROTÓTIPO DE SIMULAÇÃO
+export const DEFAULT_TERMS = `TERMOS DE USO
 
 1. Natureza da plataforma
-Esta plataforma é um protótipo de acompanhamento esportivo com odds informativas e simulações. Não há apostas com dinheiro real, depósitos, saques, transferências, saldos financeiros ou pagamento de prêmios em dinheiro.
+Esta plataforma oferece acompanhamento esportivo com odds informativas e recursos de aposta simulada. Os depósitos e saques via PIX são processados por parceiro de pagamentos, conforme as regras exibidas na Carteira.
 
-2. Pontos fictícios
-Os pontos utilizados nos boletins de simulação não possuem valor monetário, não são convertíveis e não podem ser resgatados.
+2. Boletins de aposta
+As odds e o horário de cada seleção são registrados no momento da confirmação e não podem ser alterados depois. O resultado é apurado pela fonte oficial do evento.
 
 3. Conta e CPF
 Cada pessoa pode manter uma única conta, vinculada a um CPF válido e verificado. O CPF não é utilizado como senha. A validação matemática do CPF não substitui a verificação de identidade, que ocorre por fluxo próprio.
@@ -16,12 +16,12 @@ O uso é restrito a pessoas com 18 anos ou mais.
 O tratamento de dados pessoais segue a política de privacidade da plataforma e a legislação aplicável, incluindo a LGPD.
 
 6. Programa de indicações
-Nesta fase, as recompensas do programa de indicações são apenas demonstrativas. Não há pagamento de comissões, e a política de comissões depende de validação jurídica.
+O programa de indicações segue as regras exibidas na própria página do programa. A política de comissões depende de validação jurídica.
 
 7. Alterações
-Estes termos são um texto inicial de protótipo e devem ser revisados juridicamente antes de qualquer operação com dinheiro real.`;
+Estes termos são um texto inicial e devem ser revisados juridicamente.`;
 
-export const DEFAULT_PRIVACY = `POLÍTICA DE PRIVACIDADE — PROTÓTIPO
+export const DEFAULT_PRIVACY = `POLÍTICA DE PRIVACIDADE
 
 1. Dados coletados
 Nome completo, CPF, data de nascimento, e-mail, cidade/estado e preferências esportivas, além do histórico de simulações e indicações.

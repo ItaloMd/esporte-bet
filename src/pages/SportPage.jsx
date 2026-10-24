@@ -4,18 +4,15 @@ import { Button } from "@/components/ui/button";
 import EventFilters from "@/components/odds/EventFilters";
 import EventGrid from "@/components/odds/EventGrid";
 import SportIcon from "@/components/sports/SportIcon";
-import DemoNotice from "@/components/state/DemoNotice";
 import useEventFeed from "@/lib/useEventFeed";
 import useCompetitions from "@/lib/useCompetitions";
 import { buildEventFilter } from "@/lib/eventQueries";
 import { SPORTS, sportName } from "@/lib/sports";
 import { dayRangeFromInput } from "@/lib/format";
-import { useAppSettings } from "@/lib/appSettings";
 
 export default function SportPage() {
   const { slug } = useParams();
   const navigate = useNavigate();
-  const settings = useAppSettings();
   const [filters, setFilters] = useState({ search: "", sport: slug, country: "", competition: "", date: "" });
   const { competitions } = useCompetitions({ limit: 60 });
 
@@ -48,8 +45,6 @@ export default function SportPage() {
           Todos os esportes
         </Button>
       </header>
-
-      {settings.demo_mode && <DemoNotice />}
 
       <EventFilters
         filters={{ ...filters, sport: "" }}

@@ -2,16 +2,13 @@ import React, { useEffect } from "react";
 import { Radio, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import EventGrid from "@/components/odds/EventGrid";
-import DemoNotice from "@/components/state/DemoNotice";
 import useEventFeed from "@/lib/useEventFeed";
 import { timeAgo } from "@/lib/format";
-import { useAppSettings } from "@/lib/appSettings";
 
 const LIVE_FILTER = { status: "live" };
 const REFRESH_MS = 60000;
 
 export default function Live() {
-  const settings = useAppSettings();
   const feed = useEventFeed(LIVE_FILTER, { limit: 20 });
   const [lastRefresh, setLastRefresh] = React.useState(new Date().toISOString());
 
@@ -50,13 +47,6 @@ export default function Live() {
           Atualizar agora
         </Button>
       </header>
-
-      {settings.demo_mode && (
-        <DemoNotice>
-          Modo demonstrativo: os placares ao vivo exibidos são dados de simulação, identificados como tal. Nenhuma
-          aposta com dinheiro real é possível.
-        </DemoNotice>
-      )}
 
       <EventGrid
         events={feed.events}

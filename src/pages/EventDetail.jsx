@@ -4,16 +4,13 @@ import { base44 } from "@/api/base44Client";
 import EventHeader from "@/components/odds/EventHeader";
 import MarketSection from "@/components/odds/MarketSection";
 import SportIcon from "@/components/sports/SportIcon";
-import DemoNotice from "@/components/state/DemoNotice";
 import { ErrorState } from "@/components/state/States";
 import { marketGroupLabel, sportName } from "@/lib/sports";
 import { decorateOdds } from "@/lib/eventQueries";
-import { useAppSettings } from "@/lib/appSettings";
 
 export default function EventDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const settings = useAppSettings();
   const [state, setState] = useState({ loading: true, error: "", event: null, markets: [] });
 
   useEffect(() => {
@@ -79,8 +76,6 @@ export default function EventDetail() {
         </Link>
         <span>Mercados retornados pela fonte de dados</span>
       </div>
-
-      {settings.demo_mode && <DemoNotice />}
 
       {!state.markets.length && (
         <div className="card-surface px-4 py-8 text-center text-sm text-muted-foreground">

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Info, Lock, RefreshCw, Wallet as WalletIcon } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import { useAuth } from "@/lib/AuthContext";
@@ -12,6 +12,8 @@ import { formatCurrency } from "@/lib/format";
 export default function Wallet() {
   const { user, isAuthenticated, isLoadingAuth, authChecked, navigateToLogin } = useAuth();
   const [state, setState] = useState({ loading: true, wallet: null, deposits: [], withdrawals: [], settings: {} });
+  const depositRef = useRef(null);
+  const withdrawRef = useRef(null);
 
   const load = useCallback(async () => {
     if (!user?.id) return;
@@ -38,6 +40,14 @@ export default function Wallet() {
     }
     load().catch(() => setState((current) => ({ ...current, loading: false })));
   }, [authChecked, isLoadingAuth, isAuthenticated, load, navigateToLogin]);
+
+  useEffect(() => {
+    if (state.loading) return;
+    const acao = new URLSearchParams(window.location.search).get("acao");
+    if (!acao) return;
+    const target = acao === "saque" ? withdrawRef.current : depositRef.current;
+    target?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [state.loading]);
 
   if (state.loading) return <CardListSkeleton count={2} />;
 
@@ -101,7 +111,7 @@ export default function Wallet() {
       </section>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <section className="card-surface space-y-3 p-4">
+        <section ref={depositRef} className="card-surface space-y-3 p-4">
           <h2 className="text-sm font-semibold">Depositar via PIX</h2>
           <DepositPanel
             minDeposit={Number(settings.min_deposit ?? 10)}
@@ -110,7 +120,7 @@ export default function Wallet() {
           />
         </section>
 
-        <section className="card-surface space-y-3 p-4">
+        <section ref={withdrawRef} className="card-surface space-y-3 p-4">
           <h2 className="text-sm font-semibold">Sacar via PIX</h2>
           <WithdrawPanel
             minWithdrawal={Number(settings.min_withdrawal ?? 30)}

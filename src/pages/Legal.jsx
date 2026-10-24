@@ -13,8 +13,7 @@ function LegalPage({ title, field, fallback }) {
         <p className="whitespace-pre-line text-sm leading-relaxed text-foreground/85">{text}</p>
       </div>
       <p className="text-[11px] text-muted-foreground">
-        Texto institucional editável pelo administrador no painel administrativo. Deve passar por revisão jurídica
-        antes de qualquer operação com dinheiro real.
+        Texto institucional editável pelo administrador no painel administrativo. Deve passar por revisão jurídica.
       </p>
     </article>
   );

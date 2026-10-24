@@ -11,7 +11,7 @@ import { logAdminAction } from "@/lib/adminAudit";
 import { formatDateTime, timeAgo } from "@/lib/format";
 
 const PROVIDERS = [
-  { value: "demo", label: "Modo demonstrativo (sem provedor)" },
+  { value: "demo", label: "Sem provedor externo (dados internos)" },
   { value: "the_odds_api", label: "The Odds API" },
   { value: "api_football", label: "API-Football" },
   { value: "sportradar", label: "Sportradar" },
@@ -172,7 +172,7 @@ export default function AdminProvider({ actor }) {
       <section className="card-surface px-4 py-3">
         <h2 className="text-sm font-semibold">Diagnóstico</h2>
         <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
-          <li>• Modo atual: {settings.provider === "demo" || !settings.enabled ? "demonstrativo (dados de simulação)" : "provedor externo habilitado"}</li>
+          <li>• Modo atual: {settings.provider === "demo" || !settings.enabled ? "sem provedor externo (dados internos)" : "provedor externo habilitado"}</li>
           <li>• Credenciais de API: {settings.credentials_configured ? "declaradas como configuradas" : "não configuradas — nenhuma chamada externa é feita"}</li>
           <li>• Última sincronização: {settings.last_sync_at ? timeAgo(settings.last_sync_at) : "nunca"}</li>
           <li>• Falhas recentes: {jobs.filter((job) => job.status === "error").length}</li>
