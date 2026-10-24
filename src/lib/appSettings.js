@@ -13,7 +13,6 @@ const DEFAULT_SETTINGS = {
   min_withdrawal: 30,
   rollover_multiplier: 1,
   withdrawal_fee: 3,
-  dev_split_percent: 10,
 };
 
 let cached = null;

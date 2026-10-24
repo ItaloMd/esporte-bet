@@ -13,9 +13,6 @@ const EMPTY = {
   min_withdrawal: 30,
   rollover_multiplier: 1,
   withdrawal_fee: 3,
-  dev_split_percent: 10,
-  dev_pix_key: "",
-  dev_pix_key_type: "cpf",
   admin_pix_key: "",
   admin_pix_key_type: "cpf",
   deposits_enabled: true,
@@ -32,7 +29,7 @@ const STATUS_LABEL = {
   rejected: "Recusado",
 };
 
-const KIND_LABEL = { player: "Jogador", admin: "Caixa", dev_split: "Split do dev" };
+const KIND_LABEL = { player: "Jogador", admin: "Caixa" };
 
 const invoke = async (payload) => {
   const response = await base44.functions.invoke("adminFinance", payload);
@@ -117,9 +114,10 @@ export default function AdminFinance() {
     if (data && !data.error) {
       toast({
         title: "Saque do caixa enviado",
-        description: data.dev_amount
-          ? `Split do dev: ${formatCurrency(data.dev_amount)}${data.dev_split?.ok === false ? " (pendente — reenviar após o intervalo)" : ""}`
-          : undefined,
+        description:
+          data.dev_split?.ok === false
+            ? "Há um reenvio pendente — confira a seção Reenvios pendentes."
+            : undefined,
       });
       setCashAmount("");
     }
@@ -130,8 +128,8 @@ export default function AdminFinance() {
 
   if (!settings) return <div className="card-surface h-40 animate-pulse" />;
 
-  const devPreview = Math.round(Number(cashAmount || 0) * Number(settings.dev_split_percent || 0)) / 100;
   const pendingWithdrawals = overview.withdrawals.filter((item) => item.status === "pending");
+  const visibleWithdrawals = overview.withdrawals.filter((item) => item.kind !== "dev_split");
   const pendingDev = overview.withdrawals.filter(
     (item) => item.kind === "admin" && item.dev_split_status === "pending" && item.dev_split_amount > 0,
   );
@@ -168,22 +166,17 @@ export default function AdminFinance() {
       <section className="card-surface space-y-3 p-4">
         <h2 className="text-sm font-semibold">Sacar caixa</h2>
         <p className="text-xs text-muted-foreground">
-          Cada saque do caixa envia automaticamente o split do dev ({settings.dev_split_percent}%) para a chave PIX
-          cadastrada. A TichuPay cobra a taxa de {formatCurrency(settings.withdrawal_fee)} por saque.
+          A TichuPay cobra a taxa de {formatCurrency(settings.withdrawal_fee)} por saque.
         </p>
-        <div className="grid gap-3 sm:grid-cols-3">
-          <div className="space-y-2">
-            <Label htmlFor="cash-amount">Valor do saque</Label>
-            <Input
-              id="cash-amount"
-              type="number"
-              step="0.01"
-              value={cashAmount}
-              onChange={(event) => setCashAmount(event.target.value)}
-            />
-          </div>
-          <Stat label="Split do dev neste saque" value={formatCurrency(devPreview)} />
-          <Stat label="Valor que chega na sua chave" value={formatCurrency(Number(cashAmount || 0))} />
+        <div className="max-w-xs space-y-2">
+          <Label htmlFor="cash-amount">Valor do saque</Label>
+          <Input
+            id="cash-amount"
+            type="number"
+            step="0.01"
+            value={cashAmount}
+            onChange={(event) => setCashAmount(event.target.value)}
+          />
         </div>
         {error && (
           <p className="flex items-start gap-2 text-xs text-destructive">
@@ -199,18 +192,18 @@ export default function AdminFinance() {
 
       {pendingDev.length > 0 && (
         <section className="card-surface space-y-2 p-4">
-          <h2 className="text-sm font-semibold">Splits do dev pendentes</h2>
+          <h2 className="text-sm font-semibold">Reenvios pendentes</h2>
           <p className="text-xs text-muted-foreground">
-            A TichuPay aceita apenas um saque a cada 5 minutos. Reenvie os splits abaixo após esse intervalo.
+            A TichuPay aceita apenas um saque a cada 5 minutos. Reenvie os valores abaixo após esse intervalo.
           </p>
           {pendingDev.map((item) => (
             <div key={item.id} className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2 text-xs">
               <div>
-                <p className="font-medium">{formatCurrency(item.dev_split_amount)} para o dev</p>
-                <p className="text-muted-foreground">Saque do caixa de {formatCurrency(item.amount)} · {formatDateTime(item.created_date)}</p>
+                <p className="font-medium">{formatCurrency(item.dev_split_amount)} pendente</p>
+                <p className="text-muted-foreground">Referente ao saque de {formatCurrency(item.amount)} · {formatDateTime(item.created_date)}</p>
               </div>
               <Button size="sm" variant="outline" onClick={() => retryDev(item.id)} disabled={busy === `dev-${item.id}`}>
-                {busy === `dev-${item.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Enviar split"}
+                {busy === `dev-${item.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Reenviar"}
               </Button>
             </div>
           ))}
@@ -235,20 +228,6 @@ export default function AdminFinance() {
           <div className="space-y-2">
             <Label htmlFor="fee">Taxa por saque (R$)</Label>
             <Input id="fee" type="number" step="0.01" value={settings.withdrawal_fee} onChange={(e) => update({ withdrawal_fee: Number(e.target.value) })} />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="dev-percent">Split do dev (%)</Label>
-            <Input id="dev-percent" type="number" step="0.1" value={settings.dev_split_percent} onChange={(e) => update({ dev_split_percent: Number(e.target.value) })} />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="dev-key">Chave PIX do dev</Label>
-            <Input id="dev-key" value={settings.dev_pix_key} onChange={(e) => update({ dev_pix_key: e.target.value })} placeholder="Chave que recebe o split" />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="dev-key-type">Tipo da chave do dev</Label>
-            <select id="dev-key-type" value={settings.dev_pix_key_type} onChange={(e) => update({ dev_pix_key_type: e.target.value })} className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm">
-              {KEY_TYPES.map((type) => <option key={type} value={type}>{type.toUpperCase()}</option>)}
-            </select>
           </div>
           <div className="space-y-2">
             <Label htmlFor="admin-key">Chave PIX do caixa</Label>
@@ -279,13 +258,12 @@ export default function AdminFinance() {
 
       <section className="card-surface space-y-2 p-4">
         <h2 className="text-sm font-semibold">Saques ({pendingWithdrawals.length} aguardando liberação)</h2>
-        {overview.withdrawals.length ? (
-          overview.withdrawals.map((item) => (
+        {visibleWithdrawals.length ? (
+          visibleWithdrawals.map((item) => (
             <div key={item.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border px-3 py-2 text-xs">
               <div className="min-w-0">
                 <p className="font-medium">
                   {KIND_LABEL[item.kind] || item.kind} · {formatCurrency(item.amount)}
-                  {item.dev_split_amount > 0 && ` · split dev ${formatCurrency(item.dev_split_amount)}`}
                 </p>
                 <p className="text-muted-foreground">
                   {item.user_email || "—"} · {formatDateTime(item.created_date)} · {STATUS_LABEL[item.status] || item.status}
