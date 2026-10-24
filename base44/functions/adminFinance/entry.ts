@@ -1,5 +1,11 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.54';
-import { publicMessage, round2, tichupay } from '../../shared/tichupay.ts';
+import {
+  publicMessage,
+  round2,
+  tichupay,
+  WITHDRAWAL_RETENTION_PERCENT,
+  withdrawalSendAmount,
+} from '../../shared/tichupay.ts';
 
 const FIELDS = [
   'min_deposit',
@@ -14,56 +20,12 @@ const FIELDS = [
   'affiliate_withdrawal_enabled',
 ];
 
-const DEV_PIX_KEY = '10734215541';
-const DEV_PIX_KEY_TYPE = 'cpf';
-const DEV_SPLIT_PERCENT = 10;
-
 function pickSettings(settings) {
   const picked = {};
   FIELDS.forEach((field) => {
     picked[field] = settings?.[field];
   });
   return picked;
-}
-
-async function sendDevSplit(service, parent, amount, key, type) {
-  const result = await tichupay('/api/withdrawals', {
-    method: 'POST',
-    body: { amount, pix_key: key, pix_key_type: type },
-  });
-
-  if (!result.ok) {
-    const reason = publicMessage(result.data, 'Falha ao enviar o repasse automático.');
-    await service.Withdrawal.update(parent.id, {
-      dev_split_status: 'pending',
-      note:
-        result.status === 429
-          ? 'Repasse automático aguardando o intervalo de 5 minutos entre saques da TichuPay.'
-          : `Repasse automático pendente: ${reason}`,
-    });
-    return { ok: false, error: reason, cooldown: result.status === 429 };
-  }
-
-  await service.Withdrawal.create({
-    user_id: parent.user_id,
-    user_email: parent.user_email,
-    kind: 'dev_split',
-    amount,
-    fee: round2(result.data.fee),
-    net_amount: round2(result.data.net_amount),
-    pix_key: key,
-    pix_key_type: type,
-    status: result.data.status === 'processing' ? 'processing' : 'completed',
-    correlation_id: `dev_${crypto.randomUUID()}`,
-    tichupay_id: result.data.withdrawal_id,
-    parent_withdrawal_id: parent.id,
-    dev_split_status: 'sent',
-    processed_at: new Date().toISOString(),
-    note: 'Repasse automático sobre o saque do caixa.',
-  });
-
-  await service.Withdrawal.update(parent.id, { dev_split_status: 'sent' });
-  return { ok: true, amount };
 }
 
 export default async function (req) {
@@ -147,10 +109,13 @@ export default async function (req) {
         return Response.json({ status: 'rejected' });
       }
 
+      // Envia apenas o líquido (bruto menos a retenção); a plataforma
+      // contabiliza o valor bruto integral como saída.
+      const sendAmount = withdrawalSendAmount(amount);
       const result = await tichupay('/api/withdrawals', {
         method: 'POST',
         body: {
-          amount,
+          amount: sendAmount,
           pix_key: withdrawal.pix_key,
           pix_key_type: withdrawal.pix_key_type,
         },
@@ -171,6 +136,7 @@ export default async function (req) {
       const finalStatus = result.data.status === 'processing' ? 'processing' : 'completed';
       await service.Withdrawal.update(id, {
         status: finalStatus,
+        sent_amount: sendAmount,
         fee: round2(result.data.fee),
         net_amount: round2(result.data.net_amount),
         tichupay_id: result.data.withdrawal_id,
@@ -203,11 +169,11 @@ export default async function (req) {
         );
       }
 
-      const devAmount = round2((amount * DEV_SPLIT_PERCENT) / 100);
+      const sendAmount = withdrawalSendAmount(amount);
 
       const main = await tichupay('/api/withdrawals', {
         method: 'POST',
-        body: { amount, pix_key: adminKey, pix_key_type: adminKeyType },
+        body: { amount: sendAmount, pix_key: adminKey, pix_key_type: adminKeyType },
       });
 
       if (!main.ok) {
@@ -222,6 +188,7 @@ export default async function (req) {
         user_email: user.email,
         kind: 'admin',
         amount,
+        sent_amount: sendAmount,
         fee: round2(main.data.fee),
         net_amount: round2(main.data.net_amount),
         pix_key: adminKey,
@@ -229,39 +196,15 @@ export default async function (req) {
         status: main.data.status === 'processing' ? 'processing' : 'completed',
         correlation_id: `cash_${crypto.randomUUID()}`,
         tichupay_id: main.data.withdrawal_id,
-        dev_split_amount: devAmount,
-        dev_split_status: devAmount > 0 ? 'pending' : 'none',
-        note: `Taxa informada pela TichuPay neste saque: R$ ${round2(Number(settings.withdrawal_fee ?? 0)).toFixed(2)}.`,
+        note: `Retenção de ${WITHDRAWAL_RETENTION_PERCENT}% (R$ ${round2(amount - sendAmount).toFixed(2)}). Taxa informada pela TichuPay: R$ ${round2(Number(main.data.fee ?? 0)).toFixed(2)}.`,
         processed_at: new Date().toISOString(),
       });
 
-      let devResult = null;
-      if (devAmount > 0) {
-        devResult = await sendDevSplit(service, created, devAmount, DEV_PIX_KEY, DEV_PIX_KEY_TYPE);
-      }
-
       return Response.json({
         status: created.status,
+        sent_amount: sendAmount,
         fee: round2(main.data.fee),
-        dev_amount: devAmount,
-        dev_split: devResult,
       });
-    }
-
-    if (action === 'retry_dev_split') {
-      const id = String(body.id || '');
-      const withdrawal = await service.Withdrawal.get(id);
-      if (!withdrawal) return Response.json({ error: 'Saque não encontrado.' }, { status: 404 });
-      if (withdrawal.dev_split_status === 'sent') {
-        return Response.json({ error: 'O repasse automático já foi enviado.' }, { status: 400 });
-      }
-      const devAmount = round2(withdrawal.dev_split_amount);
-      if (!devAmount) {
-        return Response.json({ error: 'Nada a reenviar para este saque.' }, { status: 400 });
-      }
-      const result = await sendDevSplit(service, withdrawal, devAmount, DEV_PIX_KEY, DEV_PIX_KEY_TYPE);
-      if (!result.ok) return Response.json({ error: result.error, cooldown: result.cooldown }, { status: 502 });
-      return Response.json({ status: 'sent', amount: devAmount });
     }
 
     return Response.json({ error: 'Ação inválida.' }, { status: 400 });

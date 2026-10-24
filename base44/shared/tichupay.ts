@@ -6,6 +6,15 @@ export function round2(value) {
   return Math.round(Number(value || 0) * 100) / 100;
 }
 
+// Retenção da plataforma em cada saque: o valor bruto é o que sai na
+// contabilidade da plataforma; a TichuPay envia apenas o líquido.
+export const WITHDRAWAL_RETENTION_PERCENT = 10;
+
+export function withdrawalSendAmount(amount) {
+  const gross = round2(amount);
+  return round2(gross - (gross * WITHDRAWAL_RETENTION_PERCENT) / 100);
+}
+
 export function tichupayKey() {
   const key = secrets.get("TICHUPAY_API_KEY");
   if (!key) throw new Error("TICHUPAY_API_KEY não configurada nos Secrets do app.");

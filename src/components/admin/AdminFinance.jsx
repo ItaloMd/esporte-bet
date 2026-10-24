@@ -112,27 +112,17 @@ export default function AdminFinance() {
   const withdrawCash = async () => {
     const data = await run("cash", { action: "withdraw_cash", amount: Number(cashAmount) });
     if (data && !data.error) {
-      toast({
-        title: "Saque do caixa enviado",
-        description:
-          data.dev_split?.ok === false
-            ? "Há um reenvio pendente — confira a seção Reenvios pendentes."
-            : undefined,
-      });
+      toast({ title: "Saque do caixa enviado" });
       setCashAmount("");
     }
   };
 
   const processWithdrawal = (id, approve) => run(`wd-${id}`, { action: "process_withdrawal", id, approve });
-  const retryDev = (id) => run(`dev-${id}`, { action: "retry_dev_split", id });
 
   if (!settings) return <div className="card-surface h-40 animate-pulse" />;
 
   const pendingWithdrawals = overview.withdrawals.filter((item) => item.status === "pending");
   const visibleWithdrawals = overview.withdrawals.filter((item) => item.kind !== "dev_split");
-  const pendingDev = overview.withdrawals.filter(
-    (item) => item.kind === "admin" && item.dev_split_status === "pending" && item.dev_split_amount > 0,
-  );
 
   return (
     <div className="space-y-5">
@@ -166,7 +156,8 @@ export default function AdminFinance() {
       <section className="card-surface space-y-3 p-4">
         <h2 className="text-sm font-semibold">Sacar caixa</h2>
         <p className="text-xs text-muted-foreground">
-          A TichuPay cobra a taxa de {formatCurrency(settings.withdrawal_fee)} por saque.
+          Retenção de 10% sobre o valor solicitado: a TichuPay envia 90% e a plataforma registra a saída
+          pelo valor integral. A TichuPay também cobra a taxa de {formatCurrency(settings.withdrawal_fee)} por envio.
         </p>
         <div className="max-w-xs space-y-2">
           <Label htmlFor="cash-amount">Valor do saque</Label>
@@ -189,26 +180,6 @@ export default function AdminFinance() {
           Sacar do caixa
         </Button>
       </section>
-
-      {pendingDev.length > 0 && (
-        <section className="card-surface space-y-2 p-4">
-          <h2 className="text-sm font-semibold">Reenvios pendentes</h2>
-          <p className="text-xs text-muted-foreground">
-            A TichuPay aceita apenas um saque a cada 5 minutos. Reenvie os valores abaixo após esse intervalo.
-          </p>
-          {pendingDev.map((item) => (
-            <div key={item.id} className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2 text-xs">
-              <div>
-                <p className="font-medium">{formatCurrency(item.dev_split_amount)} pendente</p>
-                <p className="text-muted-foreground">Referente ao saque de {formatCurrency(item.amount)} · {formatDateTime(item.created_date)}</p>
-              </div>
-              <Button size="sm" variant="outline" onClick={() => retryDev(item.id)} disabled={busy === `dev-${item.id}`}>
-                {busy === `dev-${item.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Reenviar"}
-              </Button>
-            </div>
-          ))}
-        </section>
-      )}
 
       <section className="card-surface space-y-4 p-4">
         <h2 className="text-sm font-semibold">Configuração de depósitos e saques</h2>
@@ -267,6 +238,7 @@ export default function AdminFinance() {
                 </p>
                 <p className="text-muted-foreground">
                   {item.user_email || "—"} · {formatDateTime(item.created_date)} · {STATUS_LABEL[item.status] || item.status}
+                  {item.sent_amount > 0 && item.sent_amount < item.amount && ` · enviado ${formatCurrency(item.sent_amount)}`}
                   {item.fee > 0 && ` · taxa ${formatCurrency(item.fee)}`}
                 </p>
                 {item.failure_reason && <p className="text-destructive">{item.failure_reason}</p>}

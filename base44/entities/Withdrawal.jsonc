@@ -24,6 +24,10 @@
     "amount": {
       "type": "number"
     },
+    "sent_amount": {
+      "type": "number",
+      "default": 0
+    },
     "fee": {
       "type": "number",
       "default": 0

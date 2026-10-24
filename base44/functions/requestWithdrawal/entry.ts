@@ -1,5 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.54';
-import { round2 } from '../../shared/tichupay.ts';
+import { round2, withdrawalSendAmount } from '../../shared/tichupay.ts';
 import { summarizeAffiliate } from '../../shared/affiliateCommissions.ts';
 
 const KEY_TYPES = ['cpf', 'cnpj', 'email', 'phone', 'random'];
@@ -69,6 +69,7 @@ export default async function (req) {
         kind: 'affiliate',
         affiliate_code: affiliate.code,
         amount,
+        sent_amount: withdrawalSendAmount(amount),
         pix_key: pixKey,
         pix_key_type: pixKeyType,
         status: 'pending',
@@ -122,6 +123,7 @@ export default async function (req) {
       user_email: user.email,
       kind: 'player',
       amount,
+      sent_amount: withdrawalSendAmount(amount),
       pix_key: pixKey,
       pix_key_type: pixKeyType,
       status: 'pending',
