@@ -57,6 +57,14 @@
     "affiliate_commission_rule": {
       "type": "string"
     },
+    "affiliate_qftd_min_deposit": {
+      "type": "number",
+      "default": 50
+    },
+    "affiliate_withdrawal_enabled": {
+      "type": "boolean",
+      "default": false
+    },
     "deposits_enabled": {
       "type": "boolean",
       "default": true

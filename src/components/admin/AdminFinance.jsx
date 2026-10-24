@@ -29,7 +29,7 @@ const STATUS_LABEL = {
   rejected: "Recusado",
 };
 
-const KIND_LABEL = { player: "Jogador", admin: "Caixa" };
+const KIND_LABEL = { player: "Jogador", affiliate: "Afiliado", admin: "Caixa" };
 
 const invoke = async (payload) => {
   const response = await base44.functions.invoke("adminFinance", payload);
@@ -271,7 +271,7 @@ export default function AdminFinance() {
                 </p>
                 {item.failure_reason && <p className="text-destructive">{item.failure_reason}</p>}
               </div>
-              {item.status === "pending" && item.kind === "player" && (
+              {item.status === "pending" && ["player", "affiliate"].includes(item.kind) && (
                 <div className="flex gap-2">
                   <Button size="sm" variant="outline" onClick={() => processWithdrawal(item.id, false)} disabled={busy === `wd-${item.id}`}>
                     <X className="mr-1 h-3.5 w-3.5" /> Recusar

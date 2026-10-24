@@ -4,6 +4,7 @@ import { BarChart3, Flame, History, Radio, Star, TrendingUp } from "lucide-react
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import EventFilters from "@/components/odds/EventFilters";
+import DateStrip from "@/components/odds/DateStrip";
 import EventGrid from "@/components/odds/EventGrid";
 import ResultRow from "@/components/odds/ResultRow";
 import SectionHeading from "@/components/common/SectionHeading";
@@ -159,8 +160,11 @@ export default function Home() {
         <SectionHeading
           icon={Flame}
           title="Próximos jogos"
-          subtitle="Horários no fuso de Brasília · use os filtros para refinar"
+          subtitle="Horários no fuso de Brasília · escolha o dia para ver os jogos futuros"
         />
+        <div className="mb-3">
+          <DateStrip value={filters.date} onChange={(date) => setFilters((current) => ({ ...current, date }))} />
+        </div>
         <EventGrid
           events={feed.events}
           oddsByEvent={feed.oddsByEvent}

@@ -1,10 +1,11 @@
 import React, { useState } from "react";
-import { Loader2 } from "lucide-react";
+import { Clock, Loader2 } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatCurrency } from "@/lib/format";
+import KycForm from "@/components/wallet/KycForm";
 
 const KEY_TYPES = [
   { value: "cpf", label: "CPF" },
@@ -14,7 +15,18 @@ const KEY_TYPES = [
   { value: "random", label: "Chave aleatória" },
 ];
 
-export default function WithdrawPanel({ minWithdrawal, enabled, rolloverPending, onRequested }) {
+export default function WithdrawPanel({
+  minWithdrawal,
+  enabled,
+  rolloverPending,
+  kycApproved,
+  kycLatest,
+  userId,
+  userEmail,
+  profile,
+  onRequested,
+  onKycSubmitted,
+}) {
   const [amount, setAmount] = useState("");
   const [pixKey, setPixKey] = useState("");
   const [pixKeyType, setPixKeyType] = useState("cpf");
@@ -41,6 +53,49 @@ export default function WithdrawPanel({ minWithdrawal, enabled, rolloverPending,
     }
   };
 
+  if (!enabled) {
+    return (
+      <div className="space-y-3">
+        <p className="rounded-lg bg-secondary/40 px-3 py-2 text-xs text-muted-foreground">
+          Os saques estão temporariamente desativados pela plataforma.
+        </p>
+        <Button className="w-full" disabled>
+          Saques desativados
+        </Button>
+      </div>
+    );
+  }
+
+  if (!kycApproved) {
+    if (kycLatest?.status === "pending") {
+      return (
+        <div className="space-y-3 text-center">
+          <span className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-amber-500/15">
+            <Clock className="h-6 w-6 text-amber-400" aria-hidden="true" />
+          </span>
+          <p className="font-semibold">Verificação em análise</p>
+          <p className="text-sm text-muted-foreground">
+            Recebemos as suas imagens. Assim que a análise for concluída, o saque é liberado automaticamente e você não
+            precisa reenviar nada.
+          </p>
+        </div>
+      );
+    }
+    return (
+      <KycForm
+        userId={userId}
+        userEmail={userEmail}
+        profile={profile}
+        rejectedNote={
+          kycLatest?.status === "rejected"
+            ? kycLatest.reviewer_note || "A verificação anterior não foi aprovada. Reenvie as imagens com boa iluminação."
+            : ""
+        }
+        onSubmitted={onKycSubmitted}
+      />
+    );
+  }
+
   if (done) {
     return (
       <div className="space-y-3 text-center">
@@ -66,7 +121,7 @@ export default function WithdrawPanel({ minWithdrawal, enabled, rolloverPending,
           step="0.01"
           value={amount}
           onChange={(event) => setAmount(event.target.value)}
-          disabled={blocked || !enabled}
+          disabled={blocked}
         />
         <p className="text-[11px] text-muted-foreground">Saque mínimo de {formatCurrency(minWithdrawal)}.</p>
       </div>
@@ -76,7 +131,7 @@ export default function WithdrawPanel({ minWithdrawal, enabled, rolloverPending,
           id="withdraw-key-type"
           value={pixKeyType}
           onChange={(event) => setPixKeyType(event.target.value)}
-          disabled={blocked || !enabled}
+          disabled={blocked}
           className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
         >
           {KEY_TYPES.map((type) => (
@@ -91,7 +146,7 @@ export default function WithdrawPanel({ minWithdrawal, enabled, rolloverPending,
           value={pixKey}
           onChange={(event) => setPixKey(event.target.value)}
           placeholder="Somente sua chave, de sua titularidade"
-          disabled={blocked || !enabled}
+          disabled={blocked}
         />
       </div>
 
@@ -102,9 +157,9 @@ export default function WithdrawPanel({ minWithdrawal, enabled, rolloverPending,
       )}
       {error && <p className="text-xs text-destructive">{error}</p>}
 
-      <Button className="w-full" onClick={submit} disabled={loading || blocked || !enabled}>
+      <Button className="w-full" onClick={submit} disabled={loading || blocked}>
         {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-        {!enabled ? "Saques desativados" : "Solicitar saque"}
+        Solicitar saque
       </Button>
     </div>
   );

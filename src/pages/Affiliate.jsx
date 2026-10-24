@@ -1,10 +1,13 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Check, Copy, Gift, Link2, Percent, Share2, ShieldCheck, UserPlus, Users } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/use-toast";
-import { formatDateTime, formatNumber } from "@/lib/format";
+import { formatCurrency, formatDateTime, formatNumber } from "@/lib/format";
+import { modelLabel } from "@/lib/affiliateModels";
+import AffiliatePlayers from "@/components/affiliate/AffiliatePlayers";
+import AffiliatePayout from "@/components/affiliate/AffiliatePayout";
 import useProfile from "@/lib/useProfile";
 import { useAppSettings } from "@/lib/appSettings";
 import { useAuth } from "@/lib/AuthContext";
@@ -23,7 +26,17 @@ export default function Affiliate() {
   const [state, setState] = useState({ loading: true, affiliate: null });
   const [counts, setCounts] = useState({ clicks: 0, referrals: 0, approved: 0 });
   const [referrals, setReferrals] = useState([]);
+  const [stats, setStats] = useState(null);
   const [copied, setCopied] = useState(false);
+
+  const loadStats = useCallback(async () => {
+    try {
+      const response = await base44.functions.invoke("affiliateStats", {});
+      setStats(response.data || null);
+    } catch {
+      setStats(null);
+    }
+  }, []);
 
   useEffect(() => {
     if (!isAuthenticated || !user?.id) {
@@ -47,12 +60,13 @@ export default function Affiliate() {
       if (!active) return;
       setCounts({ clicks, referrals: refs, approved });
       setReferrals(history.items || []);
+      loadStats();
     };
     load().catch(() => setState({ loading: false, affiliate: null }));
     return () => {
       active = false;
     };
-  }, [isAuthenticated, user?.id]);
+  }, [isAuthenticated, user?.id, loadStats]);
 
   if (!isAuthenticated) {
     return (
@@ -87,6 +101,9 @@ export default function Affiliate() {
   const affiliate = state.affiliate;
   const link = `${window.location.origin}/?ref=${affiliate.code}`;
   const conversionRate = counts.clicks ? (counts.approved / counts.clicks) * 100 : 0;
+  const pendingCommission = stats
+    ? stats.players.filter((player) => !player.qualified).reduce((sum, player) => sum + Number(player.commission || 0), 0)
+    : 0;
 
   const copyLink = async () => {
     try {
@@ -173,6 +190,59 @@ export default function Affiliate() {
         ))}
       </section>
 
+      {stats && (
+        <section className="card-surface space-y-3 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold">Comissões</h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Modelo {modelLabel(stats.affiliate.model)} · rev {stats.affiliate.rev_share_percent}%
+                {stats.affiliate.model !== "full_rev" && ` · CPA ${formatCurrency(stats.affiliate.cpa_amount)}`} · rollover{" "}
+                {stats.affiliate.rollover_multiplier}x o primeiro depósito
+              </p>
+            </div>
+            <span
+              className={`rounded-full border px-2.5 py-1 text-[11px] ${
+                stats.totals.withdrawal_allowed ? "border-primary/40 text-primary" : "border-border text-muted-foreground"
+              }`}
+            >
+              {stats.totals.withdrawal_allowed ? "Saque de comissões liberado" : "Saque de comissões bloqueado"}
+            </span>
+          </div>
+
+          <div className="grid gap-2 sm:grid-cols-3">
+            <div className="rounded-lg border border-primary/40 bg-primary/10 px-3 py-2">
+              <p className="score-num text-lg font-semibold">{formatCurrency(stats.totals.available)}</p>
+              <p className="text-[11px] text-muted-foreground">Comissões liberadas</p>
+            </div>
+            <div className="rounded-lg border border-border px-3 py-2">
+              <p className="score-num text-lg font-semibold">{formatCurrency(pendingCommission)}</p>
+              <p className="text-[11px] text-muted-foreground">Em qualificação</p>
+            </div>
+            <div className="rounded-lg border border-border px-3 py-2">
+              <p className="score-num text-lg font-semibold">{formatCurrency(stats.totals.requested)}</p>
+              <p className="text-[11px] text-muted-foreground">Já solicitado</p>
+            </div>
+          </div>
+
+          <AffiliatePayout
+            available={stats.totals.available}
+            minWithdrawal={stats.totals.min_withdrawal ?? 30}
+            enabled={stats.totals.withdrawal_allowed}
+            onRequested={loadStats}
+          />
+        </section>
+      )}
+
+      <section className="space-y-3">
+        <h2 className="text-sm font-semibold">Meus jogadores</h2>
+        {stats ? (
+          <AffiliatePlayers players={stats.players} totals={stats.totals} />
+        ) : (
+          <div className="h-20 animate-pulse rounded-lg bg-secondary" />
+        )}
+      </section>
+
       <section className="card-surface px-4 py-3">
         <h2 className="text-sm font-semibold">Regras do programa</h2>
         <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
@@ -183,7 +253,8 @@ export default function Affiliate() {
           <li>• Não é permitido indicar menores de 18 anos nem usar o programa para incentivar apostas.</li>
         </ul>
         <p className="mt-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200/90">
-          As comissões do programa dependem de validação jurídica e não são pagas automaticamente nesta etapa.
+          A comissão é liberada quando o jogador indicado faz o primeiro depósito dentro do valor mínimo e cumpre o
+          rollover exigido. O saque das comissões depende da liberação da administração.
         </p>
       </section>
 

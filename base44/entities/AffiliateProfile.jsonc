@@ -36,6 +36,31 @@
     "commission_rule": {
       "type": "string"
     },
+    "model": {
+      "type": "string",
+      "enum": [
+        "full_rev",
+        "rev_cpa",
+        "cpa"
+      ],
+      "default": "full_rev"
+    },
+    "rev_share_percent": {
+      "type": "number",
+      "default": 30
+    },
+    "cpa_amount": {
+      "type": "number",
+      "default": 0
+    },
+    "rollover_multiplier": {
+      "type": "number",
+      "default": 1
+    },
+    "withdrawal_enabled": {
+      "type": "boolean",
+      "default": false
+    },
     "blocked_reason": {
       "type": "string"
     },

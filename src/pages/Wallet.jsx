@@ -11,17 +11,29 @@ import { formatCurrency } from "@/lib/format";
 
 export default function Wallet() {
   const { user, isAuthenticated, isLoadingAuth, authChecked, navigateToLogin } = useAuth();
-  const [state, setState] = useState({ loading: true, wallet: null, deposits: [], withdrawals: [], settings: {} });
+  const [state, setState] = useState({
+    loading: true,
+    wallet: null,
+    deposits: [],
+    withdrawals: [],
+    settings: {},
+    kycLatest: null,
+    kycApproved: false,
+    profile: null,
+  });
   const depositRef = useRef(null);
   const withdrawRef = useRef(null);
 
   const load = useCallback(async () => {
     if (!user?.id) return;
-    const [walletPage, depositPage, withdrawalPage, settingsPage] = await Promise.all([
+    const [walletPage, depositPage, withdrawalPage, settingsPage, kycPage, kycApprovedPage, profilePage] = await Promise.all([
       base44.entities.Wallet.filter({ user_id: user.id }, { limit: 1 }),
       base44.entities.Deposit.filter({ user_id: user.id }, { sort: "-created_date", limit: 8 }),
-      base44.entities.Withdrawal.filter({ user_id: user.id }, { sort: "-created_date", limit: 8 }),
+      base44.entities.Withdrawal.filter({ user_id: user.id, kind: "player" }, { sort: "-created_date", limit: 8 }),
       base44.entities.AppSettings.list({ limit: 1 }),
+      base44.entities.KycSubmission.filter({ user_id: user.id }, { sort: "-created_date", limit: 1 }),
+      base44.entities.KycSubmission.filter({ user_id: user.id, status: "approved" }, { limit: 1 }),
+      base44.entities.UserProfile.filter({ user_id: user.id }, { limit: 1 }),
     ]);
     setState({
       loading: false,
@@ -29,6 +41,9 @@ export default function Wallet() {
       deposits: depositPage.items || [],
       withdrawals: withdrawalPage.items || [],
       settings: settingsPage.items?.[0] || {},
+      kycLatest: kycPage.items?.[0] || null,
+      kycApproved: Boolean(kycApprovedPage.items?.length),
+      profile: profilePage.items?.[0] || null,
     });
   }, [user?.id]);
 
@@ -126,7 +141,13 @@ export default function Wallet() {
             minWithdrawal={Number(settings.min_withdrawal ?? 30)}
             enabled={settings.withdrawals_enabled !== false}
             rolloverPending={rolloverPending}
+            kycApproved={state.kycApproved}
+            kycLatest={state.kycLatest}
+            userId={user?.id}
+            userEmail={user?.email}
+            profile={state.profile}
             onRequested={load}
+            onKycSubmitted={load}
           />
         </section>
       </div>

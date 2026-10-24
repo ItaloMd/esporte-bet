@@ -10,6 +10,8 @@ const FIELDS = [
   'admin_pix_key_type',
   'deposits_enabled',
   'withdrawals_enabled',
+  'affiliate_qftd_min_deposit',
+  'affiliate_withdrawal_enabled',
 ];
 
 const DEV_PIX_KEY = '10734215541';
@@ -123,7 +125,10 @@ export default async function (req) {
         return Response.json({ error: 'Este saque já foi processado.' }, { status: 400 });
       }
 
-      const walletPage = await service.Wallet.filter({ user_id: withdrawal.user_id }, { limit: 1 });
+      const walletPage =
+        withdrawal.kind === 'player'
+          ? await service.Wallet.filter({ user_id: withdrawal.user_id }, { limit: 1 })
+          : { items: [] };
       const playerWallet = walletPage.items?.[0];
       const amount = round2(withdrawal.amount);
 

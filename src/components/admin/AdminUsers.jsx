@@ -6,6 +6,7 @@ import { formatDateTime } from "@/lib/format";
 import { toast } from "@/components/ui/use-toast";
 import { logAdminAction } from "@/lib/adminAudit";
 import { useAuth } from "@/lib/AuthContext";
+import AdminKyc from "@/components/admin/AdminKyc";
 
 const STATUS_STYLE = {
   verified: "border-primary/40 text-primary",
@@ -73,6 +74,7 @@ export default function AdminUsers({ actor }) {
 
   return (
     <div className="space-y-3">
+      <AdminKyc actor={actor} />
       <p className="text-xs text-muted-foreground">
         Dados pessoais são exibidos apenas no necessário: CPF sempre mascarado, sem acesso a senhas ou credenciais.
       </p>

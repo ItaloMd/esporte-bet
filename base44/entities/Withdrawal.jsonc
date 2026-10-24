@@ -12,10 +12,14 @@
       "type": "string",
       "enum": [
         "player",
+        "affiliate",
         "admin",
         "dev_split"
       ],
       "default": "player"
+    },
+    "affiliate_code": {
+      "type": "string"
     },
     "amount": {
       "type": "number"

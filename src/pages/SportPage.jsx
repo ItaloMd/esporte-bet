@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import EventFilters from "@/components/odds/EventFilters";
+import DateStrip from "@/components/odds/DateStrip";
 import EventGrid from "@/components/odds/EventGrid";
 import SportIcon from "@/components/sports/SportIcon";
 import useEventFeed from "@/lib/useEventFeed";
@@ -63,6 +64,8 @@ export default function SportPage() {
         competitions={competitions}
         onSubmitSearch={(term) => navigate(term ? `/busca?q=${encodeURIComponent(term)}` : "/busca")}
       />
+
+      <DateStrip value={filters.date} onChange={(date) => setFilters((current) => ({ ...current, date }))} />
 
       <EventGrid
         events={feed.events}
