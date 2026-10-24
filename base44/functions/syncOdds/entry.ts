@@ -24,6 +24,7 @@ import {
   isBrazilianCompetition,
 } from '../../shared/oddsApi.ts';
 import { markStartedEventsLive } from '../../shared/matchLifecycle.ts';
+import { backfillTeamCrests } from '../../shared/teamCrests.ts';
 
 const TIME_ZONE = 'America/Bahia';
 const CATALOG_TTL_MS = 24 * 60 * 60 * 1000;
@@ -763,7 +764,15 @@ export default async function (req) {
       });
     }
 
-    return Response.json({ ok: true, mode, trigger, ...result });
+    // Brasões são complementares: uma falha aqui não invalida a sincronização.
+    let crests = null;
+    try {
+      crests = await backfillTeamCrests(db, { maxTeams: 25 });
+    } catch (crestError) {
+      crests = { error: String(crestError?.message || crestError).slice(0, 200) };
+    }
+
+    return Response.json({ ok: true, mode, trigger, crests, ...result });
   } catch (error) {
     return Response.json({ error: String(error?.message || error) }, { status: 500 });
   }

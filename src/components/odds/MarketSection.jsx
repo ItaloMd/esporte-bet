@@ -26,10 +26,10 @@ export default function MarketSection({ market, odds }) {
           </span>
         </div>
       </div>
-      <div className="flex flex-wrap gap-2 px-3.5 py-3">
+      <div className="grid grid-cols-2 gap-2 px-3.5 py-3 sm:grid-cols-3">
         {odds.length ? (
           odds.map((odd) => (
-            <div key={odd.id} className="min-w-[6.5rem] flex-1">
+            <div key={odd.id}>
               <OddsButton odd={odd} />
               {odd.status !== "open" && (
                 <p className="mt-1 text-center text-[10px] text-amber-400">

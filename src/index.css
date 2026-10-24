@@ -81,7 +81,7 @@
   }
 
   .odds-btn {
-    @apply flex flex-1 flex-col items-center justify-center gap-0.5 rounded-lg border border-border bg-secondary/60 px-3 py-2 text-sm font-medium transition-colors duration-150;
+    @apply relative flex min-h-[3.5rem] w-full flex-col items-center justify-center gap-1 overflow-hidden rounded-lg border border-border bg-secondary/60 px-2 py-2 text-center text-sm font-medium transition-colors duration-150;
   }
   .odds-btn:hover:not(:disabled) {
     @apply border-primary/60 bg-primary/10 text-foreground;

@@ -74,7 +74,7 @@ export default function EventCard({ event, odds = [], showCompetition = true }) 
                 Odds suspensas — indisponíveis para novas simulações
               </p>
             )}
-            <div className="flex gap-2">
+            <div className={`grid gap-1.5 ${odds.length >= 3 ? "grid-cols-3" : "grid-cols-2"}`}>
               {odds.map((odd) => (
                 <OddsButton key={odd.id} odd={odd} />
               ))}

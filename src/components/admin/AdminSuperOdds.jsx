@@ -32,14 +32,22 @@ export default function AdminSuperOdds() {
     setSearching(true);
     setEvent(null);
     try {
-      const filter = { published: true, start_time: { $gte: new Date().toISOString() } };
+      // Partidas ao vivo já começaram e não entram no catálogo publicado, então
+      // não podem ser filtradas por "publicado" nem por "começa a partir de
+      // agora": entram por status, junto das agendadas.
+      const conditions = [
+        { $or: [{ status: "live" }, { status: "scheduled", start_time: { $gte: new Date().toISOString() } }] },
+      ];
       if (text) {
-        filter.$or = [
-          { home_team_name: { $regex: text, $options: "i" } },
-          { away_team_name: { $regex: text, $options: "i" } },
-          { competition_name: { $regex: text, $options: "i" } },
-        ];
+        conditions.push({
+          $or: [
+            { home_team_name: { $regex: text, $options: "i" } },
+            { away_team_name: { $regex: text, $options: "i" } },
+            { competition_name: { $regex: text, $options: "i" } },
+          ],
+        });
       }
+      const filter = { $and: conditions };
       const page = await base44.entities.Event.filter(filter, { limit: 8, sort: "start_time" });
       setEvents(page.items || []);
     } finally {
@@ -142,6 +150,7 @@ export default function AdminSuperOdds() {
                 <span className="min-w-0">
                   <span className="block truncate font-medium">
                     {row.home_team_name} x {row.away_team_name}
+                    {row.status === "live" && <span className="ml-2 text-destructive">ao vivo</span>}
                   </span>
                   <span className="block truncate text-muted-foreground">
                     {row.competition_name} · {formatDateTime(row.start_time)}
