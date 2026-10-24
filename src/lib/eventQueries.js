@@ -3,6 +3,13 @@ import { OTHERS_SLUGS } from "@/lib/sports";
 
 export const MAX_CARD_ODDS = 3;
 
+/**
+ * Janela em que uma partida iniciada ainda pode ser exibida como "ao vivo".
+ * Precisa acompanhar LIVE_WINDOW_MS do ciclo de vida no backend: nada mais
+ * antigo que isso aparece como ao vivo, mesmo que o status tenha ficado preso.
+ */
+export const LIVE_WINDOW_MS = 6 * 60 * 60 * 1000;
+
 export function buildEventFilter({ sportSlug, competitionId, dayRange, status, search, featured, country, from } = {}) {
   const filter = {};
   if (sportSlug === "outros") filter.sport_slug = { $in: OTHERS_SLUGS };
@@ -15,7 +22,11 @@ export function buildEventFilter({ sportSlug, competitionId, dayRange, status, s
   // Partidas ao vivo já começaram e não recebem mais apostas: ficam fora do
   // catálogo publicável, mas continuam listadas enquanto a fonte não confirma o resultado.
   if (status === "live") {
-    filter.start_time = { $lte: new Date().toISOString() };
+    const nowMs = Date.now();
+    filter.start_time = {
+      $gte: new Date(nowMs - LIVE_WINDOW_MS).toISOString(),
+      $lte: new Date(nowMs).toISOString(),
+    };
     const liveTerm = (search || "").trim();
     if (liveTerm) {
       filter.$or = [

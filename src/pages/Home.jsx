@@ -17,7 +17,6 @@ import { buildEventFilter } from "@/lib/eventQueries";
 import { SPORTS } from "@/lib/sports";
 import { dayRangeFromInput } from "@/lib/format";
 
-const LIVE_ONLY = { status: "live" };
 const PAST = { status: "finished" };
 
 function CompetitionChips() {
@@ -58,7 +57,8 @@ export default function Home() {
     [nowIso],
   );
 
-  const liveFeed = useEventFeed(LIVE_ONLY, { limit: 6 });
+  const liveFilter = useMemo(() => buildEventFilter({ status: "live" }), []);
+  const liveFeed = useEventFeed(liveFilter, { limit: 6 });
   const featuredFeed = useEventFeed(featuredFilter, { limit: 4, sort: "start_time" });
   const resultsFeed = useEventFeed(PAST, { limit: 4, sort: "-start_time" });
 

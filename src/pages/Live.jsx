@@ -3,9 +3,11 @@ import { Radio, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import EventGrid from "@/components/odds/EventGrid";
 import useEventFeed from "@/lib/useEventFeed";
+import { buildEventFilter } from "@/lib/eventQueries";
 import { timeAgo } from "@/lib/format";
 
-const LIVE_FILTER = { status: "live" };
+// Só partidas iniciadas dentro da janela de "ao vivo" entram aqui.
+const LIVE_FILTER = buildEventFilter({ status: "live" });
 const REFRESH_MS = 60000;
 
 export default function Live() {

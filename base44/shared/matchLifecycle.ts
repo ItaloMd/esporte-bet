@@ -20,6 +20,13 @@ export const SCORE_RECHECK_MS = 30 * 60 * 1000;
 /** Espera maior quando a modalidade não devolve placar (evita gasto repetido). */
 export const SCORE_BACKOFF_MS = 60 * 60 * 1000;
 
+/**
+ * Janela em que uma partida iniciada ainda pode ser considerada "ao vivo".
+ * Passado esse tempo ela já terminou, então sai da lista de ao vivo e para de
+ * ser consultada — é o que impede que jogos de dias anteriores reapareçam.
+ */
+export const LIVE_WINDOW_MS = 6 * 60 * 60 * 1000;
+
 export function chunkArray(list, size) {
   const out = [];
   for (let index = 0; index < list.length; index += size) out.push(list.slice(index, index + size));
@@ -102,7 +109,31 @@ export function settleSelection(selection, event) {
  * O status é definido pelo horário previsto, sem consultar odds durante o jogo.
  */
 export async function markStartedEventsLive(db, nowIso) {
+  const nowMs = Date.parse(nowIso);
+  const staleIso = new Date(nowMs - LIVE_WINDOW_MS).toISOString();
+  const staleUpdate = {
+    status: 'finished',
+    tracking: 'finished',
+    published: false,
+    odds_status: 'unavailable',
+    next_check_at: null,
+  };
   const startedIds = [];
+
+  // 1) Partidas antigas ainda marcadas como "ao vivo" já terminaram: saem da
+  // listagem de ao vivo e deixam de consumir consultas de placar.
+  for (let round = 0; round < 8; round += 1) {
+    const page = await db.Event.filter(
+      { source: 'provider', status: 'live', start_time: { $lt: staleIso } },
+      { limit: 500 },
+    );
+    const items = page.items || [];
+    if (!items.length) break;
+    await db.Event.updateMany({ id: { $in: items.map((row) => row.id) } }, { $set: staleUpdate });
+  }
+
+  // 2) Partidas cujo horário previsto já passou viram "ao vivo". As que
+  // começaram antes da janela são encerradas direto, sem passar por "ao vivo".
   for (let round = 0; round < 8; round += 1) {
     const page = await db.Event.filter(
       { source: 'provider', status: 'scheduled', start_time: { $lte: nowIso } },
@@ -110,11 +141,18 @@ export async function markStartedEventsLive(db, nowIso) {
     );
     const items = page.items || [];
     if (!items.length) break;
-    await db.Event.updateMany(
-      { id: { $in: items.map((row) => row.id) } },
-      { $set: { status: 'live', published: false, odds_status: 'unavailable', next_check_at: nowIso } },
-    );
-    startedIds.push(...items.map((row) => row.id));
+    const recent = items.filter((row) => Date.parse(row.start_time) >= nowMs - LIVE_WINDOW_MS);
+    const stale = items.filter((row) => Date.parse(row.start_time) < nowMs - LIVE_WINDOW_MS);
+    if (recent.length) {
+      await db.Event.updateMany(
+        { id: { $in: recent.map((row) => row.id) } },
+        { $set: { status: 'live', published: false, odds_status: 'unavailable', next_check_at: nowIso } },
+      );
+      startedIds.push(...recent.map((row) => row.id));
+    }
+    if (stale.length) {
+      await db.Event.updateMany({ id: { $in: stale.map((row) => row.id) } }, { $set: staleUpdate });
+    }
   }
 
   // Partidas que já começaram não ficam mais publicadas para apostas.
