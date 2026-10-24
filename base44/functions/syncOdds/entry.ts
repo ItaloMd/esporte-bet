@@ -492,6 +492,14 @@ async function runSync({ db, settings, apiKey, mode, now, force }) {
       const previousValue = Number(existing.value);
       payload.previous_value = Number.isFinite(previousValue) ? previousValue : payload.value;
       payload.movement = payload.value > previousValue ? 'up' : payload.value < previousValue ? 'down' : 'stable';
+      // Super odd marcada pelo admin: o valor promocional prevalece sobre o
+      // recálculo de margem, para que o destaque não desapareça na sincronização.
+      if (existing.is_super_odd) {
+        payload.value = previousValue;
+        payload.is_super_odd = true;
+        payload.super_odd_value = Number(existing.super_odd_value) || previousValue;
+        payload.super_odd_at = existing.super_odd_at;
+      }
       oddUpdates.push({ id: existing.id, ...payload });
     } else {
       oddCreates.push(payload);

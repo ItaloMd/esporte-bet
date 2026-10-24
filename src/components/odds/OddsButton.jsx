@@ -34,14 +34,29 @@ export default function OddsButton({ odd }) {
       type="button"
       className="odds-btn"
       data-selected={selected}
+      data-super={Boolean(odd.is_super_odd)}
       disabled={disabled}
       onClick={handleClick}
-      title={disabled ? "Odd indisponível" : `${odd.market_name} — ${odd.label}`}
+      title={
+        disabled
+          ? "Odd indisponível"
+          : odd.is_super_odd
+            ? `Super odd — ${odd.market_name}: ${odd.label}`
+            : `${odd.market_name} — ${odd.label}`
+      }
       aria-pressed={selected}
     >
-      <span className="line-clamp-1 text-[11px] font-normal text-muted-foreground">{odd.label}</span>
+      <span
+        className={`line-clamp-1 text-[11px] font-normal ${
+          odd.is_super_odd ? "text-primary-foreground/80" : "text-muted-foreground"
+        }`}
+      >
+        {odd.is_super_odd ? `Super · ${odd.label}` : odd.label}
+      </span>
       <span className="flex items-center gap-1 score-num text-[15px]">
-        {selected && <Check className="h-3.5 w-3.5 text-primary" aria-hidden="true" />}
+        {selected && (
+          <Check className={`h-3.5 w-3.5 ${odd.is_super_odd ? "text-primary-foreground" : "text-primary"}`} aria-hidden="true" />
+        )}
         {formatOdds(odd.value)}
         {odd.movement === "up" && <TrendingUp className="h-3 w-3 text-primary/80" aria-hidden="true" />}
         {odd.movement === "down" && <TrendingDown className="h-3 w-3 text-destructive/80" aria-hidden="true" />}

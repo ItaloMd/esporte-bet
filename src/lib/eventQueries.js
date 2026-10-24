@@ -38,8 +38,12 @@ export function buildEventFilter({ sportSlug, competitionId, dayRange, status, s
     return filter;
   }
   // Nenhuma listagem exibe partidas que já começaram: a comparação é feita em
-  // UTC e a exibição converte para America/Bahia.
-  filter.start_time = { ...(filter.start_time || {}), $gte: from || new Date().toISOString() };
+  // UTC e a exibição converte para America/Bahia. O piso é o mais restritivo
+  // entre "a partir de agora" e o início do dia escolhido, senão um dia futuro
+  // ainda traria os jogos de hoje.
+  const floor = from || new Date().toISOString();
+  const rangeStart = filter.start_time?.$gte;
+  filter.start_time = { ...(filter.start_time || {}), $gte: rangeStart && rangeStart > floor ? rangeStart : floor };
   // Catálogo público: apenas partidas com cotação efetivamente oferecida pelo
   // sistema. Quem perdeu as odds ou já começou sai da listagem para apostar.
   filter.published = true;
