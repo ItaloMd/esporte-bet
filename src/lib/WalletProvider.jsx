@@ -29,6 +29,26 @@ export function WalletProvider({ children }) {
     reload();
   }, [reload]);
 
+  // O saldo muda fora desta tela (depósito PIX confirmado pelo webhook, prêmio
+  // liquidado, cashout em outro dispositivo). A inscrição mantém o valor
+  // exibido igual ao do banco sem precisar recarregar a página.
+  useEffect(() => {
+    if (!isAuthenticated || !user?.id) return undefined;
+    const unsubscribe = base44.entities.Wallet.subscribe((event) => {
+      const record = event?.data;
+      if (!record || record.user_id !== user.id) return;
+      if (typeof record.balance === "number") setBalance(Number(record.balance));
+    });
+    return unsubscribe;
+  }, [isAuthenticated, user?.id]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !user?.id) return undefined;
+    const onFocus = () => reload();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [isAuthenticated, user?.id, reload]);
+
   const value = useMemo(() => ({ balance, loading, reload, setBalance }), [balance, loading, reload]);
 
   return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>;
