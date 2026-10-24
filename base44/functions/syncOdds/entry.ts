@@ -17,6 +17,11 @@ import {
   DEFAULT_REGIONS,
   DEFAULT_MARKETS,
   FEATURED_LEAGUES,
+  PRIORITY_MARKETS,
+  DEFAULT_HOUSE_MARGIN_PERCENT,
+  HOUSE_MARGIN_VERSION,
+  applyHouseMargin,
+  isBrazilianCompetition,
 } from '../../shared/oddsApi.ts';
 
 const TIME_ZONE = 'America/Bahia';
@@ -138,6 +143,8 @@ async function runSync({ db, settings, apiKey, mode, now, force }) {
   const maxBookmakers = Math.max(1, num(settings.max_bookmakers, 8));
   const budget = Math.max(0, num(settings.budget_credits, 0));
   const dailyLimit = Math.max(0, num(settings.daily_request_limit, 0));
+  const houseMargin = num(settings.house_margin_percent, DEFAULT_HOUSE_MARGIN_PERCENT);
+  const marginVersion = settings.house_margin_version || HOUSE_MARGIN_VERSION;
 
   const today = localDateString(now, TIME_ZONE);
   const sameDay = settings.credits_today_date === today;
@@ -186,7 +193,8 @@ async function runSync({ db, settings, apiKey, mode, now, force }) {
   const refreshSeconds =
     mode === 'today' ? num(settings.refresh_upcoming_seconds, 3600) : num(settings.refresh_finished_seconds, 86400);
   const todayRange = localDayRange(today, TIME_ZONE);
-  const windowFrom = new Date(now.getTime() - 60 * 1000).toISOString();
+  // Somente partidas que ainda não começaram: a comparação é feita em UTC.
+  const windowFrom = now.toISOString();
   const windowTo =
     mode === 'today' ? todayRange.end : new Date(now.getTime() + WINDOW_DAYS * 86400000).toISOString();
   const windowEndMs = Date.parse(windowTo);
@@ -220,7 +228,19 @@ async function runSync({ db, settings, apiKey, mode, now, force }) {
     if (count) candidates.push({ competition, count });
   });
 
-  candidates.sort((a, b) => b.count - a.count);
+  // Prioridade de catálogo: competições brasileiras primeiro; as demais entram
+  // apenas enquanto houver orçamento e vagas na execução.
+  candidates.sort((a, b) => {
+    const aBrazil = isBrazilianCompetition(a.competition.external_id, a.competition.name) ? 1 : 0;
+    const bBrazil = isBrazilianCompetition(b.competition.external_id, b.competition.name) ? 1 : 0;
+    if (aBrazil !== bBrazil) return bBrazil - aBrazil;
+    // Rotação: entre as demais, a liga consultada há mais tempo vem primeiro,
+    // para que todas recebam cobertura sem repetir consultas desnecessárias.
+    const aLast = a.competition.odds_synced_at ? Date.parse(a.competition.odds_synced_at) : 0;
+    const bLast = b.competition.odds_synced_at ? Date.parse(b.competition.odds_synced_at) : 0;
+    if (aLast !== bLast) return aLast - bLast;
+    return b.count - a.count;
+  });
 
   const budgetReached = budget > 0 && spentPeriod >= budget * 0.95;
   const dailyReached = dailyLimit > 0 && spentToday >= dailyLimit;
@@ -262,6 +282,10 @@ async function runSync({ db, settings, apiKey, mode, now, force }) {
 
   oddsResults.forEach(({ competition, data }) => {
     data.forEach((event) => {
+      // A resposta de odds também pode trazer partidas já iniciadas: elas nunca
+      // entram no catálogo, mesmo que a API ainda as devolva.
+      const start = Date.parse(event.commence_time);
+      if (!Number.isFinite(start) || start <= now.getTime() || start > windowEndMs) return;
       if (!discovered.has(event.id)) discovered.set(event.id, { api: event, competition });
     });
   });
@@ -300,71 +324,142 @@ async function runSync({ db, settings, apiKey, mode, now, force }) {
 
   const eventRows = await loadByExternalId(db, 'Event', externalIds);
 
-  const marketRows = new Map();
-  const oddRows = new Map();
   const observed = new Map();
   const bookmakers = new Set();
+  const marketRows = new Map();
+  const oddRows = new Map();
+  const marketBooks = new Map();
+  const universe = new Map();
+  const priced = new Map();
+  const consulted = new Set();
+
+  const lineKeyOf = (value) => {
+    const parsed = value === undefined || value === null ? NaN : Number(value);
+    return Number.isFinite(parsed) ? String(parsed) : 'principal';
+  };
+
+  const branchFor = (store, eventId, marketKey, lineKey, factory) => {
+    if (!store.has(eventId)) store.set(eventId, new Map());
+    const byMarket = store.get(eventId);
+    if (!byMarket.has(marketKey)) byMarket.set(marketKey, new Map());
+    const byLine = byMarket.get(marketKey);
+    if (!byLine.has(lineKey)) byLine.set(lineKey, factory());
+    return byLine.get(lineKey);
+  };
+  const groupFor = (store, eventId, marketKey, lineKey) =>
+    branchFor(store, eventId, marketKey, lineKey, () => new Map());
+  const setFor = (store, eventId, marketKey, lineKey) =>
+    branchFor(store, eventId, marketKey, lineKey, () => new Set());
 
   oddsResults.forEach(({ data }) => {
     data.forEach((apiEvent) => {
       const eventRow = eventRows.get(apiEvent.id);
       if (!eventRow) return;
+      consulted.add(apiEvent.id);
       const books = (apiEvent.bookmakers || []).slice(0, maxBookmakers);
       books.forEach((book) => {
         const bookName = book.title || book.key;
         bookmakers.add(bookName);
         (book.markets || []).forEach((market) => {
           if (!activeMarkets.includes(market.key)) return;
-          const marketRef = `${apiEvent.id}|${market.key}`;
-          if (!marketRows.has(marketRef)) {
-            marketRows.set(marketRef, {
-              event_id: eventRow.id,
-              name: marketName(market.key, eventRow.sport_slug),
-              code: market.key,
-              market_key: market.key,
-              market_group: marketGroup(market.key),
-              status: 'open',
-              sort_order: sortFor(market.key),
-              is_main: market.key === 'h2h',
-              bookmaker_count: 0,
-              source: 'provider',
-              external_id: marketRef,
-              last_sync_at: now.toISOString(),
-            });
-          }
-          const marketRow = marketRows.get(marketRef);
-          marketRow.bookmaker_count += 1;
           if (!observed.has(eventRow.sport_slug)) observed.set(eventRow.sport_slug, new Set());
           observed.get(eventRow.sport_slug).add(market.key);
+          const marketRef = `${apiEvent.id}|${market.key}`;
+          if (!marketBooks.has(marketRef)) marketBooks.set(marketRef, new Set());
+          marketBooks.get(marketRef).add(bookName);
 
           (market.outcomes || []).forEach((outcome) => {
-            const price = Number(outcome.price);
-            if (!Number.isFinite(price)) return;
-            const code = selectionCode(market.key, outcome);
-            const externalId = `${apiEvent.id}|${book.key}|${market.key}|${code}`;
-            if (oddRows.has(externalId)) return;
             const line = outcome.point === undefined || outcome.point === null ? null : Number(outcome.point);
-            const row = {
-              event_id: eventRow.id,
-              market_name: marketName(market.key, eventRow.sport_slug),
-              market_group: marketGroup(market.key),
-              market_key: market.key,
-              bookmaker: bookName,
-              label: selectionLabel(market.key, outcome),
+            const lineKey = lineKeyOf(line);
+            const code = selectionCode(market.key, outcome);
+            // O universo de resultados possíveis define o que é um mercado completo,
+            // inclusive quando alguma casa não devolve preço para uma das seleções.
+            setFor(universe, apiEvent.id, market.key, lineKey).add(code);
+            const price = Number(outcome.price);
+            if (!Number.isFinite(price) || price <= 1) return;
+            const group = groupFor(priced, apiEvent.id, market.key, lineKey);
+            const current = group.get(code);
+            if (current && current.original_value >= price) return;
+            group.set(code, {
               code,
-              value: price,
-              status: 'open',
-              sort_order: sortFor(market.key),
-              source: 'provider',
-              external_id: externalId,
-              last_sync_at: now.toISOString(),
-              market_ref: marketRef,
-            };
-            if (line !== null && Number.isFinite(line)) row.line = line;
-            if (book.last_update) row.source_updated_at = book.last_update;
-            oddRows.set(externalId, row);
+              line: Number.isFinite(line) ? line : null,
+              label: selectionLabel(market.key, outcome),
+              original_value: price,
+              bookmaker: bookName,
+              source_updated_at: book.last_update || null,
+            });
           });
         });
+      });
+    });
+  });
+
+  // Uma cotação por seleção: o melhor preço original entre as casas, com a
+  // margem da casa aplicada sobre o conjunto completo do mercado.
+  const offeredEvents = new Set();
+  eventRows.forEach((eventRow, eventExternalId) => {
+    const byMarket = priced.get(eventExternalId);
+    if (!byMarket) return;
+    byMarket.forEach((byLine, marketKey) => {
+      const marketRef = `${eventExternalId}|${marketKey}`;
+      const seenLines = universe.get(eventExternalId)?.get(marketKey) || new Map();
+      let offeredLines = 0;
+
+      byLine.forEach((group, lineKey) => {
+        const seen = seenLines.get(lineKey) || new Set();
+        const quotes = [...group.values()];
+        // Mercado completo: todos os resultados possíveis observados têm preço válido.
+        const complete = seen.size >= 2 && quotes.length === seen.size && [...seen].every((code) => group.has(code));
+        const margin = complete ? applyHouseMargin(quotes, houseMargin) : null;
+        if (margin) offeredLines += 1;
+
+        quotes.forEach((quote, index) => {
+          const offered = margin ? margin.values[index] : null;
+          const externalId = `${eventExternalId}|${marketKey}|${quote.code}`;
+          const row = {
+            event_id: eventRow.id,
+            market_name: marketName(marketKey, eventRow.sport_slug),
+            market_group: marketGroup(marketKey),
+            market_key: marketKey,
+            bookmaker: quote.bookmaker,
+            label: quote.label,
+            code: quote.code,
+            original_value: quote.original_value,
+            value: offered === null ? quote.original_value : offered,
+            house_margin_percent: margin ? margin.margin_percent : null,
+            calc_version: margin ? marginVersion : null,
+            original_overround: margin ? margin.original_overround : null,
+            target_overround: margin ? margin.target_overround : null,
+            offered_overround: margin ? margin.offered_overround : null,
+            quote_state: margin ? 'offered' : 'withheld',
+            status: margin ? 'open' : 'suspended',
+            sort_order: sortFor(marketKey),
+            source: 'provider',
+            external_id: externalId,
+            last_sync_at: now.toISOString(),
+            market_ref: marketRef,
+          };
+          if (quote.line !== null) row.line = quote.line;
+          if (quote.source_updated_at) row.source_updated_at = quote.source_updated_at;
+          oddRows.set(externalId, row);
+        });
+      });
+
+      if (!offeredLines && ![...byLine.values()].some((group) => group.size)) return;
+      if (offeredLines && PRIORITY_MARKETS.includes(marketKey)) offeredEvents.add(eventExternalId);
+      marketRows.set(marketRef, {
+        event_id: eventRow.id,
+        name: marketName(marketKey, eventRow.sport_slug),
+        code: marketKey,
+        market_key: marketKey,
+        market_group: marketGroup(marketKey),
+        status: offeredLines ? 'open' : 'suspended',
+        sort_order: sortFor(marketKey),
+        is_main: marketKey === 'h2h',
+        bookmaker_count: (marketBooks.get(marketRef) || new Set()).size,
+        source: 'provider',
+        external_id: marketRef,
+        last_sync_at: now.toISOString(),
       });
     });
   });
@@ -404,25 +499,61 @@ async function runSync({ db, settings, apiKey, mode, now, force }) {
   await writeInChunks(db, 'Odd', oddCreates, 'create');
   await writeInChunks(db, 'Odd', oddUpdates, 'update');
 
-  const availableIds = new Set();
-  oddsResults.forEach(({ data }) => {
-    data.forEach((event) => {
-      if ((event.bookmakers || []).length) availableIds.add(event.id);
+  // Mercados que a fonte deixou de devolver nesta execução deixam de ser
+  // oferecidos: o mercado e suas seleções passam a suspenso, sem apagar nada.
+  const consultedIds = [...consulted].map((externalId) => eventRows.get(externalId)?.id).filter(Boolean);
+  const refreshedRefs = new Set(marketRows.keys());
+  const vanishedMarketIds = [];
+  for (const ids of chunk(consultedIds, 100)) {
+    const page = await db.Market.filter({ event_id: { $in: ids } }, { limit: 500 });
+    (page.items || []).forEach((market) => {
+      if (refreshedRefs.has(market.external_id)) return;
+      if (market.status === 'suspended') return;
+      vanishedMarketIds.push(market.id);
     });
-  });
+  }
+  if (vanishedMarketIds.length) {
+    for (const ids of chunk(vanishedMarketIds, 100)) {
+      await db.Market.updateMany({ id: { $in: ids } }, { $set: { status: 'suspended' } });
+    }
+  }
+
+  // Cotações não renovadas nesta execução são substituídas: evita duplicar
+  // seleções e impede que um preço antigo volte a ser oferecido sem margem.
+  const runStartIso = now.toISOString();
+  const staleOddIds = [];
+  for (const ids of chunk(consultedIds, 100)) {
+    let staleCursor = null;
+    for (let round = 0; round < 20; round += 1) {
+      const page = await db.Odd.filter(
+        { event_id: { $in: ids }, last_sync_at: { $lt: runStartIso } },
+        { limit: 500, ...(staleCursor ? { cursor: staleCursor } : {}) },
+      );
+      (page.items || []).forEach((row) => staleOddIds.push(row.id));
+      staleCursor = page.next_cursor;
+      if (!page.has_more) break;
+    }
+  }
+  for (const ids of chunk(staleOddIds, 200)) {
+    await db.Odd.deleteMany({ id: { $in: ids } });
+  }
 
   const eventStatusUpdates = [];
   let available = 0;
   let unavailable = 0;
   eventRows.forEach((row, externalId) => {
-    const hasOdds = availableIds.has(externalId);
-    if (hasOdds) available += 1;
+    // Liga não consultada nesta execução: o estado anterior é preservado.
+    if (!consulted.has(externalId)) return;
+    const started = Date.parse(row.start_time) <= now.getTime();
+    const hasOffered = offeredEvents.has(externalId) && !started;
+    if (hasOffered) available += 1;
     else unavailable += 1;
     const payload = {
       id: row.id,
-      odds_status: hasOdds ? 'available' : row.odds_status === 'available' ? 'stale' : 'unavailable',
+      published: hasOffered,
+      odds_status: hasOffered ? 'available' : row.odds_status === 'available' ? 'stale' : 'unavailable',
     };
-    if (hasOdds) payload.odds_updated_at = now.toISOString();
+    if (hasOffered) payload.odds_updated_at = now.toISOString();
     eventStatusUpdates.push(payload);
   });
   await writeInChunks(db, 'Event', eventStatusUpdates, 'update');
@@ -433,7 +564,11 @@ async function runSync({ db, settings, apiKey, mode, now, force }) {
   let pastCursor = null;
   for (let round = 0; round < 6; round += 1) {
     const pastPage = await db.Event.filter(
-      { source: 'provider', status: { $in: ['scheduled', 'live'] }, start_time: { $lt: now.toISOString() } },
+      {
+        source: 'provider',
+        start_time: { $lt: now.toISOString() },
+        $or: [{ status: { $in: ['scheduled', 'live'] } }, { published: true }],
+      },
       { limit: 500, ...(pastCursor ? { cursor: pastCursor } : {}) },
     );
     pastEvents.push(...(pastPage.items || []));
@@ -443,7 +578,7 @@ async function runSync({ db, settings, apiKey, mode, now, force }) {
   await writeInChunks(
     db,
     'Event',
-    pastEvents.map((row) => ({ id: row.id, status: 'finished', tracking: 'finished' })),
+    pastEvents.map((row) => ({ id: row.id, status: 'finished', tracking: 'finished', published: false })),
     'update',
   );
 
@@ -486,6 +621,8 @@ async function runSync({ db, settings, apiKey, mode, now, force }) {
     bookmakers: bookmakers.size,
     available,
     unavailable,
+    published: offeredEvents.size,
+    margin_percent: houseMargin,
     today,
     usedNow,
     creditsToday,
@@ -563,8 +700,10 @@ export default async function (req) {
       `modo ${mode}`,
       `${result.events} evento(s)`,
       `${result.odds} cotação(ões)`,
+      `${result.published} publicado(s)`,
       `${result.selected.length} liga(s) consultada(s)`,
       `${result.skipped.length} adiada(s)`,
+      `margem ${result.margin_percent}%`,
       `custo observado ${result.usage.cost}`,
     ].join(' · ');
 

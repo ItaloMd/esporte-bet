@@ -12,9 +12,12 @@ export function buildEventFilter({ sportSlug, competitionId, dayRange, status, s
   if (status) filter.status = status;
   if (featured) filter.is_featured = true;
   if (dayRange) filter.start_time = { $gte: dayRange.start, $lte: dayRange.end };
-  // `from` descarta partidas que já começaram, para que listagens de "próximos
-  // jogos" nunca mostrem eventos que não estão mais por vir.
-  if (from) filter.start_time = { ...(filter.start_time || {}), $gte: from };
+  // Nenhuma listagem exibe partidas que já começaram: a comparação é feita em
+  // UTC e a exibição converte para America/Bahia.
+  filter.start_time = { ...(filter.start_time || {}), $gte: from || new Date().toISOString() };
+  // Catálogo público: apenas partidas com cotação efetivamente oferecida pelo
+  // sistema. Quem perdeu as odds ou já começou sai da listagem para apostar.
+  filter.published = true;
   const term = (search || "").trim();
   if (term) {
     filter.$or = [

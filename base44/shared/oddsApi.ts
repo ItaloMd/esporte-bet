@@ -80,6 +80,82 @@ export const FEATURED_LEAGUES = new Set([
   "boxing_boxing",
 ]);
 
+/** Mercados considerados prioritários para publicar uma partida. */
+export const PRIORITY_MARKETS = ["h2h", "totals", "spreads"];
+
+export const DEFAULT_HOUSE_MARGIN_PERCENT = 20;
+export const HOUSE_MARGIN_VERSION = "v1";
+
+/**
+ * Prioridade de catálogo: competições brasileiras primeiro.
+ * A descoberta continua dinâmica — nenhuma liga é presumida; a lista apenas
+ * define quem é consultado primeiro quando o orçamento é limitado.
+ */
+export function isBrazilianCompetition(...values) {
+  const haystack = values.filter(Boolean).join(" ").toLowerCase();
+  return /(brazil|brasil|brasileir|copa do brasil|paulista|carioca|mineiro|gaucho|baiano|pernambucano|cearense|paranaense|goiano|potiguar|alagoano|sergipano|maranhense|paraense|capixaba|brasiliense|tocantinense|piauiense|acreano|amapaense|rondoniense|amazonense|sul-mato|distrital|nordestao|verdao)/.test(
+    haystack,
+  );
+}
+
+function roundOdd(value) {
+  return Math.round(value * 100) / 100;
+}
+
+/** Soma das probabilidades implícitas de um conjunto de cotações. */
+export function overround(values) {
+  return values.reduce((total, value) => {
+    const price = Number(value);
+    return Number.isFinite(price) && price > 0 ? total + 1 / price : total;
+  }, 0);
+}
+
+/**
+ * Aplica a margem da casa a um mercado mutuamente exclusivo e exaustivo.
+ *
+ *   p_i = 1 / odd_i                  (probabilidade implícita original)
+ *   S   = Σ p_i                      (overround original)
+ *   q_i = p_i / S                    (distribuição proporcional)
+ *   a_i = q_i * (1 + margem / 100)   (probabilidade ajustada)
+ *   odd_i = 1 / a_i                  (odd oferecida)
+ *
+ * O overround-alvo é distribuído proporcionalmente entre os resultados, e não
+ * como um desconto fixo aplicado à cotação. Devolve `null` quando o conjunto
+ * está incompleto ou produz valores inválidos, para que a cotação seja retida
+ * em vez de oferecida incorreta.
+ */
+export function applyHouseMargin(selections, marginPercent) {
+  const margin = Number(marginPercent);
+  if (!Number.isFinite(margin) || margin < 0 || margin > 100) return null;
+  const prices = selections.map((selection) => Number(selection.original_value));
+  if (prices.length < 2) return null;
+  if (prices.some((price) => !Number.isFinite(price) || price <= 1)) return null;
+
+  const probabilities = prices.map((price) => 1 / price);
+  const total = probabilities.reduce((sum, value) => sum + value, 0);
+  if (!Number.isFinite(total) || total <= 0) return null;
+
+  const target = 1 + margin / 100;
+  const values = probabilities.map((probability) => {
+    const adjusted = (probability / total) * target;
+    if (!Number.isFinite(adjusted) || adjusted <= 0) return null;
+    const offered = 1 / adjusted;
+    return Number.isFinite(offered) && offered > 1 ? roundOdd(offered) : null;
+  });
+  if (values.some((value) => value === null)) return null;
+
+  const effective = overround(values);
+  if (!Number.isFinite(effective) || effective <= 1) return null;
+
+  return {
+    margin_percent: margin,
+    original_overround: total,
+    target_overround: target,
+    offered_overround: effective,
+    values,
+  };
+}
+
 export function apiBase(settings) {
   return String(settings?.base_url || DEFAULT_BASE_URL).replace(/\/+$/, "");
 }

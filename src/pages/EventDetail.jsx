@@ -11,7 +11,7 @@ import { bestBySelection, decorateOdds } from "@/lib/eventQueries";
 export default function EventDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const [state, setState] = useState({ loading: true, error: "", event: null, markets: [] });
+  const [state, setState] = useState({ loading: true, error: "", event: null, markets: [], bettable: false });
 
   useEffect(() => {
     let active = true;
@@ -25,14 +25,20 @@ export default function EventDetail() {
         ]);
         if (!active) return;
         const decorated = decorateOdds(oddsPage.items || [], event);
+        // Sem cotação publicada ou com a partida já iniciada, nenhuma seleção
+        // pode ser adicionada ao bilhete.
+        const bettable = Boolean(event.published) && Date.parse(event.start_time) > Date.now();
         const markets = (marketsPage.items || []).map((market) => ({
           ...market,
-          odds: bestBySelection(decorated.filter((odd) => odd.market_id === market.id)),
+          status: bettable ? market.status : "suspended",
+          odds: bestBySelection(decorated.filter((odd) => odd.market_id === market.id)).map((odd) =>
+            bettable ? odd : { ...odd, status: "suspended" },
+          ),
         }));
-        setState({ loading: false, error: "", event, markets });
+        setState({ loading: false, error: "", event, markets, bettable });
       } catch (error) {
         if (!active) return;
-        setState({ loading: false, error: error.message || "Evento não encontrado.", event: null, markets: [] });
+        setState({ loading: false, error: error.message || "Evento não encontrado.", event: null, markets: [], bettable: false });
       }
     };
     load();
@@ -65,6 +71,13 @@ export default function EventDetail() {
   return (
     <div className="space-y-5">
       <EventHeader event={state.event} />
+
+      {!state.bettable && (
+        <div className="card-surface border-amber-500/40 bg-amber-500/10 px-4 py-3 text-xs text-amber-300">
+          Esta partida não está disponível para novas apostas: as cotações ainda não foram
+          publicadas ou o horário de início já passou.
+        </div>
+      )}
 
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <Link

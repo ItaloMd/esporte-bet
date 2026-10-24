@@ -55,6 +55,14 @@
         "type": "string"
       }
     },
+    "house_margin_percent": {
+      "type": "number",
+      "default": 20
+    },
+    "house_margin_version": {
+      "type": "string",
+      "default": "v1"
+    },
     "max_sports_per_run": {
       "type": "number",
       "default": 10

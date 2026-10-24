@@ -32,6 +32,32 @@
     "value": {
       "type": "number"
     },
+    "original_value": {
+      "type": "number"
+    },
+    "house_margin_percent": {
+      "type": "number"
+    },
+    "calc_version": {
+      "type": "string"
+    },
+    "original_overround": {
+      "type": "number"
+    },
+    "target_overround": {
+      "type": "number"
+    },
+    "offered_overround": {
+      "type": "number"
+    },
+    "quote_state": {
+      "type": "string",
+      "enum": [
+        "offered",
+        "withheld"
+      ],
+      "default": "offered"
+    },
     "previous_value": {
       "type": "number"
     },

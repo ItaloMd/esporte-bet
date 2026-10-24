@@ -8,6 +8,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/components/ui/use-toast";
 import AdminProviderStats from "@/components/admin/AdminProviderStats";
+import AdminQuotes from "@/components/admin/AdminQuotes";
 import { logAdminAction } from "@/lib/adminAudit";
 import { formatDateTime, timeAgo } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -40,6 +41,7 @@ const DEFAULTS = {
   regions: ["eu"],
   markets: ["h2h", "spreads", "totals"],
   sports: [],
+  house_margin_percent: 20,
   max_sports_per_run: 6,
   max_bookmakers: 8,
   budget_credits: 0,
@@ -113,6 +115,11 @@ export default function AdminProvider({ actor }) {
       toast({ title: "Selecione pelo menos um mercado", variant: "destructive" });
       return;
     }
+    const margin = Number(settings.house_margin_percent);
+    if (!Number.isFinite(margin) || margin < 0 || margin > 50) {
+      toast({ title: "A margem da casa deve ficar entre 0% e 50%", variant: "destructive" });
+      return;
+    }
     setSaving(true);
     try {
       const payload = { ...settings };
@@ -130,7 +137,7 @@ export default function AdminProvider({ actor }) {
         action: "provider.settings_updated",
         targetType: "ProviderSettings",
         targetId: recordId || "novo",
-        details: `Provedor ${payload.provider} · regiões ${(payload.regions || []).join("/")} · mercados ${(payload.markets || []).join("/")} · limite diário ${payload.daily_request_limit}`,
+        details: `Provedor ${payload.provider} · regiões ${(payload.regions || []).join("/")} · mercados ${(payload.markets || []).join("/")} · margem ${payload.house_margin_percent}% · limite diário ${payload.daily_request_limit}`,
         severity: "warning",
       });
       toast({ title: "Configurações salvas" });
@@ -268,6 +275,21 @@ export default function AdminProvider({ actor }) {
             <Label htmlFor="cache_ttl">Validade mínima do cache (segundos)</Label>
             <Input id="cache_ttl" type="number" value={settings.cache_ttl_seconds} onChange={(event) => update({ cache_ttl_seconds: Number(event.target.value) })} />
           </div>
+          <div className="space-y-2">
+            <Label htmlFor="house_margin">Margem da casa (%)</Label>
+            <Input
+              id="house_margin"
+              type="number"
+              step="0.5"
+              min="0"
+              max="50"
+              value={settings.house_margin_percent ?? 20}
+              onChange={(event) => update({ house_margin_percent: Number(event.target.value) })}
+            />
+            <p className="text-[11px] text-muted-foreground">
+              Aplicada sobre as odds originais da API. Apostas já confirmadas nunca são alteradas.
+            </p>
+          </div>
         </div>
 
         <div className="grid gap-2 sm:grid-cols-2">
@@ -302,6 +324,8 @@ export default function AdminProvider({ actor }) {
           </span>
         </div>
       </section>
+
+      <AdminQuotes marginPercent={settings.house_margin_percent} />
 
       <section className="card-surface px-4 py-3">
         <h2 className="text-sm font-semibold">Diagnóstico</h2>

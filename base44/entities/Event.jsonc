@@ -68,6 +68,10 @@
       ],
       "default": "unavailable"
     },
+    "published": {
+      "type": "boolean",
+      "default": false
+    },
     "odds_updated_at": {
       "type": "string",
       "format": "date-time"
