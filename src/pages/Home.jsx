@@ -8,6 +8,7 @@ import EventGrid from "@/components/odds/EventGrid";
 import ResultRow from "@/components/odds/ResultRow";
 import SectionHeading from "@/components/common/SectionHeading";
 import PixActions from "@/components/wallet/PixActions";
+import BannerCarousel from "@/components/banners/BannerCarousel";
 import { CardListSkeleton } from "@/components/state/LoadingBlocks";
 import useEventFeed from "@/lib/useEventFeed";
 import useCompetitions from "@/lib/useCompetitions";
@@ -97,6 +98,8 @@ export default function Home() {
           </Button>
         </div>
       </section>
+
+      <BannerCarousel />
 
       <PixActions />
 
