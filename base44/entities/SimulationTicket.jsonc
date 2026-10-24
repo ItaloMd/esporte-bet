@@ -51,6 +51,19 @@
     },
     "note": {
       "type": "string"
+    },
+    "settlement_state": {
+      "type": "string",
+      "enum": [
+        "none",
+        "waiting",
+        "review",
+        "settled"
+      ],
+      "default": "none"
+    },
+    "settlement_note": {
+      "type": "string"
     }
   },
   "required": [

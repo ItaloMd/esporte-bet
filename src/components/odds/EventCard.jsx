@@ -39,7 +39,7 @@ export default function EventCard({ event, odds = [], showCompetition = true }) 
           )}
         </div>
         {event.status === "live" ? (
-          <LiveBadge minute={event.minute} />
+          <LiveBadge minute={event.minute} label={event.phase_label} />
         ) : (
           <span className="score-num shrink-0 text-lg font-semibold text-muted-foreground">
             {formatTime(event.start_time)}

@@ -10,9 +10,19 @@ import { timeAgo } from "@/lib/format";
 const LIVE_FILTER = buildEventFilter({ status: "live" });
 const REFRESH_MS = 60000;
 
+/** Momento mais recente em que a fonte atualizou algum placar desta lista. */
+function latestSourceUpdate(events) {
+  return events.reduce((latest, event) => {
+    const stamp = event.live_updated_at || event.last_sync_at;
+    if (!stamp) return latest;
+    return !latest || Date.parse(stamp) > Date.parse(latest) ? stamp : latest;
+  }, null);
+}
+
 export default function Live() {
   const feed = useEventFeed(LIVE_FILTER, { limit: 20 });
   const [lastRefresh, setLastRefresh] = React.useState(new Date().toISOString());
+  const dataAt = latestSourceUpdate(feed.events || []);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -32,7 +42,8 @@ export default function Live() {
           <div>
             <h1 className="text-xl font-semibold">Partidas ao vivo</h1>
             <p className="text-xs text-muted-foreground">
-              Atualização automática a cada 60 segundos · última consulta {timeAgo(lastRefresh)}
+              {dataAt ? `Placar atualizado ${timeAgo(dataAt)}` : "Aguardando a próxima sincronização de placares"} ·
+              tela recarregada {timeAgo(lastRefresh)}
             </p>
           </div>
         </div>

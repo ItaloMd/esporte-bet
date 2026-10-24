@@ -1,0 +1,87 @@
+{
+  "name": "ApiQuota",
+  "type": "object",
+  "properties": {
+    "provider": {
+      "type": "string",
+      "default": "api_football"
+    },
+    "day": {
+      "type": "string"
+    },
+    "used": {
+      "type": "number",
+      "default": 0
+    },
+    "limit": {
+      "type": "number",
+      "default": 100
+    },
+    "level": {
+      "type": "number",
+      "default": 0
+    },
+    "provider_limit": {
+      "type": "number"
+    },
+    "provider_remaining": {
+      "type": "number"
+    },
+    "provider_used": {
+      "type": "number"
+    },
+    "alerts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "last_status_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "last_status_code": {
+      "type": "number"
+    },
+    "last_error": {
+      "type": "string"
+    },
+    "lock_until": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "lock_owner": {
+      "type": "string"
+    },
+    "notes": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "provider",
+    "day"
+  ],
+  "rls": {
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

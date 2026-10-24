@@ -75,6 +75,15 @@
         "provider"
       ],
       "default": "demo"
+    },
+    "fixture_id": {
+      "type": "string"
+    },
+    "result_source": {
+      "type": "string"
+    },
+    "result_note": {
+      "type": "string"
     }
   },
   "required": [

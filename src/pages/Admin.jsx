@@ -1,6 +1,6 @@
 import React from "react";
 import { Link } from "react-router-dom";
-import { LayoutDashboard, Database, Gift, Images, ShieldAlert, ShieldCheck, SlidersHorizontal, Users, Wallet, Zap } from "lucide-react";
+import { Activity, LayoutDashboard, Database, Gift, Images, ShieldAlert, ShieldCheck, SlidersHorizontal, Users, Wallet, Zap } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import AdminDashboard from "@/components/admin/AdminDashboard";
@@ -10,6 +10,7 @@ import AdminCatalog from "@/components/admin/AdminCatalog";
 import AdminBanners from "@/components/admin/AdminBanners";
 import AdminSuperOdds from "@/components/admin/AdminSuperOdds";
 import AdminProvider from "@/components/admin/AdminProvider";
+import AdminFootball from "@/components/admin/AdminFootball";
 import AdminFinance from "@/components/admin/AdminFinance";
 import AdminSettings from "@/components/admin/AdminSettings";
 import AdminLogs from "@/components/admin/AdminLogs";
@@ -24,6 +25,7 @@ const TABS = [
   { value: "super-odds", label: "Super odds", icon: Zap },
   { value: "catalog", label: "Esportes e competições", icon: Database },
   { value: "provider", label: "Provedor de odds", icon: SlidersHorizontal },
+  { value: "football", label: "API-Football", icon: Activity },
   { value: "settings", label: "Identidade e textos", icon: ShieldCheck },
   { value: "logs", label: "Logs e privacidade", icon: ShieldAlert },
 ];
@@ -106,6 +108,9 @@ export default function Admin() {
         </TabsContent>
         <TabsContent value="provider" className="mt-4">
           <AdminProvider actor={user} />
+        </TabsContent>
+        <TabsContent value="football" className="mt-4">
+          <AdminFootball actor={user} />
         </TabsContent>
         <TabsContent value="settings" className="mt-4">
           <AdminSettings actor={user} />

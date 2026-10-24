@@ -55,14 +55,37 @@ export function readScore(scoreEvent, teamName, index) {
 }
 
 /**
- * Decide o resultado de uma seleção a partir do placar final da partida.
- * Devolve `null` quando não é possível decidir — a seleção permanece aberta.
+ * Fases em que o resultado não decide a aposta sozinho: suspensa, interrompida,
+ * abandonada, decisão administrativa ou W.O. Exigem revisão manual.
+ */
+export const REVIEW_PHASES = new Set(['SUSP', 'INT', 'ABD', 'AWD', 'WO']);
+
+/**
+ * Placar usado na liquidação dos mercados principais. Quando houve prorrogação
+ * ou pênaltis, vale o placar dos 90 minutos; caso contrário, o placar final.
+ */
+export function regulationScore(event) {
+  const regHome = Number(event?.reg_home_score);
+  const regAway = Number(event?.reg_away_score);
+  if (Number.isFinite(regHome) && Number.isFinite(regAway)) return { home: regHome, away: regAway };
+  return { home: Number(event?.home_score), away: Number(event?.away_score) };
+}
+
+/**
+ * Decide o resultado de uma seleção a partir do placar confirmado da partida.
+ * Devolve `null` quando não é possível decidir — a seleção permanece aberta e a
+ * partida é marcada para revisão. Nunca decide por ausência de dados.
  */
 export function settleSelection(selection, event) {
   const marketKey = selection?.market_key;
   const code = selection?.odd_code;
-  const home = Number(event?.home_score);
-  const away = Number(event?.away_score);
+
+  // Partida adiada ou cancelada: a seleção é anulada, sem placar inventado.
+  if (event?.status === 'postponed' || event?.status === 'cancelled') return 'void';
+  // Situações indefinidas ficam pendentes até decisão humana.
+  if (event?.settlement_state === 'review' || REVIEW_PHASES.has(String(event?.phase || '').toUpperCase())) return null;
+
+  const { home, away } = regulationScore(event);
   if (!code || !Number.isFinite(home) || !Number.isFinite(away)) return null;
 
   const homeSlug = slugify(event.home_team_name);
@@ -90,6 +113,7 @@ export function settleSelection(selection, event) {
     if (!parsed) return null;
     const teamSlug = parsed[1];
     const point = Number(parsed[2]);
+    // Linha fracionária não existe: empate exato é anulado (push).
     if (teamSlug === homeSlug) {
       const margin = home + point - away;
       return margin === 0 ? 'void' : margin > 0 ? 'won' : 'lost';

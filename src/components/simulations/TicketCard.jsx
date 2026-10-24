@@ -45,7 +45,9 @@ export default function TicketCard({ ticket, selections, onChanged }) {
           </div>
         </div>
         <span className="mt-2 inline-block rounded-full border border-border px-2 py-0.5 text-[10px] text-muted-foreground">
-          {STATUS_LABEL[ticket.status] || ticket.status}
+          {ticket.settlement_state === "review"
+            ? "Revisão manual necessária"
+            : STATUS_LABEL[ticket.status] || ticket.status}
         </span>
       </button>
 

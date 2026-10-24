@@ -19,10 +19,10 @@ export default function EventMeta({ event, compact = false }) {
           <StatusBadge status={event.status} />
         </>
       )}
-      {!compact && event.last_sync_at && (
+      {!compact && (event.live_updated_at || event.last_sync_at) && (
         <>
           <span aria-hidden="true">·</span>
-          <span>Atualizado {timeAgo(event.last_sync_at)}</span>
+          <span>Atualizado {timeAgo(event.live_updated_at || event.last_sync_at)}</span>
         </>
       )}
     </div>

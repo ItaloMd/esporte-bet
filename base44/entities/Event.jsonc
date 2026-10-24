@@ -121,6 +121,50 @@
     "last_sync_at": {
       "type": "string",
       "format": "date-time"
+    },
+    "fixture_id": {
+      "type": "string"
+    },
+    "phase": {
+      "type": "string"
+    },
+    "phase_label": {
+      "type": "string"
+    },
+    "reg_home_score": {
+      "type": "number"
+    },
+    "reg_away_score": {
+      "type": "number"
+    },
+    "extra_time": {
+      "type": "boolean",
+      "default": false
+    },
+    "penalties": {
+      "type": "boolean",
+      "default": false
+    },
+    "result_source": {
+      "type": "string"
+    },
+    "result_confirmed_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "live_updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "settlement_state": {
+      "type": "string",
+      "enum": [
+        "none",
+        "waiting",
+        "review",
+        "settled"
+      ],
+      "default": "none"
     }
   },
   "required": [

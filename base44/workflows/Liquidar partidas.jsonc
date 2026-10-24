@@ -1,6 +1,6 @@
 {
   "name": "Liquidar partidas",
-  "description": "A cada 10 minutos fecha as apostas das partidas iniciadas, marca-as como ao vivo e confirma o resultado pela fonte para liquidar os boletins.",
+  "description": "A cada 10 minutos sincroniza o calend\u00e1rio e os placares pela API-Football e liquida os boletins com o resultado confirmado pela fonte.",
   "trigger": {
     "condition": null,
     "config": {
@@ -22,10 +22,27 @@
     "document": {
       "dsl": "1.0.0",
       "name": "liquidar_partidas",
-      "version": "1.0",
+      "version": "1.1",
       "namespace": "base44"
     },
     "do": [
+      {
+        "sincronizar_api_football": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "syncFootball",
+            "args": {
+              "mode": "auto",
+              "trigger": "scheduled"
+            }
+          },
+          "then": "liquidar_partidas",
+          "x-base44": {
+            "title": "Sincronizar calend\u00e1rio e placares",
+            "description": "API-Football \u00b7 cache e or\u00e7amento di\u00e1rio"
+          }
+        }
+      },
       {
         "liquidar_partidas": {
           "call": "invoke_backend_function",
@@ -38,7 +55,7 @@
           "then": "end",
           "x-base44": {
             "title": "Fechar apostas e liquidar",
-            "description": "Status ao vivo + placar confirmado"
+            "description": "Somente resultado confirmado"
           }
         }
       }

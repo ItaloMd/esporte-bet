@@ -61,10 +61,13 @@ async function loadSelections(db, filter, rounds = 10) {
  * Ciclo de vida das partidas e liquidação por resultado confirmado.
  *
  * 1. Partidas iniciadas viram "ao vivo" pelo horário previsto, sem consultar odds.
- * 2. Após o início, os placares são consultados de forma controlada (uma chamada
- *    por modalidade, com intervalo mínimo por partida).
- * 3. Quando a fonte confirma o resultado final, cada seleção é liquidada uma
- *    única vez e o boletim é fechado somente quando todas as seleções têm resultado.
+ * 2. Com a API-Football ativa, os placares já chegam confirmados pelo
+ *    sincronizador (`syncFootball`) e nenhuma chamada extra é feita aqui; sem
+ *    ela, o comportamento anterior (uma consulta por modalidade) é mantido.
+ * 3. Cada seleção é liquidada uma única vez, a partir do placar confirmado.
+ *    Partidas adiadas ou canceladas anulam a seleção; situações indefinidas
+ *    ficam pendentes e marcadas para revisão manual — nunca são decididas por
+ *    ausência de dados.
  */
 export default async function (req) {
   let base44;
@@ -84,8 +87,11 @@ export default async function (req) {
     settings = settingsPage.items?.[0];
     if (!settings) return Response.json({ skipped: true, reason: 'Configuração do provedor não encontrada' });
     if (!settings.enabled) return Response.json({ skipped: true, reason: 'Integração desabilitada' });
-    if (settings.provider !== 'the_odds_api') {
-      return Response.json({ skipped: true, reason: 'Provedor ativo não é a The Odds API' });
+
+    // Com a API-Football ativa, os resultados chegam do sincronizador central.
+    const footballEnabled = Boolean(settings.football_enabled);
+    if (!footballEnabled && settings.provider !== 'the_odds_api') {
+      return Response.json({ skipped: true, reason: 'Provedor ativo não fornece placares' });
     }
     if (settings.locked_until && Date.parse(settings.locked_until) > nowMs) {
       return Response.json({ skipped: true, reason: 'Outra execução está em andamento' });
@@ -97,7 +103,7 @@ export default async function (req) {
     });
 
     const job = await db.SyncJob.create({
-      provider: settings.provider,
+      provider: footballEnabled ? 'api_football' : settings.provider,
       trigger: 'scheduled',
       job_type: 'results',
       status: 'running',
@@ -119,11 +125,16 @@ export default async function (req) {
     // 1) Fechamento e status ao vivo, definidos apenas pelo horário previsto.
     const startedIds = await markStartedEventsLive(db, nowIso);
 
-    // 2) Consulta controlada de placares das partidas em andamento.
+    // 2) Consulta controlada de placares (somente sem a API-Football).
     const pending = await loadPendingEvents(db);
     const due = pending.filter((event) => !event.next_check_at || Date.parse(event.next_check_at) <= nowMs);
 
-    const competitionIds = [...new Set(due.map((event) => event.competition_id).filter(Boolean))];
+    // Com a API-Football ativa, o futebol já recebe placar confirmado pelo
+    // sincronizador central; as demais modalidades continuam sendo consultadas
+    // na fonte de odds, para que nenhuma aposta fique sem resultado.
+    const scoreDue = footballEnabled ? due.filter((event) => event.sport_slug !== 'futebol') : due;
+
+    const competitionIds = [...new Set(scoreDue.map((event) => event.competition_id).filter(Boolean))];
     let keyByCompetition = new Map();
     if (competitionIds.length) {
       const page = await db.Competition.filter({ id: { $in: competitionIds } }, { limit: competitionIds.length });
@@ -131,7 +142,7 @@ export default async function (req) {
     }
 
     const dueByKey = new Map();
-    due.forEach((event) => {
+    scoreDue.forEach((event) => {
       const sportKey = keyByCompetition.get(event.competition_id);
       if (!sportKey) return;
       if (!dueByKey.has(sportKey)) dueByKey.set(sportKey, []);
@@ -184,6 +195,9 @@ export default async function (req) {
           odds_status: 'unavailable',
           home_score: home,
           away_score: away,
+          result_confirmed_at: nowIso,
+          result_source: settings.provider,
+          settlement_state: 'waiting',
           next_check_at: null,
         });
       });
@@ -202,33 +216,88 @@ export default async function (req) {
       await db.Event.updateMany({ id: { $in: ids }, status: 'live' }, { $set: { next_check_at: backoffAt } });
     }
 
-    // 3) Liquidação: somente seleções ainda abertas de partidas já encerradas.
+    // 3) Liquidação: seleções abertas de partidas encerradas ou não disputadas.
     const finishedEvents = await loadFinishedEvents(db);
     const finishedById = new Map(finishedEvents.map((event) => [event.id, event]));
 
+    const voidPage = await db.Event.filter(
+      { status: { $in: ['postponed', 'cancelled'] } },
+      { limit: 300, sort: '-updated_date' },
+    );
+    const voidEvents = voidPage.items || [];
+    const voidById = new Map(voidEvents.map((event) => [event.id, event]));
+
     const openSelections = [];
     for (const ids of chunkArray([...finishedById.keys()], 100)) {
-      const rows = await loadSelections(db, { event_id: { $in: ids }, status: 'open' });
-      openSelections.push(...rows);
+      openSelections.push(...(await loadSelections(db, { event_id: { $in: ids }, status: 'open' })));
+    }
+    for (const ids of chunkArray([...voidById.keys()], 100)) {
+      openSelections.push(...(await loadSelections(db, { event_id: { $in: ids }, status: 'open' })));
     }
 
     const selectionUpdates = [];
     const touchedTickets = new Set();
+    const reviewEventIds = new Set();
+    const waitingEventIds = new Set();
+    const settledEventIds = new Set();
+
     openSelections.forEach((selection) => {
-      const event = finishedById.get(selection.event_id);
+      const event = finishedById.get(selection.event_id) || voidById.get(selection.event_id);
       if (!event) return;
+
+      if (voidById.has(event.id)) {
+        touchedTickets.add(selection.ticket_id);
+        settledEventIds.add(event.id);
+        selectionUpdates.push({
+          id: selection.id,
+          status: 'void',
+          settled_at: nowIso,
+          fixture_id: event.fixture_id || '',
+          result_source: 'provider',
+          result_note: 'Partida adiada ou cancelada — seleção anulada',
+        });
+        return;
+      }
+
       const outcome = settleSelection(selection, event);
-      if (!outcome) return;
-      selectionUpdates.push({ id: selection.id, status: outcome, settled_at: nowIso });
+      if (!outcome) {
+        const hasScore =
+          Number.isFinite(Number(event.home_score)) && Number.isFinite(Number(event.away_score));
+        if (hasScore) reviewEventIds.add(event.id);
+        else waitingEventIds.add(event.id);
+        return;
+      }
+
       touchedTickets.add(selection.ticket_id);
+      settledEventIds.add(event.id);
+      selectionUpdates.push({
+        id: selection.id,
+        status: outcome,
+        settled_at: nowIso,
+        fixture_id: event.fixture_id || '',
+        result_source: event.result_source || 'provider',
+        result_note: `Placar considerado: ${event.home_score} x ${event.away_score}${event.extra_time ? ' (tempo regulamentar)' : ''}`,
+      });
     });
+
     for (const batch of chunkArray(selectionUpdates, 200)) {
       await db.SimulationSelection.bulkUpdate(batch);
+    }
+
+    for (const ids of chunkArray([...reviewEventIds], 200)) {
+      await db.Event.updateMany({ id: { $in: ids } }, { $set: { settlement_state: 'review' } });
+    }
+    for (const ids of chunkArray([...waitingEventIds], 200)) {
+      await db.Event.updateMany({ id: { $in: ids } }, { $set: { settlement_state: 'waiting' } });
+    }
+    for (const ids of chunkArray([...settledEventIds].filter((id) => !reviewEventIds.has(id)), 200)) {
+      await db.Event.updateMany({ id: { $in: ids } }, { $set: { settlement_state: 'settled' } });
     }
 
     const ticketIds = [...touchedTickets].filter(Boolean);
     let settledTickets = 0;
     let prizesPaid = 0;
+    let skippedDuplicates = 0;
     if (ticketIds.length) {
       const selectionsByTicket = new Map();
       for (const ids of chunkArray(ticketIds, 100)) {
@@ -239,17 +308,34 @@ export default async function (req) {
         });
       }
 
+      // Idempotência: um boletim já registrado não gera um segundo resultado.
+      const existingResults = await db.SimulationResult.filter(
+        { ticket_id: { $in: ticketIds } },
+        { limit: ticketIds.length },
+      );
+      const alreadySettled = new Set((existingResults.items || []).map((row) => row.ticket_id));
+
       const ticketUpdates = [];
       const results = [];
       ticketIds.forEach((ticketId) => {
         const list = selectionsByTicket.get(ticketId) || [];
         if (!list.length || list.some((selection) => selection.status === 'open')) return;
+        if (alreadySettled.has(ticketId)) {
+          skippedDuplicates += 1;
+          return;
+        }
         const status = list.some((selection) => selection.status === 'lost')
           ? 'lost'
           : list.every((selection) => selection.status === 'won')
             ? 'won'
             : 'void';
-        ticketUpdates.push({ id: ticketId, status, settled_at: nowIso });
+        ticketUpdates.push({
+          id: ticketId,
+          status,
+          settled_at: nowIso,
+          settlement_state: 'settled',
+          settlement_note: 'Liquidado após confirmação do resultado pela fonte.',
+        });
         results.push({
           ticket_id: ticketId,
           user_id: list[0].user_id,
@@ -300,10 +386,11 @@ export default async function (req) {
     const summary = [
       'liquidação',
       `${startedIds.length} iniciada(s)`,
-      `${sportKeys.length} modalidade(s) consultada(s)`,
+      footballEnabled ? `futebol pela API-Football · ${sportKeys.length} outra(s) modalidade(s)` : `${sportKeys.length} modalidade(s) consultada(s)`,
       `${finishedUpdates.length} resultado(s) confirmado(s)`,
       `${selectionUpdates.length} seleção(ões)`,
       `${settledTickets} boletim(ns)`,
+      reviewEventIds.size ? `${reviewEventIds.size} em revisão` : 'sem revisão pendente',
       `custo observado ${usage.cost}`,
     ].join(' · ');
 
@@ -343,10 +430,14 @@ export default async function (req) {
     return Response.json({
       ok: true,
       started: startedIds.length,
+      results_source: footballEnabled ? 'api_football' : settings.provider,
       sports_checked: sportKeys.length,
       results_confirmed: finishedUpdates.length,
       selections_settled: selectionUpdates.length,
       tickets_settled: settledTickets,
+      duplicates_skipped: skippedDuplicates,
+      review_events: reviewEventIds.size,
+      waiting_events: waitingEventIds.size,
       prizes_paid: prizesPaid,
       failures,
       usage,
