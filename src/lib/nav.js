@@ -1,6 +1,6 @@
 import {
   Home, CircleDot, Activity, Trophy, Dumbbell, Sparkles, Radio, BarChart3,
-  Ticket, Gift, UserRound, Settings,
+  Ticket, Gift, UserRound, Settings, Wallet,
 } from "lucide-react";
 
 export const NAV_ITEMS = [
@@ -13,6 +13,7 @@ export const NAV_ITEMS = [
   { path: "/ao-vivo", label: "Ao vivo", icon: Radio },
   { path: "/competicoes", label: "Competições", icon: BarChart3 },
   { path: "/minhas-simulacoes", label: "Minhas simulações", icon: Ticket },
+  { path: "/carteira", label: "Carteira", icon: Wallet },
   { path: "/indique-e-ganhe", label: "Indique e ganhe", icon: Gift },
   { path: "/perfil", label: "Perfil", icon: UserRound },
   { path: "/configuracoes", label: "Configurações", icon: Settings },

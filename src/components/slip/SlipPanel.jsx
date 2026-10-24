@@ -97,6 +97,8 @@ export default function SlipPanel({ onDone }) {
         })),
       );
 
+      await base44.functions.invoke("registerWager", { stake }).catch(() => null);
+
       clear();
       toast({ title: "Simulação registrada", description: "Sem valor real: os pontos são fictícios." });
       onDone?.();

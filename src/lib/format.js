@@ -71,3 +71,7 @@ export function formatOdds(value) {
 export function formatNumber(value) {
   return new Intl.NumberFormat("pt-BR").format(Number(value || 0));
 }
+
+export function formatCurrency(value) {
+  return Number(value || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}

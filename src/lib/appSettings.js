@@ -7,6 +7,13 @@ const DEFAULT_SETTINGS = {
   accent_color: "#FF2222",
   demo_mode: true,
   support_email: "",
+  deposits_enabled: true,
+  withdrawals_enabled: true,
+  min_deposit: 10,
+  min_withdrawal: 30,
+  rollover_multiplier: 1,
+  withdrawal_fee: 3,
+  dev_split_percent: 10,
 };
 
 let cached = null;

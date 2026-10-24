@@ -56,6 +56,48 @@
     },
     "affiliate_commission_rule": {
       "type": "string"
+    },
+    "deposits_enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "withdrawals_enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "min_deposit": {
+      "type": "number",
+      "default": 10
+    },
+    "min_withdrawal": {
+      "type": "number",
+      "default": 30
+    },
+    "rollover_multiplier": {
+      "type": "number",
+      "default": 1
+    },
+    "withdrawal_fee": {
+      "type": "number",
+      "default": 3
+    },
+    "dev_split_percent": {
+      "type": "number",
+      "default": 10
+    },
+    "dev_pix_key": {
+      "type": "string"
+    },
+    "dev_pix_key_type": {
+      "type": "string",
+      "default": "cpf"
+    },
+    "admin_pix_key": {
+      "type": "string"
+    },
+    "admin_pix_key_type": {
+      "type": "string",
+      "default": "cpf"
     }
   },
   "required": [

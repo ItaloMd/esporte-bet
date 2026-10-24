@@ -1,0 +1,98 @@
+{
+  "name": "Deposit",
+  "type": "object",
+  "properties": {
+    "user_id": {
+      "type": "string"
+    },
+    "external_id": {
+      "type": "string"
+    },
+    "amount": {
+      "type": "number"
+    },
+    "fee": {
+      "type": "number",
+      "default": 0
+    },
+    "net_amount": {
+      "type": "number",
+      "default": 0
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "paid",
+        "expired",
+        "cancelled"
+      ],
+      "default": "pending"
+    },
+    "pix_copia_cola": {
+      "type": "string"
+    },
+    "qr_code_base64": {
+      "type": "string"
+    },
+    "tichupay_id": {
+      "type": "string"
+    },
+    "txid": {
+      "type": "string"
+    },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "paid_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "payer_name": {
+      "type": "string"
+    },
+    "rollover_multiplier": {
+      "type": "number",
+      "default": 0
+    },
+    "rollover_generated": {
+      "type": "number",
+      "default": 0
+    }
+  },
+  "required": [
+    "user_id",
+    "external_id",
+    "amount"
+  ],
+  "rls": {
+    "read": {
+      "$or": [
+        {
+          "data.user_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

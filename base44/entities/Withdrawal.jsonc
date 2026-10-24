@@ -1,0 +1,121 @@
+{
+  "name": "Withdrawal",
+  "type": "object",
+  "properties": {
+    "user_id": {
+      "type": "string"
+    },
+    "user_email": {
+      "type": "string"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "player",
+        "admin",
+        "dev_split"
+      ],
+      "default": "player"
+    },
+    "amount": {
+      "type": "number"
+    },
+    "fee": {
+      "type": "number",
+      "default": 0
+    },
+    "net_amount": {
+      "type": "number",
+      "default": 0
+    },
+    "pix_key": {
+      "type": "string"
+    },
+    "pix_key_type": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "processing",
+        "completed",
+        "failed",
+        "rejected"
+      ],
+      "default": "pending"
+    },
+    "correlation_id": {
+      "type": "string"
+    },
+    "tichupay_id": {
+      "type": "string"
+    },
+    "gateway_txid": {
+      "type": "string"
+    },
+    "gateway_e2eid": {
+      "type": "string"
+    },
+    "failure_reason": {
+      "type": "string"
+    },
+    "note": {
+      "type": "string"
+    },
+    "parent_withdrawal_id": {
+      "type": "string"
+    },
+    "dev_split_amount": {
+      "type": "number",
+      "default": 0
+    },
+    "dev_split_status": {
+      "type": "string",
+      "enum": [
+        "none",
+        "pending",
+        "sent",
+        "failed"
+      ],
+      "default": "none"
+    },
+    "processed_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "required": [
+    "user_id",
+    "amount"
+  ],
+  "rls": {
+    "read": {
+      "$or": [
+        {
+          "data.user_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

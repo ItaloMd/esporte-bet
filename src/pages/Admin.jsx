@@ -1,6 +1,6 @@
 import React from "react";
 import { Link } from "react-router-dom";
-import { LayoutDashboard, Database, Gift, ShieldAlert, ShieldCheck, SlidersHorizontal, Users } from "lucide-react";
+import { LayoutDashboard, Database, Gift, ShieldAlert, ShieldCheck, SlidersHorizontal, Users, Wallet } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import AdminDashboard from "@/components/admin/AdminDashboard";
@@ -8,6 +8,7 @@ import AdminUsers from "@/components/admin/AdminUsers";
 import AdminAffiliates from "@/components/admin/AdminAffiliates";
 import AdminCatalog from "@/components/admin/AdminCatalog";
 import AdminProvider from "@/components/admin/AdminProvider";
+import AdminFinance from "@/components/admin/AdminFinance";
 import AdminSettings from "@/components/admin/AdminSettings";
 import AdminLogs from "@/components/admin/AdminLogs";
 import { useAuth } from "@/lib/AuthContext";
@@ -15,6 +16,7 @@ import { useAuth } from "@/lib/AuthContext";
 const TABS = [
   { value: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { value: "users", label: "Usuários", icon: Users },
+  { value: "finance", label: "Financeiro", icon: Wallet },
   { value: "affiliates", label: "Afiliados", icon: Gift },
   { value: "catalog", label: "Esportes e competições", icon: Database },
   { value: "provider", label: "Provedor de odds", icon: SlidersHorizontal },
@@ -82,6 +84,9 @@ export default function Admin() {
         </TabsContent>
         <TabsContent value="users" className="mt-4">
           <AdminUsers actor={user} />
+        </TabsContent>
+        <TabsContent value="finance" className="mt-4">
+          <AdminFinance />
         </TabsContent>
         <TabsContent value="affiliates" className="mt-4">
           <AdminAffiliates actor={user} />

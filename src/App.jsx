@@ -24,6 +24,7 @@ import MySimulations from '@/pages/MySimulations';
 import Affiliate from '@/pages/Affiliate';
 import Profile from '@/pages/Profile';
 import SettingsPage from '@/pages/SettingsPage';
+import WalletPage from '@/pages/Wallet';
 import Admin from '@/pages/Admin';
 import { Terms, Privacy } from '@/pages/Legal';
 
@@ -71,6 +72,7 @@ const AuthenticatedApp = () => {
 
         <Route element={<ProtectedRoute unauthenticatedElement={<Navigate to="/login" replace />} />}>
           <Route path="/minhas-simulacoes" element={<MySimulations />} />
+          <Route path="/carteira" element={<WalletPage />} />
           <Route path="/indique-e-ganhe" element={<Affiliate />} />
           <Route path="/perfil" element={<Profile />} />
           <Route path="/configuracoes" element={<SettingsPage />} />
