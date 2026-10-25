@@ -20,7 +20,7 @@ export default function DepositPanel({ minDeposit, enabled, profile, onCredited 
     setError("");
     setLoading(true);
     try {
-      const response = await base44.functions.invoke("elevaDeposit", {
+      const response = await base44.functions.invoke("liqfyDeposit", {
         action: "create",
         amount: Number(amount),
       });
@@ -36,7 +36,7 @@ export default function DepositPanel({ minDeposit, enabled, profile, onCredited 
     if (!deposit || deposit.status !== "pending") return undefined;
     const timer = setInterval(async () => {
       try {
-        const response = await base44.functions.invoke("elevaDeposit", {
+        const response = await base44.functions.invoke("liqfyDeposit", {
           action: "sync",
           external_id: deposit.external_id,
         });
@@ -82,9 +82,11 @@ export default function DepositPanel({ minDeposit, enabled, profile, onCredited 
         <p className="text-sm text-muted-foreground">
           Abra o app do seu banco e pague o QR Code de {formatCurrency(deposit.amount)}. A confirmação é automática.
         </p>
-        <div className="mx-auto w-48 rounded-xl bg-white p-2">
-          <img src={deposit.qr_code_base64} alt="QR Code PIX para depósito" className="h-full w-full" />
-        </div>
+        {deposit.qr_code_base64 && (
+          <div className="mx-auto w-48 rounded-xl bg-white p-2">
+            <img src={deposit.qr_code_base64} alt="QR Code PIX para depósito" className="h-full w-full" />
+          </div>
+        )}
         <div className="space-y-2">
           <Label>PIX copia e cola</Label>
           <div className="flex gap-2">

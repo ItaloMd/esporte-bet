@@ -1,12 +1,13 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.54';
 import {
+  adminVisibleBalance,
   publicMessage,
   refundWithdrawal,
   round2,
   WITHDRAWAL_RETENTION_PERCENT,
   withdrawalSendAmount,
 } from '../../shared/payments.ts';
-import { createPixCashout } from '../../shared/elevaPay.ts';
+import { createPixWithdrawal, fromCents, pixKeyType, toCents, withdrawalStatus } from '../../shared/liqfy.ts';
 
 const FIELDS = [
   'min_deposit',
@@ -44,10 +45,21 @@ function countOf(result) {
 }
 
 /** Envia o PIX do saque pelo gateway, devolvendo o corpo já validado. */
-async function sendWithdrawal(amount, pixKey) {
-  const result = await createPixCashout({ amount, pix_key: pixKey });
-  const payload = result.data?.withdrawal || {};
-  if (!result.ok || result.data?.success === false || !payload.id) {
+async function sendWithdrawal(amount, pixKey, keyType, idempotencyKey) {
+  const type = pixKeyType(keyType);
+  const result = await createPixWithdrawal(
+    {
+      type: 'PIX',
+      amount: toCents(amount),
+      currency: 'BRL',
+      pixKey,
+      ...(type ? { pixKeyType: type } : {}),
+    },
+    idempotencyKey,
+  );
+
+  const payload = result.data || {};
+  if (!result.ok || !payload.id) {
     return { ok: false, reason: publicMessage(result.data, 'Falha no envio do PIX pelo gateway.') };
   }
   return { ok: true, payload };
@@ -71,19 +83,32 @@ export default async function (req) {
 
     if (action === 'overview') {
       const monthStart = startOfMonthIso();
-      const [paidDeposits, sentWithdrawals, pendingWithdrawals, deposits, withdrawals] = await Promise.all([
-        service.Deposit.aggregate({ query: { status: 'paid', paid_at: { $gte: monthStart } }, sum: ['amount'] }),
-        service.Withdrawal.aggregate({
-          query: { created_date: { $gte: monthStart }, status: { $in: ['completed', 'processing'] } },
-          sum: ['amount'],
-        }),
-        service.Withdrawal.aggregate({ query: { status: 'pending' }, sum: ['amount'] }),
-        service.Deposit.filter({}, { sort: '-created_date', limit: 25 }),
-        service.Withdrawal.filter({}, { sort: '-created_date', limit: 25 }),
-      ]);
+      const [paidDeposits, sentWithdrawals, pendingWithdrawals, deposits, withdrawals, wallets, users] =
+        await Promise.all([
+          service.Deposit.aggregate({ query: { status: 'paid', paid_at: { $gte: monthStart } }, sum: ['amount'] }),
+          service.Withdrawal.aggregate({
+            query: { created_date: { $gte: monthStart }, status: { $in: ['completed', 'processing'] } },
+            sum: ['amount'],
+          }),
+          service.Withdrawal.aggregate({ query: { status: 'pending' }, sum: ['amount'] }),
+          service.Deposit.filter({}, { sort: '-created_date', limit: 25 }),
+          service.Withdrawal.filter({}, { sort: '-created_date', limit: 25 }),
+          service.Wallet.filter({}, { sort: '-balance', limit: 50 }),
+          service.User.list(),
+        ]);
 
       const monthDeposits = sumOf(paidDeposits);
       const monthWithdrawals = sumOf(sentWithdrawals);
+
+      // O painel exibe o saldo do jogador 5% menor; a carteira não é alterada.
+      const emailById = new Map((users || []).map((item) => [item.id, item.email]));
+      const players = (wallets.items || []).map((wallet) => ({
+        user_id: wallet.user_id,
+        email: emailById.get(wallet.user_id) || '',
+        visible_balance: adminVisibleBalance(wallet.balance),
+        locked_balance: round2(wallet.locked_balance),
+      }));
+      const playersTotal = round2(players.reduce((total, player) => total + player.visible_balance, 0));
 
       return Response.json({
         settings: pickSettings(settings),
@@ -95,6 +120,8 @@ export default async function (req) {
           pending_withdrawals: sumOf(pendingWithdrawals),
           pending_count: countOf(pendingWithdrawals),
         },
+        players,
+        players_total: playersTotal,
         deposits: deposits.items || [],
         withdrawals: withdrawals.items || [],
       });
@@ -129,22 +156,27 @@ export default async function (req) {
         return Response.json({ status: 'rejected' });
       }
 
-      // Envia apenas o líquido (bruto menos a retenção); a plataforma
-      // contabiliza o valor bruto integral como saída.
+      // Envia apenas o líquido (bruto menos a retenção total de 10%); a
+      // plataforma contabiliza o valor bruto integral como saída.
       const sendAmount = withdrawalSendAmount(amount);
-      const sent = await sendWithdrawal(sendAmount, withdrawal.pix_key);
+      const sent = await sendWithdrawal(
+        sendAmount,
+        withdrawal.pix_key,
+        withdrawal.pix_key_type,
+        withdrawal.correlation_id || `wd_${withdrawal.id}`,
+      );
       if (!sent.ok) {
         await service.Withdrawal.update(id, { failure_reason: sent.reason });
         return Response.json({ error: sent.reason, status: 'pending' }, { status: 502 });
       }
 
       const payload = sent.payload;
-      const finalStatus = ['paid', 'completed'].includes(payload.status) ? 'completed' : 'processing';
+      const finalStatus = withdrawalStatus(payload.status);
       await service.Withdrawal.update(id, {
         status: finalStatus,
-        sent_amount: round2(payload.amount ?? sendAmount),
-        fee: round2(payload.fee),
-        net_amount: round2(payload.amount ?? sendAmount),
+        sent_amount: round2(payload.amount === undefined ? sendAmount : fromCents(payload.amount)),
+        fee: round2(payload.fee === undefined ? 0 : fromCents(payload.fee)),
+        net_amount: round2(payload.netAmount === undefined ? sendAmount : fromCents(payload.netAmount)),
         gateway_id: String(payload.id),
         processed_at: new Date().toISOString(),
         failure_reason: null,
@@ -161,7 +193,7 @@ export default async function (req) {
         }
       }
 
-      return Response.json({ status: finalStatus, fee: round2(payload.fee) });
+      return Response.json({ status: finalStatus, fee: round2(payload.fee === undefined ? 0 : fromCents(payload.fee)) });
     }
 
     if (action === 'withdraw_cash') {
@@ -180,26 +212,28 @@ export default async function (req) {
       }
 
       const sendAmount = withdrawalSendAmount(amount);
-      const sent = await sendWithdrawal(sendAmount, adminKey);
+      const correlationId = `cash_${crypto.randomUUID()}`;
+      const sent = await sendWithdrawal(sendAmount, adminKey, adminKeyType, correlationId);
       if (!sent.ok) {
         return Response.json({ error: sent.reason }, { status: 502 });
       }
 
       const payload = sent.payload;
+      const gatewayFeeValue = round2(payload.fee === undefined ? 0 : fromCents(payload.fee));
       const created = await service.Withdrawal.create({
         user_id: user.id,
         user_email: user.email,
         kind: 'admin',
         amount,
-        sent_amount: round2(payload.amount ?? sendAmount),
-        fee: round2(payload.fee),
-        net_amount: round2(payload.amount ?? sendAmount),
+        sent_amount: round2(payload.amount === undefined ? sendAmount : fromCents(payload.amount)),
+        fee: gatewayFeeValue,
+        net_amount: round2(payload.netAmount === undefined ? sendAmount : fromCents(payload.netAmount)),
         pix_key: adminKey,
         pix_key_type: adminKeyType,
-        status: ['paid', 'completed'].includes(payload.status) ? 'completed' : 'processing',
-        correlation_id: `cash_${crypto.randomUUID()}`,
+        status: withdrawalStatus(payload.status),
+        correlation_id: correlationId,
         gateway_id: String(payload.id),
-        note: `Retenção de ${WITHDRAWAL_RETENTION_PERCENT}% (R$ ${round2(amount - sendAmount).toFixed(2)}). Taxa informada pelo gateway: R$ ${round2(Number(payload.fee ?? 0)).toFixed(2)}.`,
+        note: `Retenção total de ${WITHDRAWAL_RETENTION_PERCENT}% (R$ ${round2(amount - sendAmount).toFixed(2)}), incluindo a taxa de R$ ${gatewayFeeValue.toFixed(2)} cobrada pelo gateway.`,
         processed_at: new Date().toISOString(),
       });
 

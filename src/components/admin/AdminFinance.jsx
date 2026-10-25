@@ -47,7 +47,15 @@ function Stat({ label, value, hint, highlight }) {
 }
 
 export default function AdminFinance() {
-  const [overview, setOverview] = useState({ loading: true, cash: null, cashError: "", deposits: [], withdrawals: [] });
+  const [overview, setOverview] = useState({
+    loading: true,
+    cash: null,
+    cashError: "",
+    deposits: [],
+    withdrawals: [],
+    players: [],
+    playersTotal: 0,
+  });
   const [settings, setSettings] = useState(null);
   const [saving, setSaving] = useState(false);
   const [cashAmount, setCashAmount] = useState("");
@@ -64,6 +72,8 @@ export default function AdminFinance() {
       cashError: data.cash_error || "",
       deposits: data.deposits || [],
       withdrawals: data.withdrawals || [],
+      players: data.players || [],
+      playersTotal: data.players_total || 0,
     });
   }, []);
 
@@ -129,7 +139,7 @@ export default function AdminFinance() {
       <section className="card-surface space-y-3 p-4">
         <div className="flex items-center justify-between gap-2">
           <h2 className="flex items-center gap-2 text-sm font-semibold">
-            <Banknote className="h-4 w-4 text-primary" aria-hidden="true" /> Caixa do mês (Eleva Payments)
+            <Banknote className="h-4 w-4 text-primary" aria-hidden="true" /> Caixa do mês
           </h2>
           <Button variant="outline" size="sm" onClick={() => load()} disabled={overview.loading}>
             <RefreshCw className="mr-1.5 h-3.5 w-3.5" /> Atualizar
@@ -158,11 +168,38 @@ export default function AdminFinance() {
         )}
       </section>
 
+      <section className="card-surface space-y-2 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-sm font-semibold">Saldos dos jogadores</h2>
+          <p className="score-num text-sm font-semibold">{formatCurrency(overview.playersTotal)}</p>
+        </div>
+        <p className="text-[11px] text-muted-foreground">
+          O jogador recebe o valor integral do depósito; neste painel o saldo de cada carteira aparece 5% menor.
+        </p>
+        {overview.players.length ? (
+          <div className="space-y-1.5">
+            {overview.players.map((item) => (
+              <div key={item.user_id} className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2 text-xs">
+                <div className="min-w-0">
+                  <p className="truncate font-medium">{item.email || item.user_id}</p>
+                  {item.locked_balance > 0 && (
+                    <p className="text-muted-foreground">reservado em saques {formatCurrency(item.locked_balance)}</p>
+                  )}
+                </div>
+                <p className="score-num font-semibold">{formatCurrency(item.visible_balance)}</p>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground">Nenhuma carteira registrada.</p>
+        )}
+      </section>
+
       <section className="card-surface space-y-3 p-4">
         <h2 className="text-sm font-semibold">Sacar caixa</h2>
         <p className="text-xs text-muted-foreground">
-          Retenção de 10% sobre o valor solicitado: a Eleva Payments envia 90% e a plataforma registra a saída
-          pelo valor integral. O gateway ainda debita a própria taxa de envio, informada na resposta de cada saque.
+          Retenção total de 10% sobre o valor solicitado: o gateway envia 90% para a chave de destino e cobra 3,5%
+          pela transferência; a plataforma registra a saída pelo valor integral e fica com os 6,5% restantes.
         </p>
         <div className="max-w-xs space-y-2">
           <Label htmlFor="cash-amount">Valor do saque</Label>

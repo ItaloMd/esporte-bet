@@ -163,7 +163,7 @@ export default function Wallet() {
         <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
         <p>
           Depósitos entram no seu saldo pelo valor cheio. Cada simulação confirmada conta como aposta para o rollover.
-          A taxa do saque e o envio do PIX são processados pela Eleva Payments.
+          O envio do PIX e as taxas de depósito e saque são processados pelo gateway de pagamentos.
         </p>
       </div>
 

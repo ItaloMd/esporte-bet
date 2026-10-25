@@ -1,14 +1,25 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.54';
-import { creditPaidDeposit, publicMessage, round2 } from '../../shared/payments.ts';
-import { createPixCharge, depositStatus, getPayment } from '../../shared/elevaPay.ts';
+import { creditPaidDeposit, gatewayFee, publicMessage, round2 } from '../../shared/payments.ts';
+import { createPixCharge, depositStatus, fromCents, getCharge, toCents } from '../../shared/liqfy.ts';
 
 /**
- * Depósitos PIX pela Eleva Payments.
+ * Depósitos PIX pela Liqfy.
  *
- * `create` gera a cobrança e guarda o QR Code; `sync` consulta a cobrança direto
- * no gateway, como reforço do webhook. O valor creditado é sempre o bruto: a
- * taxa do gateway é custo da plataforma.
+ * `create` gera a cobrança e guarda o BR Code/QR Code; `sync` consulta a
+ * cobrança direto no gateway, como reforço do webhook. O valor creditado ao
+ * jogador é sempre o bruto: a taxa do gateway é custo da plataforma.
  */
+
+/** O gateway pode devolver a imagem do QR como URL ou como PNG em base64. */
+function qrImage(pix) {
+  const url = String(pix?.qr_code_url || '').trim();
+  if (url) return url;
+  const encoded = String(pix?.qr_code_base64 || '').trim();
+  if (!encoded) return '';
+  if (encoded.startsWith('data:') || encoded.startsWith('http')) return encoded;
+  return `data:image/png;base64,${encoded}`;
+}
+
 export default async function (req) {
   try {
     const base44 = createClientFromRequest(req);
@@ -33,17 +44,15 @@ export default async function (req) {
       if (deposit.status === 'paid') return Response.json({ status: 'paid', deposit });
       if (!deposit.gateway_id) return Response.json({ status: deposit.status, deposit });
 
-      const remote = await getPayment(deposit.gateway_id);
-      const remoteData = remote.data?.data || {};
-      const status = depositStatus(remoteData.status);
+      const remote = await getCharge(deposit.gateway_id);
+      const charge = remote.data || {};
+      const status = depositStatus(charge.status);
 
       if (status === 'paid') {
         const credited = await creditPaidDeposit(service, deposit, {
-          amount: remoteData.amount,
-          fee: remoteData.fee,
-          net_amount: remoteData.amount_net,
-          paid_at: remoteData.updated_at,
-          payer_name: remoteData.payer?.name,
+          amount: charge.amount === undefined ? undefined : fromCents(charge.amount),
+          payer_name: charge.customer?.name,
+          gateway_id: String(charge.id || deposit.gateway_id),
         });
         return Response.json({ status: 'paid', deposit: credited });
       }
@@ -87,35 +96,41 @@ export default async function (req) {
     const payerName = String(profile?.full_name || user.full_name || 'Cliente').slice(0, 255);
     const externalId = `dep_${user.id.slice(-8)}_${crypto.randomUUID()}`;
 
-    const created = await createPixCharge({
-      amount,
-      payer_name: payerName,
-      payer_email: user.email,
-      payer_cpf: cpf,
-      description: `Depósito ${settings.brand_name || 'Arena Sim'} · ${externalId}`,
-      settlement: 'brl',
-    });
+    const created = await createPixCharge(
+      {
+        amount: toCents(amount),
+        currency: 'BRL',
+        payment_method: 'pix',
+        description: `Depósito ${settings.brand_name || 'Arena Sim'} · ${externalId}`,
+        customer: { name: payerName, document: cpf, email: user.email },
+        metadata: { external_id: externalId, user_id: user.id },
+      },
+      externalId,
+    );
 
-    const charge = created.data?.data;
-    if (!created.ok || !charge) {
+    const charge = created.data || {};
+    if (!created.ok || !charge.id) {
       return Response.json(
         { error: publicMessage(created.data, 'Não foi possível gerar o PIX agora. Tente novamente.') },
         { status: 502 },
       );
     }
 
-    const gross = round2(charge.amount ?? amount);
+    const gross = fromCents(charge.amount ?? toCents(amount));
+    const pix = charge.pix || {};
+    const fee = gatewayFee(gross);
+
     const deposit = await service.Deposit.create({
       user_id: user.id,
       external_id: externalId,
       amount: gross,
-      fee: round2(charge.fee),
-      net_amount: round2(charge.amount_net),
+      fee,
+      net_amount: round2(gross - fee),
       status: 'pending',
-      pix_copia_cola: charge.qr_code || charge.pix_code,
-      qr_code_base64: charge.qr_code_base64,
-      gateway_id: String(charge.transaction_uuid || ''),
-      expires_at: charge.expires_at,
+      pix_copia_cola: pix.br_code || '',
+      qr_code_base64: qrImage(pix),
+      gateway_id: String(charge.id),
+      expires_at: pix.expires_at,
       payer_name: payerName,
       rollover_multiplier: rolloverMultiplier,
       rollover_generated: round2(gross * rolloverMultiplier),
