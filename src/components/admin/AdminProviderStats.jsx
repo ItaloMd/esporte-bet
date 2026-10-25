@@ -228,9 +228,10 @@ export default function AdminProviderStats({ actor }) {
         <div className="rounded-lg border border-border px-3 py-2.5 text-[11px] text-muted-foreground">
           <p className="font-medium text-foreground">Como o orçamento é usado</p>
           <p className="mt-1">
-            Cada coleta consome uma chamada por dia consultado e fica válida por uma hora. Dez chamadas por execução
-            ficam reservadas para a leitura de placares ao vivo; quando o consumo passa de 80%, as cotações são
-            suspensas antes dos placares.
+            Cada coleta consome uma chamada por página e fica válida por uma hora. O plano atual libera até três
+            páginas por data, o que cobre cerca de 30 partidas por dia. Dez chamadas por execução ficam reservadas
+            para a leitura de placares ao vivo; quando o consumo passa de 80%, as cotações são suspensas antes dos
+            placares.
           </p>
           {settings?.skipped_reason ? <p className="mt-1 text-amber-400">{settings.skipped_reason}</p> : null}
         </div>

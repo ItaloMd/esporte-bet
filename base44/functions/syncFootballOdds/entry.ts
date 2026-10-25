@@ -1,7 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.54';
 import { secrets } from 'base44:runtime';
 import { FOOTBALL_TIMEZONE, footballApiBase } from '../../shared/apiFootball.ts';
-import { fetchOddsByDate, mapOddsEntry, pickBookmaker } from '../../shared/apiFootballOdds.ts';
+import { MAX_ODDS_PAGES, fetchOddsByDate, mapOddsEntry, pageLimitReached, pickBookmaker } from '../../shared/apiFootballOdds.ts';
 import { writeQuotes } from '../../shared/oddsWriter.ts';
 import {
   DEFAULT_DAILY_LIMIT,
@@ -117,57 +117,71 @@ export default async function (req) {
     const calls = [];
     const entries = [];
     const quotaPatch = {};
+    let pagesLimited = false;
 
     for (const date of due) {
-      if (!canSpend(used, limit, RESERVE_CALLS, 1)) {
-        failures.push(`orçamento reservado para placares: ${used}/${limit}`);
-        break;
-      }
-      try {
-        const result = await fetchOddsByDate(apiKey, base, date);
-        const charged = await chargeQuota(db, {
-          record: quotaRecord,
-          day,
-          limit,
-          cost: 1,
-          purpose: 'odds',
-          endpoint: '/odds',
-          reserve: policy.reserve,
-        });
-        quotaRecord = charged.record || quotaRecord;
-        used = charged.used;
-        if (result.quota?.limit !== null && result.quota?.limit !== undefined) quotaPatch.provider_limit = result.quota.limit;
-        if (result.quota?.remaining !== null && result.quota?.remaining !== undefined) {
-          quotaPatch.provider_remaining = result.quota.remaining;
+      const dateEntries = [];
+      const pages = [];
+      let exhausted = false;
+
+      for (let page = 1; page <= MAX_ODDS_PAGES; page += 1) {
+        if (!canSpend(used, limit, RESERVE_CALLS, 1)) {
+          failures.push(`orçamento reservado para placares: ${used}/${limit}`);
+          exhausted = true;
+          break;
         }
-        if (result.quota?.used !== null && result.quota?.used !== undefined) quotaPatch.provider_used = result.quota.used;
+        try {
+          const result = await fetchOddsByDate(apiKey, base, date, page);
+          const charged = await chargeQuota(db, {
+            record: quotaRecord,
+            day,
+            limit,
+            cost: 1,
+            purpose: 'odds',
+            endpoint: '/odds',
+            reserve: policy.reserve,
+          });
+          quotaRecord = charged.record || quotaRecord;
+          used = charged.used;
+          if (result.quota?.limit !== null && result.quota?.limit !== undefined) quotaPatch.provider_limit = result.quota.limit;
+          if (result.quota?.remaining !== null && result.quota?.remaining !== undefined) {
+            quotaPatch.provider_remaining = result.quota.remaining;
+          }
+          if (result.quota?.used !== null && result.quota?.used !== undefined) quotaPatch.provider_used = result.quota.used;
 
-        const list = Array.isArray(result.data?.response) ? result.data.response : [];
-        list.forEach((entry) => entries.push(entry));
-        calls.push({ date, records: list.length });
-        if (result.errors.length) failures.push(`odds ${date}: ${result.errors.join(' | ')}`);
+          const list = Array.isArray(result.data?.response) ? result.data.response : [];
+          dateEntries.push(...list);
+          pages.push({ page, records: list.length });
 
-        await writeCache(db, {
-          key: `odds:date:${date}`,
-          endpoint: '/odds',
-          params: `date=${date}`,
-          ttlSeconds: ODDS_REFRESH_SECONDS,
-          records: list.length,
-          note: result.errors.length
-            ? `Sem cotações: ${result.errors.join(' | ')}`.slice(0, 200)
-            : `${list.length} partida(s) com cotações`,
-        });
-      } catch (error) {
-        failures.push(`odds ${date}: ${String(error?.message || error)}`);
-        await writeCache(db, {
-          key: `odds:date:${date}`,
-          endpoint: '/odds',
-          params: `date=${date}`,
-          ttlSeconds: ODDS_REFRESH_SECONDS,
-          records: 0,
-          note: 'Falha na coleta; nova tentativa após a validade do cache',
-        }).catch(() => null);
+          if (result.errors.length) {
+            if (pageLimitReached(result.errors)) pagesLimited = true;
+            else failures.push(`odds ${date} p${page}: ${result.errors.join(' | ')}`);
+            break;
+          }
+          if (!list.length) break;
+          const totalPages = Number(result.data?.paging?.total);
+          if (Number.isFinite(totalPages) && totalPages > 0 && page >= totalPages) break;
+        } catch (error) {
+          failures.push(`odds ${date} p${page}: ${String(error?.message || error)}`);
+          break;
+        }
       }
+
+      entries.push(...dateEntries);
+      pages.forEach((row) => calls.push({ date, page: row.page, records: row.records }));
+
+      await writeCache(db, {
+        key: `odds:date:${date}`,
+        endpoint: '/odds',
+        params: `date=${date}`,
+        ttlSeconds: ODDS_REFRESH_SECONDS,
+        records: dateEntries.length,
+        note: exhausted && !pages.length
+          ? 'Sem orçamento disponível nesta execução'
+          : `${dateEntries.length} partida(s) com cotações em ${pages.length} página(s)${
+              pagesLimited ? ' · limite de páginas do plano' : ''
+            }`,
+      }).catch(() => null);
     }
 
     // Somente partidas já conhecidas e que ainda não começaram recebem cotação.
@@ -229,12 +243,12 @@ export default async function (req) {
     for (const call of calls) {
       await db.ApiUsageLog.create({
         provider: 'api_football',
-        endpoint: `/odds?date=${call.date}`,
+        endpoint: `/odds?date=${call.date}&page=${call.page}`,
         status_code: 200,
         records_returned: call.records,
         cache_hit: false,
         credits_used: 1,
-        params: 'bets=1,4,5',
+        params: `date=${call.date} · page=${call.page}`,
         note: summary.slice(0, 240),
         error_message: failures.length ? failures.join(' | ').slice(0, 240) : '',
       });
@@ -250,6 +264,7 @@ export default async function (req) {
       markets: written.markets,
       published: written.published,
       quota: { used, limit, percent: quotaPercent(used, limit), level: quotaLevel(used, limit) },
+      pages_limited: pagesLimited,
       failures,
       summary,
     });

@@ -12,10 +12,12 @@ import { apiFootballFetch, FOOTBALL_TIMEZONE } from './apiFootball.ts';
 import { selectionCode, selectionLabel } from './oddsApi.ts';
 
 /**
- * Mercados solicitados na coleta (identificadores oficiais de `bets`):
- * 1 = Match Winner · 4 = Asian Handicap · 5 = Goals Over/Under.
+ * Páginas consultadas por data. A fonte entrega as cotações paginadas (10
+ * partidas por página) e o plano gratuito aceita no máximo 3 páginas por data,
+ * o que cobre até 30 partidas por dia. A coleta para assim que a fonte recusa
+ * uma página, então planos maiores não são prejudicados.
  */
-export const ODDS_BET_IDS = '1,4,5';
+export const MAX_ODDS_PAGES = 3;
 
 /** Casas preferidas como referência de preço, quando presentes na resposta. */
 export const BOOKMAKER_PREFERENCE = [
@@ -31,14 +33,20 @@ export const BOOKMAKER_PREFERENCE = [
   'Unibet',
 ];
 
-/** Cotações de uma data inteira em uma única chamada. */
-export function fetchOddsByDate(apiKey, base, date) {
-  return apiFootballFetch(
-    apiKey,
-    '/odds',
-    { date, timezone: FOOTBALL_TIMEZONE, bet: ODDS_BET_IDS },
-    { base, timeoutMs: 25000 },
-  );
+/**
+ * Cotações de uma página da data. Sem filtro de mercado: uma única consulta já
+ * traz todos os mercados disponíveis, então a mesma chamada serve vencedor da
+ * partida, gols acima/abaixo e handicap asiático.
+ */
+export function fetchOddsByDate(apiKey, base, date, page = 1) {
+  const params = { date, timezone: FOOTBALL_TIMEZONE };
+  if (page > 1) params.page = page;
+  return apiFootballFetch(apiKey, '/odds', params, { base, timeoutMs: 25000 });
+}
+
+/** Erros que indicam que o plano atual não libera mais páginas desta data. */
+export function pageLimitReached(errors = []) {
+  return errors.some((message) => /page/i.test(String(message)));
 }
 
 /** Casa de referência: a preferida que tiver mercados; senão a mais completa. */
