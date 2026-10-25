@@ -27,6 +27,7 @@ import {
 } from '../../shared/footballQuota.ts';
 import { localDateString, slugify } from '../../shared/oddsApi.ts';
 import { chunkArray } from '../../shared/matchLifecycle.ts';
+import { indexByFixtureId, numberOr, windowDates } from '../../shared/footballSync.ts';
 
 const LOCK_MS = 4 * 60 * 1000;
 const MAX_LIVE_PAGES = 2;
@@ -34,11 +35,6 @@ const CREATE_AHEAD_MS = 8 * 24 * 60 * 60 * 1000;
 const CREATE_BEHIND_MS = 60 * 60 * 1000;
 const MATCH_TOLERANCE_MS = 36 * 60 * 60 * 1000;
 const MAX_CALENDAR_DAYS = 7;
-
-function numberOr(value, fallback) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
 
 /** O plano tem limite por minuto além da cota diária: nesse caso a execução para. */
 function isRateLimit(message) {
@@ -66,15 +62,6 @@ function secondsUntilEndOfDay(now) {
 
 function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/** Próximos `days` dias no calendário brasileiro, começando hoje. */
-function windowDates(now, days) {
-  const list = [];
-  for (let index = 0; index < days; index += 1) {
-    list.push(localDateString(new Date(now.getTime() + index * 86400000), FOOTBALL_TIMEZONE));
-  }
-  return list;
 }
 
 function eventKey(homeName, awayName) {
@@ -170,16 +157,6 @@ function buildCreate(fixture, nowIso, competitionId) {
     ...fixtureFields(fixture, nowIso),
     settlement_state: settlementStateFor(fixture, null) || 'none',
   };
-}
-
-/** Índice por `fixture_id` para as partidas já conhecidas. */
-async function indexByFixtureId(db, fixtureIds) {
-  const index = new Map();
-  for (const ids of chunkArray(fixtureIds, 100)) {
-    const page = await db.Event.filter({ fixture_id: { $in: ids } }, { limit: ids.length });
-    (page.items || []).forEach((row) => index.set(row.fixture_id, row));
-  }
-  return index;
 }
 
 /** Candidatos na mesma janela de horário, para casar partidas por equipes. */

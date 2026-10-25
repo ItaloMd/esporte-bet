@@ -54,27 +54,25 @@ export default function AdminProviderUsage() {
     Promise.all([
       base44.entities.ProviderSettings.list({ limit: 1 }),
       base44.entities.ApiQuota.filter({ provider: "api_football", day }, { limit: 1 }),
-      base44.entities.ApiCache.count({ provider: "api_football" }),
-      base44.entities.ApiUsageLog.count({ provider: "api_football", created_date: { $gte: since } }),
-      base44.entities.ApiUsageLog.count({ provider: "the_odds_api", created_date: { $gte: since } }),
-      base44.entities.SyncJob.filter({ provider: "api_football" }, { sort: "-created_date", limit: 2 }),
-      base44.entities.SyncJob.filter({ provider: "the_odds_api" }, { sort: "-created_date", limit: 2 }),
-      base44.entities.ApiUsageLog.filter(
-        { provider: "api_football", status_code: { $gte: 400 } },
-        { sort: "-created_date", limit: 2 },
-      ),
+      base44.entities.ApiCache.filter({ provider: "api_football" }, { sort: "-fetched_at", limit: 20 }),
+      base44.entities.ApiUsageLog.filter({ provider: "api_football" }, { sort: "-created_date", limit: 40 }),
+      base44.entities.SyncJob.filter({ provider: "api_football" }, { sort: "-created_date", limit: 8 }),
+      base44.entities.Event.count({ source: "provider", odds_status: "available" }),
+      base44.entities.Odd.count({ quote_state: "offered" }),
+      base44.entities.Market.count({ status: "open" }),
     ])
-      .then(([settingsPage, quotaPage, cacheRows, footballCalls, oddsCalls, footballJobs, oddsJobs, footballErrors]) => {
+      .then(([settingsPage, quotaPage, cachePage, logPage, jobPage, eventsWithOdds, offeredOdds, openMarkets]) => {
         if (!active) return;
         setState({
           settings: settingsPage.items?.[0] || {},
           quota: quotaPage.items?.[0] || null,
-          cacheRows,
-          footballCalls,
-          oddsCalls,
-          footballJobs: footballJobs.items || [],
-          oddsJobs: oddsJobs.items || [],
-          footballErrors: footballErrors.items || [],
+          cache: cachePage.items || [],
+          logs: logPage.items || [],
+          jobs: jobPage.items || [],
+          eventsWithOdds,
+          offeredOdds,
+          openMarkets,
+          since,
         });
       })
       .catch(() => active && setFailed(true));
@@ -99,9 +97,18 @@ export default function AdminProviderUsage() {
   const limit = Number(settings.football_daily_limit || 100);
   const percent = limit > 0 ? Math.round((used / limit) * 1000) / 10 : 0;
   const level = Number(quota?.level || 0);
-  const lastFootball = state.footballJobs[0] || null;
-  const lastOdds = state.oddsJobs[0] || null;
-  const footballError = settings.football_last_error || state.footballErrors[0]?.endpoint || "";
+
+  const dataCache = state.cache.filter((row) => String(row.key || "").startsWith("fixtures:"));
+  const oddsCache = state.cache.filter((row) => String(row.key || "").startsWith("odds:date:"));
+  const oddsJob = state.jobs.find((job) => job.job_type === "odds") || null;
+  const dataJob = state.jobs.find((job) => job.job_type === "results") || null;
+  const callsToday = state.logs.filter((row) => Date.parse(row.created_date) >= Date.parse(state.since));
+  const oddsCallsToday = callsToday.filter((row) => String(row.endpoint || "").includes("/odds"));
+  const nextOdds = oddsCache
+    .map((row) => Date.parse(row.expires_at))
+    .filter(Number.isFinite)
+    .sort((a, b) => a - b)[0];
+  const error = settings.football_last_error || state.logs.find((row) => row.error_message)?.error_message || "";
 
   return (
     <div className="grid gap-3 lg:grid-cols-2">
@@ -110,7 +117,7 @@ export default function AdminProviderUsage() {
           <div>
             <h3 className="flex items-center gap-1.5 text-sm font-semibold">
               <Radio className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
-              API-Football · dados de jogos
+              API-Football · jogos e placares
             </h3>
             <p className="mt-0.5 text-[11px] text-muted-foreground">
               Calendário, placares e resultados oficiais.{" "}
@@ -135,15 +142,15 @@ export default function AdminProviderUsage() {
           />
           <Metric
             label="Chamadas hoje"
-            value={formatNumber(state.footballCalls)}
-            hint={`${formatNumber(state.cacheRows)} resposta(s) em cache`}
+            value={formatNumber(callsToday.length)}
+            hint={`${formatNumber(dataCache.length)} resposta(s) em cache`}
           />
           <Metric
-            label="Última sincronização"
+            label="Última leitura de placares"
             value={settings.football_last_sync_at ? timeAgo(settings.football_last_sync_at) : "nunca"}
             hint={
-              lastFootball
-                ? `${formatNumber(lastFootball.requests_used || 0)} chamada(s) · ${formatNumber(lastFootball.records_upserted || 0)} registro(s)`
+              dataJob
+                ? `${formatNumber(dataJob.requests_used || 0)} chamada(s) · ${formatNumber(dataJob.records_upserted || 0)} registro(s)`
                 : "sem execução registrada"
             }
           />
@@ -154,15 +161,13 @@ export default function AdminProviderUsage() {
             • Próxima execução: {settings.football_next_run_at ? formatDateTime(settings.football_next_run_at) : "—"}
           </li>
           <li>• Último resumo: {settings.football_last_summary || "—"}</li>
-          <li>
-            • Alertas de consumo: {quota?.alerts?.length ? quota.alerts.join(", ") : "nenhum"}
-          </li>
+          <li>• Alertas de consumo: {quota?.alerts?.length ? quota.alerts.join(", ") : "nenhum"}</li>
         </ul>
 
-        {footballError ? (
+        {error ? (
           <p className="flex items-start gap-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-300">
             <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
-            <span>{footballError}</span>
+            <span>{error}</span>
           </p>
         ) : null}
       </section>
@@ -172,65 +177,58 @@ export default function AdminProviderUsage() {
           <div>
             <h3 className="flex items-center gap-1.5 text-sm font-semibold">
               <TrendingUp className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
-              The Odds API · cotações
+              API-Football · cotações
             </h3>
             <p className="mt-0.5 text-[11px] text-muted-foreground">
-              {settings.provider === "the_odds_api" && settings.enabled
-                ? "Mercados pré-jogo e placares das demais modalidades."
-                : "Provedor de odds não habilitado."}
+              Cotações pré-jogo dos jogos do dia e de amanhã, com a margem da casa aplicada sobre o mercado
+              completo.
             </p>
           </div>
-          <StatusPill status={settings.last_status} />
+          <StatusPill status={oddsJob?.status} />
         </div>
 
         <div className="grid gap-2 sm:grid-cols-2">
           <Metric
-            label="Créditos usados (período)"
-            value={formatNumber(Number(settings.credits_used) || 0)}
+            label="Partidas com cotações"
+            value={formatNumber(state.eventsWithOdds)}
+            hint={`${formatNumber(state.openMarkets)} mercado(s) aberto(s)`}
+          />
+          <Metric
+            label="Cotações oferecidas"
+            value={formatNumber(state.offeredOdds)}
+            hint="seleções com preço válido"
+          />
+          <Metric
+            label="Coletas de hoje"
+            value={formatNumber(oddsCallsToday.length)}
+            hint={`${formatNumber(oddsCache.length)} dia(s) em cache`}
+          />
+          <Metric
+            label="Última coleta"
+            value={oddsJob?.finished_at ? timeAgo(oddsJob.finished_at) : "nunca"}
             hint={
-              Number(settings.budget_credits) > 0
-                ? `${((Number(settings.credits_used) / Number(settings.budget_credits)) * 100).toFixed(1)}% do orçamento`
-                : "sem orçamento definido"
-            }
-          />
-          <Metric
-            label="Créditos restantes (fonte)"
-            value={
-              settings.credits_remaining === undefined || settings.credits_remaining === null
-                ? "—"
-                : formatNumber(settings.credits_remaining)
-            }
-            hint="informado pela própria API"
-          />
-          <Metric
-            label="Chamadas hoje"
-            value={formatNumber(state.oddsCalls)}
-            hint={`${formatNumber(settings.skipped_queries || 0)} consulta(s) adiada(s)`}
-          />
-          <Metric
-            label="Última sincronização"
-            value={settings.last_sync_at ? timeAgo(settings.last_sync_at) : "nunca"}
-            hint={
-              lastOdds
-                ? `${formatNumber(lastOdds.requests_used || 0)} crédito(s) · ${formatNumber(lastOdds.records_upserted || 0)} registro(s)`
+              oddsJob
+                ? `${formatNumber(oddsJob.requests_used || 0)} chamada(s) · ${formatNumber(oddsJob.records_upserted || 0)} cotação(ões)`
                 : "sem execução registrada"
             }
           />
         </div>
 
         <ul className="space-y-1 text-[11px] text-muted-foreground">
+          <li>• Próxima coleta prevista: {nextOdds ? formatDateTime(new Date(nextOdds).toISOString()) : "—"}</li>
           <li>
-            • Próxima coleta de hoje:{" "}
-            {settings.next_today_run_at ? formatDateTime(settings.next_today_run_at) : "—"}
+            • Dias em cache:{" "}
+            {oddsCache.length
+              ? oddsCache.map((row) => String(row.key).replace("odds:date:", "")).join(", ")
+              : "nenhum"}
           </li>
-          <li>• Última execução: {settings.last_run_summary || "—"}</li>
-          <li>• Situação do cache: validade de {formatNumber(settings.cache_ttl_seconds || 0)} s por resposta</li>
+          <li>• Chamadas reservadas para placares ao vivo: 10 por execução</li>
         </ul>
 
-        {settings.last_error ? (
+        {oddsJob?.error_message ? (
           <p className="flex items-start gap-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-300">
             <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
-            <span>{settings.last_error}</span>
+            <span>{oddsJob.error_message}</span>
           </p>
         ) : null}
       </section>

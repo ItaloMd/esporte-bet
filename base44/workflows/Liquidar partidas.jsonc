@@ -1,6 +1,6 @@
 {
   "name": "Liquidar partidas",
-  "description": "A cada 10 minutos sincroniza o calend\u00e1rio e os placares pela API-Football e liquida os boletins com o resultado confirmado pela fonte.",
+  "description": "A cada 10 minutos sincroniza o calend\u00e1rio e os placares pela API-Football, atualiza as cota\u00e7\u00f5es pr\u00e9-jogo dos jogos do dia e liquida os boletins com o resultado confirmado pela fonte.",
   "trigger": {
     "condition": null,
     "config": {
@@ -22,7 +22,7 @@
     "document": {
       "dsl": "1.0.0",
       "name": "liquidar_partidas",
-      "version": "1.1",
+      "version": "1.2",
       "namespace": "base44"
     },
     "do": [
@@ -36,10 +36,27 @@
               "trigger": "scheduled"
             }
           },
-          "then": "liquidar_partidas",
+          "then": "sincronizar_odds_futebol",
           "x-base44": {
             "title": "Sincronizar calend\u00e1rio e placares",
             "description": "API-Football \u00b7 cache e or\u00e7amento di\u00e1rio"
+          }
+        }
+      },
+      {
+        "sincronizar_odds_futebol": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "syncFootballOdds",
+            "args": {
+              "mode": "auto",
+              "trigger": "scheduled"
+            }
+          },
+          "then": "liquidar_partidas",
+          "x-base44": {
+            "title": "Atualizar cota\u00e7\u00f5es",
+            "description": "API-Football \u00b7 uma coleta por hora por dia"
           }
         }
       },

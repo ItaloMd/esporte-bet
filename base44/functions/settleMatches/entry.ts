@@ -1,19 +1,8 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.54';
-import { secrets } from 'base44:runtime';
-import { apiBase, listScores } from '../../shared/oddsApi.ts';
 import { round2 } from '../../shared/tichupay.ts';
-import {
-  SCORE_RECHECK_MS,
-  SCORE_BACKOFF_MS,
-  chunkArray,
-  readScore,
-  settleSelection,
-  markStartedEventsLive,
-} from '../../shared/matchLifecycle.ts';
+import { chunkArray, settleSelection, markStartedEventsLive } from '../../shared/matchLifecycle.ts';
 
 const LOCK_MS = 4 * 60 * 1000;
-const SCORE_BATCH = 3;
-const SCORE_DAYS_FROM = 3;
 
 async function loadPendingEvents(db) {
   const pending = [];
@@ -61,9 +50,10 @@ async function loadSelections(db, filter, rounds = 10) {
  * Ciclo de vida das partidas e liquidação por resultado confirmado.
  *
  * 1. Partidas iniciadas viram "ao vivo" pelo horário previsto, sem consultar odds.
- * 2. Com a API-Football ativa, os placares já chegam confirmados pelo
- *    sincronizador (`syncFootball`) e nenhuma chamada extra é feita aqui; sem
- *    ela, o comportamento anterior (uma consulta por modalidade) é mantido.
+ * 2. Os placares chegam confirmados pelo sincronizador da API-Football
+ *    (`syncFootball`): nenhuma chamada externa é feita aqui. Partidas ao vivo
+ *    fora do futebol não têm fonte de resultado e ficam marcadas para revisão
+ *    manual, em vez de esperar por um dado que não virá.
  * 3. Cada seleção é liquidada uma única vez, a partir do placar confirmado.
  *    Partidas adiadas ou canceladas anulam a seleção; situações indefinidas
  *    ficam pendentes e marcadas para revisão manual — nunca são decididas por
@@ -90,8 +80,8 @@ export default async function (req) {
 
     // Com a API-Football ativa, os resultados chegam do sincronizador central.
     const footballEnabled = Boolean(settings.football_enabled);
-    if (!footballEnabled && settings.provider !== 'the_odds_api') {
-      return Response.json({ skipped: true, reason: 'Provedor ativo não fornece placares' });
+    if (!footballEnabled) {
+      return Response.json({ skipped: true, reason: 'Integração de resultados desabilitada' });
     }
     if (settings.locked_until && Date.parse(settings.locked_until) > nowMs) {
       return Response.json({ skipped: true, reason: 'Outra execução está em andamento' });
@@ -103,7 +93,7 @@ export default async function (req) {
     });
 
     const job = await db.SyncJob.create({
-      provider: footballEnabled ? 'api_football' : settings.provider,
+      provider: 'api_football',
       trigger: 'scheduled',
       job_type: 'results',
       status: 'running',
@@ -111,110 +101,20 @@ export default async function (req) {
       triggered_by: user.email,
     });
 
-    const usage = { used: null, remaining: null, cost: 0, calls: 0 };
-    const track = (info) => {
-      if (!info) return;
-      if (info.used !== null && info.used !== undefined) usage.used = info.used;
-      if (info.remaining !== null && info.remaining !== undefined) usage.remaining = info.remaining;
-      if (info.last !== null && info.last !== undefined) {
-        usage.cost += Number(info.last) || 0;
-        usage.calls += 1;
-      }
-    };
-
     // 1) Fechamento e status ao vivo, definidos apenas pelo horário previsto.
     const startedIds = await markStartedEventsLive(db, nowIso);
 
-    // 2) Consulta controlada de placares (somente sem a API-Football).
+    // 2) Partidas ao vivo fora do futebol não têm fonte de placar: ficam marcadas
+    // para decisão manual, para que nenhuma aposta fique esperando um resultado
+    // que não virá.
     const pending = await loadPendingEvents(db);
     const due = pending.filter((event) => !event.next_check_at || Date.parse(event.next_check_at) <= nowMs);
-
-    // Com a API-Football ativa, o futebol já recebe placar confirmado pelo
-    // sincronizador central; as demais modalidades continuam sendo consultadas
-    // na fonte de odds, para que nenhuma aposta fique sem resultado.
-    const scoreDue = footballEnabled ? due.filter((event) => event.sport_slug !== 'futebol') : due;
-
-    const competitionIds = [...new Set(scoreDue.map((event) => event.competition_id).filter(Boolean))];
-    let keyByCompetition = new Map();
-    if (competitionIds.length) {
-      const page = await db.Competition.filter({ id: { $in: competitionIds } }, { limit: competitionIds.length });
-      keyByCompetition = new Map((page.items || []).map((row) => [row.id, row.external_id]));
+    const reviewCandidates = due.filter((event) => event.sport_slug !== 'futebol');
+    for (const ids of chunkArray(reviewCandidates.map((event) => event.id), 200)) {
+      await db.Event.updateMany({ id: { $in: ids } }, { $set: { settlement_state: 'review' } });
     }
 
-    const dueByKey = new Map();
-    scoreDue.forEach((event) => {
-      const sportKey = keyByCompetition.get(event.competition_id);
-      if (!sportKey) return;
-      if (!dueByKey.has(sportKey)) dueByKey.set(sportKey, []);
-      dueByKey.get(sportKey).push(event);
-    });
-
-    const apiKey = secrets.get('THE_ODDS_API_KEY');
-    const base = apiBase(settings);
-    const sportKeys = [...dueByKey.keys()];
-    const outcomes = [];
-    if (apiKey && sportKeys.length) {
-      for (let index = 0; index < sportKeys.length; index += SCORE_BATCH) {
-        const slice = sportKeys.slice(index, index + SCORE_BATCH);
-        const batch = await Promise.allSettled(
-          slice.map(async (sportKey) => {
-            const response = await listScores(apiKey, base, sportKey, { daysFrom: SCORE_DAYS_FROM });
-            return { sportKey, data: response.data || [], usage: response.usage };
-          }),
-        );
-        batch.forEach((result, offset) => outcomes.push({ sportKey: slice[offset], result }));
-      }
-    }
-
-    const finishedUpdates = [];
-    const checkedIds = [];
-    const backedOffIds = [];
     const failures = [];
-
-    outcomes.forEach(({ sportKey, result }) => {
-      const events = dueByKey.get(sportKey) || [];
-      if (result.status === 'rejected') {
-        failures.push(String(result.reason?.message || result.reason));
-        events.forEach((event) => backedOffIds.push(event.id));
-        return;
-      }
-      track(result.value.usage);
-      const byExternalId = new Map(result.value.data.map((entry) => [entry.id, entry]));
-      events.forEach((event) => {
-        checkedIds.push(event.id);
-        const score = byExternalId.get(event.external_id);
-        if (!score || score.completed !== true) return;
-        const home = readScore(score, event.home_team_name, 0);
-        const away = readScore(score, event.away_team_name, 1);
-        if (home === null || away === null) return;
-        finishedUpdates.push({
-          id: event.id,
-          status: 'finished',
-          tracking: 'finished',
-          published: false,
-          odds_status: 'unavailable',
-          home_score: home,
-          away_score: away,
-          result_confirmed_at: nowIso,
-          result_source: settings.provider,
-          settlement_state: 'waiting',
-          next_check_at: null,
-        });
-      });
-    });
-
-    for (const batch of chunkArray(finishedUpdates, 200)) {
-      await db.Event.bulkUpdate(batch);
-    }
-
-    const recheckAt = new Date(nowMs + SCORE_RECHECK_MS).toISOString();
-    const backoffAt = new Date(nowMs + SCORE_BACKOFF_MS).toISOString();
-    for (const ids of chunkArray(checkedIds, 200)) {
-      await db.Event.updateMany({ id: { $in: ids }, status: 'live' }, { $set: { next_check_at: recheckAt } });
-    }
-    for (const ids of chunkArray(backedOffIds, 200)) {
-      await db.Event.updateMany({ id: { $in: ids }, status: 'live' }, { $set: { next_check_at: backoffAt } });
-    }
 
     // 3) Liquidação: seleções abertas de partidas encerradas ou não disputadas.
     const finishedEvents = await loadFinishedEvents(db);
@@ -386,12 +286,11 @@ export default async function (req) {
     const summary = [
       'liquidação',
       `${startedIds.length} iniciada(s)`,
-      footballEnabled ? `futebol pela API-Football · ${sportKeys.length} outra(s) modalidade(s)` : `${sportKeys.length} modalidade(s) consultada(s)`,
-      `${finishedUpdates.length} resultado(s) confirmado(s)`,
+      'placares confirmados pela API-Football',
+      `${reviewCandidates.length} partida(s) sem fonte de placar em revisão`,
       `${selectionUpdates.length} seleção(ões)`,
       `${settledTickets} boletim(ns)`,
       reviewEventIds.size ? `${reviewEventIds.size} em revisão` : 'sem revisão pendente',
-      `custo observado ${usage.cost}`,
     ].join(' · ');
 
     await db.ProviderSettings.update(settings.id, {
@@ -401,38 +300,21 @@ export default async function (req) {
       last_status: failures.length ? 'partial' : 'success',
       last_error: failures.length ? failures[0].slice(0, 400) : '',
       last_run_summary: summary,
-      ...(usage.used !== null ? { credits_used: usage.used } : {}),
-      ...(usage.remaining !== null ? { credits_remaining: usage.remaining } : {}),
     });
 
     await db.SyncJob.update(job.id, {
       status: 'success',
       finished_at: new Date().toISOString(),
-      requests_used: usage.cost,
-      records_upserted: finishedUpdates.length + selectionUpdates.length,
+      requests_used: 0,
+      records_upserted: selectionUpdates.length,
       error_message: failures.length ? failures.join(' | ').slice(0, 400) : '',
     });
-
-    if (usage.calls) {
-      await db.ApiUsageLog.create({
-        provider: settings.provider,
-        endpoint: `/sports/{key}/scores · ${sportKeys.length} modalidade(s)`,
-        status_code: 200,
-        duration_ms: Date.now() - nowMs,
-        records_returned: finishedUpdates.length,
-        cache_hit: false,
-        credits_used: usage.cost,
-        params: `daysFrom=${SCORE_DAYS_FROM}`,
-        note: summary.slice(0, 240),
-      });
-    }
 
     return Response.json({
       ok: true,
       started: startedIds.length,
-      results_source: footballEnabled ? 'api_football' : settings.provider,
-      sports_checked: sportKeys.length,
-      results_confirmed: finishedUpdates.length,
+      results_source: 'api_football',
+      events_without_score_source: reviewCandidates.length,
       selections_settled: selectionUpdates.length,
       tickets_settled: settledTickets,
       duplicates_skipped: skippedDuplicates,
@@ -440,7 +322,6 @@ export default async function (req) {
       waiting_events: waitingEventIds.size,
       prizes_paid: prizesPaid,
       failures,
-      usage,
       elapsedMs: Date.now() - nowMs,
     });
   } catch (error) {

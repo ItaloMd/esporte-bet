@@ -107,7 +107,7 @@ export default function AdminFootball({ actor }) {
       });
       if (recordId) await base44.entities.ProviderSettings.update(recordId, patch);
       else {
-        const created = await base44.entities.ProviderSettings.create({ provider: "the_odds_api", ...patch });
+        const created = await base44.entities.ProviderSettings.create({ provider: "api_football", ...patch });
         setRecordId(created.id);
       }
       await logAdminAction({

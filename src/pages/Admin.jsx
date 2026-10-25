@@ -24,7 +24,7 @@ const TABS = [
   { value: "banners", label: "Banners", icon: Images },
   { value: "super-odds", label: "Super odds", icon: Zap },
   { value: "catalog", label: "Esportes e competições", icon: Database },
-  { value: "provider", label: "Provedor de odds", icon: SlidersHorizontal },
+  { value: "provider", label: "Margem e cotações", icon: SlidersHorizontal },
   { value: "football", label: "API-Football", icon: Activity },
   { value: "settings", label: "Identidade e textos", icon: ShieldCheck },
   { value: "logs", label: "Logs e privacidade", icon: ShieldAlert },
