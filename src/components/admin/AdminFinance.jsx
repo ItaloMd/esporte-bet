@@ -129,7 +129,7 @@ export default function AdminFinance() {
       <section className="card-surface space-y-3 p-4">
         <div className="flex items-center justify-between gap-2">
           <h2 className="flex items-center gap-2 text-sm font-semibold">
-            <Banknote className="h-4 w-4 text-primary" aria-hidden="true" /> Caixa disponível (TichuPay)
+            <Banknote className="h-4 w-4 text-primary" aria-hidden="true" /> Caixa do mês (Eleva Payments)
           </h2>
           <Button variant="outline" size="sm" onClick={() => load()} disabled={overview.loading}>
             <RefreshCw className="mr-1.5 h-3.5 w-3.5" /> Atualizar
@@ -137,18 +137,23 @@ export default function AdminFinance() {
         </div>
         {overview.cash ? (
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-            <Stat label="Líquido disponível para saque" value={formatCurrency(overview.cash.available)} highlight />
-            <Stat label="Bloqueado em saques" value={formatCurrency(overview.cash.blocked)} />
-            <Stat label="A receber (PIX pendentes)" value={formatCurrency(overview.cash.pending)} />
             <Stat
-              label="Líquido no mês"
-              value={formatCurrency(overview.cash.month_net)}
-              hint={`${overview.cash.month_transactions} depósitos pagos`}
+              label="Depósitos pagos no mês"
+              value={formatCurrency(overview.cash.month_deposits)}
+              hint={`${overview.cash.month_deposits_count} depósito(s)`}
+              highlight
+            />
+            <Stat label="Saques enviados no mês" value={formatCurrency(overview.cash.month_withdrawals)} />
+            <Stat label="Resultado do mês" value={formatCurrency(overview.cash.month_net)} />
+            <Stat
+              label="Saques aguardando liberação"
+              value={formatCurrency(overview.cash.pending_withdrawals)}
+              hint={`${overview.cash.pending_count} solicitação(ões)`}
             />
           </div>
         ) : (
           <p className="text-xs text-destructive">
-            {overview.cashError || "Não foi possível consultar o saldo na TichuPay."}
+            {overview.cashError || "Não foi possível carregar os números do mês."}
           </p>
         )}
       </section>
@@ -156,8 +161,8 @@ export default function AdminFinance() {
       <section className="card-surface space-y-3 p-4">
         <h2 className="text-sm font-semibold">Sacar caixa</h2>
         <p className="text-xs text-muted-foreground">
-          Retenção de 10% sobre o valor solicitado: a TichuPay envia 90% e a plataforma registra a saída
-          pelo valor integral. A TichuPay também cobra a taxa de {formatCurrency(settings.withdrawal_fee)} por envio.
+          Retenção de 10% sobre o valor solicitado: a Eleva Payments envia 90% e a plataforma registra a saída
+          pelo valor integral. O gateway ainda debita a própria taxa de envio, informada na resposta de cada saque.
         </p>
         <div className="max-w-xs space-y-2">
           <Label htmlFor="cash-amount">Valor do saque</Label>

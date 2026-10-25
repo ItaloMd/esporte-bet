@@ -1,11 +1,12 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.54';
 import {
   publicMessage,
+  refundWithdrawal,
   round2,
-  tichupay,
   WITHDRAWAL_RETENTION_PERCENT,
   withdrawalSendAmount,
-} from '../../shared/tichupay.ts';
+} from '../../shared/payments.ts';
+import { createPixCashout } from '../../shared/elevaPay.ts';
 
 const FIELDS = [
   'min_deposit',
@@ -28,6 +29,30 @@ function pickSettings(settings) {
   return picked;
 }
 
+/** Primeiro instante do mês corrente no horário de Brasília. */
+function startOfMonthIso() {
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bahia' });
+  return new Date(`${today.slice(0, 7)}-01T00:00:00-03:00`).toISOString();
+}
+
+function sumOf(result) {
+  return round2(result?.rows?.[0]?.sum_amount || 0);
+}
+
+function countOf(result) {
+  return Number(result?.rows?.[0]?.count || 0);
+}
+
+/** Envia o PIX do saque pelo gateway, devolvendo o corpo já validado. */
+async function sendWithdrawal(amount, pixKey) {
+  const result = await createPixCashout({ amount, pix_key: pixKey });
+  const payload = result.data?.withdrawal || {};
+  if (!result.ok || result.data?.success === false || !payload.id) {
+    return { ok: false, reason: publicMessage(result.data, 'Falha no envio do PIX pelo gateway.') };
+  }
+  return { ok: true, payload };
+}
+
 export default async function (req) {
   try {
     const base44 = createClientFromRequest(req);
@@ -45,24 +70,31 @@ export default async function (req) {
     const settings = record || {};
 
     if (action === 'overview') {
-      const wallet = await tichupay('/api/wallet');
-      const [deposits, withdrawals] = await Promise.all([
+      const monthStart = startOfMonthIso();
+      const [paidDeposits, sentWithdrawals, pendingWithdrawals, deposits, withdrawals] = await Promise.all([
+        service.Deposit.aggregate({ query: { status: 'paid', paid_at: { $gte: monthStart } }, sum: ['amount'] }),
+        service.Withdrawal.aggregate({
+          query: { created_date: { $gte: monthStart }, status: { $in: ['completed', 'processing'] } },
+          sum: ['amount'],
+        }),
+        service.Withdrawal.aggregate({ query: { status: 'pending' }, sum: ['amount'] }),
         service.Deposit.filter({}, { sort: '-created_date', limit: 25 }),
         service.Withdrawal.filter({}, { sort: '-created_date', limit: 25 }),
       ]);
+
+      const monthDeposits = sumOf(paidDeposits);
+      const monthWithdrawals = sumOf(sentWithdrawals);
+
       return Response.json({
         settings: pickSettings(settings),
-        cash: wallet.ok
-          ? {
-              available: round2(wallet.data.wallet_balance),
-              blocked: round2(wallet.data.blocked_balance),
-              pending: round2(wallet.data.pending_balance),
-              month_net: round2(wallet.data.this_month?.net),
-              month_gross: round2(wallet.data.this_month?.gross),
-              month_transactions: wallet.data.this_month?.transactions || 0,
-            }
-          : null,
-        cash_error: wallet.ok ? null : publicMessage(wallet.data, 'Não foi possível consultar o saldo na TichuPay.'),
+        cash: {
+          month_deposits: monthDeposits,
+          month_deposits_count: countOf(paidDeposits),
+          month_withdrawals: monthWithdrawals,
+          month_net: round2(monthDeposits - monthWithdrawals),
+          pending_withdrawals: sumOf(pendingWithdrawals),
+          pending_count: countOf(pendingWithdrawals),
+        },
         deposits: deposits.items || [],
         withdrawals: withdrawals.items || [],
       });
@@ -87,71 +119,49 @@ export default async function (req) {
         return Response.json({ error: 'Este saque já foi processado.' }, { status: 400 });
       }
 
-      const walletPage =
-        withdrawal.kind === 'player'
-          ? await service.Wallet.filter({ user_id: withdrawal.user_id }, { limit: 1 })
-          : { items: [] };
-      const playerWallet = walletPage.items?.[0];
       const amount = round2(withdrawal.amount);
 
       if (!approve) {
-        await service.Withdrawal.update(id, {
+        await refundWithdrawal(service, withdrawal, {
           status: 'rejected',
-          processed_at: new Date().toISOString(),
           note: String(body.note || 'Saque recusado pelo administrador. Valor devolvido ao saldo.'),
         });
-        if (playerWallet) {
-          await service.Wallet.update(playerWallet.id, {
-            balance: round2(Number(playerWallet.balance || 0) + amount),
-            locked_balance: round2(Math.max(0, Number(playerWallet.locked_balance || 0) - amount)),
-          });
-        }
         return Response.json({ status: 'rejected' });
       }
 
       // Envia apenas o líquido (bruto menos a retenção); a plataforma
       // contabiliza o valor bruto integral como saída.
       const sendAmount = withdrawalSendAmount(amount);
-      const result = await tichupay('/api/withdrawals', {
-        method: 'POST',
-        body: {
-          amount: sendAmount,
-          pix_key: withdrawal.pix_key,
-          pix_key_type: withdrawal.pix_key_type,
-        },
-      });
-
-      if (!result.ok) {
-        const reason = publicMessage(result.data, 'Falha no gateway PIX.');
-        await service.Withdrawal.update(id, {
-          failure_reason: reason,
-          note:
-            result.status === 429
-              ? 'Intervalo de 5 minutos entre saques da TichuPay. Tente novamente em alguns minutos.'
-              : withdrawal.note,
-        });
-        return Response.json({ error: reason, cooldown: result.status === 429, status: 'pending' }, { status: 502 });
+      const sent = await sendWithdrawal(sendAmount, withdrawal.pix_key);
+      if (!sent.ok) {
+        await service.Withdrawal.update(id, { failure_reason: sent.reason });
+        return Response.json({ error: sent.reason, status: 'pending' }, { status: 502 });
       }
 
-      const finalStatus = result.data.status === 'processing' ? 'processing' : 'completed';
+      const payload = sent.payload;
+      const finalStatus = ['paid', 'completed'].includes(payload.status) ? 'completed' : 'processing';
       await service.Withdrawal.update(id, {
         status: finalStatus,
-        sent_amount: sendAmount,
-        fee: round2(result.data.fee),
-        net_amount: round2(result.data.net_amount),
-        tichupay_id: result.data.withdrawal_id,
+        sent_amount: round2(payload.amount ?? sendAmount),
+        fee: round2(payload.fee),
+        net_amount: round2(payload.amount ?? sendAmount),
+        gateway_id: String(payload.id),
         processed_at: new Date().toISOString(),
         failure_reason: null,
       });
 
-      if (playerWallet) {
-        await service.Wallet.update(playerWallet.id, {
-          locked_balance: round2(Math.max(0, Number(playerWallet.locked_balance || 0) - amount)),
-          total_withdrawn: round2(Number(playerWallet.total_withdrawn || 0) + amount),
-        });
+      if (withdrawal.kind === 'player') {
+        const walletPage = await service.Wallet.filter({ user_id: withdrawal.user_id }, { limit: 1 });
+        const playerWallet = walletPage.items?.[0];
+        if (playerWallet) {
+          await service.Wallet.update(playerWallet.id, {
+            locked_balance: round2(Math.max(0, Number(playerWallet.locked_balance || 0) - amount)),
+            total_withdrawn: round2(Number(playerWallet.total_withdrawn || 0) + amount),
+          });
+        }
       }
 
-      return Response.json({ status: finalStatus, fee: round2(result.data.fee) });
+      return Response.json({ status: finalStatus, fee: round2(payload.fee) });
     }
 
     if (action === 'withdraw_cash') {
@@ -170,40 +180,33 @@ export default async function (req) {
       }
 
       const sendAmount = withdrawalSendAmount(amount);
-
-      const main = await tichupay('/api/withdrawals', {
-        method: 'POST',
-        body: { amount: sendAmount, pix_key: adminKey, pix_key_type: adminKeyType },
-      });
-
-      if (!main.ok) {
-        return Response.json(
-          { error: publicMessage(main.data, 'Falha ao sacar o caixa.'), cooldown: main.status === 429 },
-          { status: 502 },
-        );
+      const sent = await sendWithdrawal(sendAmount, adminKey);
+      if (!sent.ok) {
+        return Response.json({ error: sent.reason }, { status: 502 });
       }
 
+      const payload = sent.payload;
       const created = await service.Withdrawal.create({
         user_id: user.id,
         user_email: user.email,
         kind: 'admin',
         amount,
-        sent_amount: sendAmount,
-        fee: round2(main.data.fee),
-        net_amount: round2(main.data.net_amount),
+        sent_amount: round2(payload.amount ?? sendAmount),
+        fee: round2(payload.fee),
+        net_amount: round2(payload.amount ?? sendAmount),
         pix_key: adminKey,
         pix_key_type: adminKeyType,
-        status: main.data.status === 'processing' ? 'processing' : 'completed',
+        status: ['paid', 'completed'].includes(payload.status) ? 'completed' : 'processing',
         correlation_id: `cash_${crypto.randomUUID()}`,
-        tichupay_id: main.data.withdrawal_id,
-        note: `Retenção de ${WITHDRAWAL_RETENTION_PERCENT}% (R$ ${round2(amount - sendAmount).toFixed(2)}). Taxa informada pela TichuPay: R$ ${round2(Number(main.data.fee ?? 0)).toFixed(2)}.`,
+        gateway_id: String(payload.id),
+        note: `Retenção de ${WITHDRAWAL_RETENTION_PERCENT}% (R$ ${round2(amount - sendAmount).toFixed(2)}). Taxa informada pelo gateway: R$ ${round2(Number(payload.fee ?? 0)).toFixed(2)}.`,
         processed_at: new Date().toISOString(),
       });
 
       return Response.json({
         status: created.status,
-        sent_amount: sendAmount,
-        fee: round2(main.data.fee),
+        sent_amount: created.sent_amount,
+        fee: created.fee,
       });
     }
 

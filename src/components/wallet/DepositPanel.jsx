@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { Check, Copy, Loader2 } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
@@ -6,18 +7,20 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatCurrency } from "@/lib/format";
 
-export default function DepositPanel({ minDeposit, enabled, onCredited }) {
+export default function DepositPanel({ minDeposit, enabled, profile, onCredited }) {
   const [amount, setAmount] = useState(String(minDeposit || 10));
   const [deposit, setDeposit] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
 
+  const cpfMissing = !String(profile?.cpf || "").replace(/\D/g, "").length;
+
   const create = async () => {
     setError("");
     setLoading(true);
     try {
-      const response = await base44.functions.invoke("tichupayDeposit", {
+      const response = await base44.functions.invoke("elevaDeposit", {
         action: "create",
         amount: Number(amount),
       });
@@ -33,7 +36,7 @@ export default function DepositPanel({ minDeposit, enabled, onCredited }) {
     if (!deposit || deposit.status !== "pending") return undefined;
     const timer = setInterval(async () => {
       try {
-        const response = await base44.functions.invoke("tichupayDeposit", {
+        const response = await base44.functions.invoke("elevaDeposit", {
           action: "sync",
           external_id: deposit.external_id,
         });
@@ -96,6 +99,19 @@ export default function DepositPanel({ minDeposit, enabled, onCredited }) {
           Aguardando o pagamento…
         </div>
         <Button variant="ghost" size="sm" onClick={() => setDeposit(null)}>Cancelar</Button>
+      </div>
+    );
+  }
+
+  if (cpfMissing) {
+    return (
+      <div className="space-y-3">
+        <p className="text-sm text-muted-foreground">
+          Para gerar o PIX do depósito precisamos do seu CPF cadastrado no perfil.
+        </p>
+        <Button asChild className="w-full">
+          <Link to="/perfil">Completar meu perfil</Link>
+        </Button>
       </div>
     );
   }

@@ -1,5 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.54';
-import { round2 } from '../../shared/tichupay.ts';
+import { round2 } from '../../shared/payments.ts';
 import { chunkArray, settleSelection, markStartedEventsLive } from '../../shared/matchLifecycle.ts';
 
 const LOCK_MS = 4 * 60 * 1000;

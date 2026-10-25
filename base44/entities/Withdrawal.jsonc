@@ -56,7 +56,7 @@
     "correlation_id": {
       "type": "string"
     },
-    "tichupay_id": {
+    "gateway_id": {
       "type": "string"
     },
     "gateway_txid": {

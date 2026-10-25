@@ -8,6 +8,9 @@
     "external_id": {
       "type": "string"
     },
+    "gateway_id": {
+      "type": "string"
+    },
     "amount": {
       "type": "number"
     },
@@ -33,9 +36,6 @@
       "type": "string"
     },
     "qr_code_base64": {
-      "type": "string"
-    },
-    "tichupay_id": {
       "type": "string"
     },
     "txid": {
