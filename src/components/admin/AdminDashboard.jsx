@@ -3,6 +3,7 @@ import { Activity, AlertTriangle, Database, Link2, Radio, RefreshCw, Users } fro
 import { base44 } from "@/api/base44Client";
 import { formatDateTime, formatNumber, timeAgo } from "@/lib/format";
 import { CardListSkeleton } from "@/components/state/LoadingBlocks";
+import AdminProviderUsage from "@/components/admin/AdminProviderUsage";
 
 function Stat({ icon: Icon, label, value, hint }) {
   return (
@@ -84,15 +85,12 @@ export default function AdminDashboard() {
         <Stat icon={AlertTriangle} label="Erros de integração" value={formatNumber(state.errors)} hint={`${formatNumber(stats.usage)} requisições registradas`} />
       </div>
 
-      <section className="card-surface px-4 py-3">
+      <section className="space-y-3">
         <h2 className="flex items-center gap-2 text-sm font-semibold">
-          <Radio className="h-4 w-4 text-primary" aria-hidden="true" /> Status da integração de dados
+          <Radio className="h-4 w-4 text-primary" aria-hidden="true" /> Uso e métricas dos provedores
         </h2>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Nenhum provedor externo está habilitado: os eventos e odds são cadastrados na própria plataforma, e
-          nenhuma credencial de provedor está armazenada em tabelas acessíveis ao jogador.
-        </p>
-        <p className="mt-2 text-[11px] text-muted-foreground">
+        <AdminProviderUsage />
+        <p className="text-[11px] text-muted-foreground">
           Consumo de requisições: {formatNumber(stats.usage)} · respostas em cache: {formatNumber(stats.usageCached)} ·
           solicitações de privacidade pendentes: {formatNumber(stats.privacyPending)}
         </p>
@@ -125,7 +123,7 @@ export default function AdminDashboard() {
               state.sync.map((job) => (
                 <div key={job.id} className="rounded-lg border border-border px-3 py-2 text-xs">
                   <p className="font-medium">
-                    {job.job_type} · {job.status}
+                    {job.job_type} · {job.provider || "—"} · {job.status}
                   </p>
                   <p className="text-muted-foreground">
                     {job.trigger} · {formatDateTime(job.started_at || job.created_date)}
@@ -134,9 +132,7 @@ export default function AdminDashboard() {
                 </div>
               ))
             ) : (
-              <p className="text-xs text-muted-foreground">
-                Nenhuma sincronização executada. Sem provedor externo, os dados são cadastrados manualmente.
-              </p>
+              <p className="text-xs text-muted-foreground">Nenhuma sincronização registrada.</p>
             )}
           </div>
         </section>

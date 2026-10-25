@@ -59,8 +59,8 @@ export default function AdminProviderStats({ actor }) {
       base44.entities.Competition.count({ active: true }),
       base44.entities.Odd.list({ distinct: "bookmaker" }),
       base44.entities.Odd.aggregate({ query: {}, groupBy: "market_key" }),
-      base44.entities.SyncJob.filter({}, { sort: "-created_date", limit: 8 }),
-      base44.entities.ApiUsageLog.filter({}, { sort: "-created_date", limit: 6 }),
+      base44.entities.SyncJob.filter({ provider: "the_odds_api" }, { sort: "-created_date", limit: 8 }),
+      base44.entities.ApiUsageLog.filter({ provider: "the_odds_api" }, { sort: "-created_date", limit: 6 }),
     ]);
 
     setState({
@@ -147,7 +147,8 @@ export default function AdminProviderStats({ actor }) {
             <h2 className="text-sm font-semibold">Sincronização The Odds API</h2>
             <p className="mt-0.5 text-[11px] text-muted-foreground">
               Rotina horária para os jogos de hoje e rotina diária para os próximos sete dias. Odds ao vivo não são
-              coletadas.
+              coletadas. O calendário, os placares e os resultados são coletados pela API-Football, com uso e métricas
+              na aba própria.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
