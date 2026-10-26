@@ -156,20 +156,35 @@ export function timingSafeEqual(a, b) {
 /**
  * Credita um depósito já pago (webhook ou verificação manual).
  * O valor creditado é o bruto: a taxa do gateway é custo da plataforma.
+ *
+ * A transição pending→paid é atômica (condição avaliada junto com a escrita):
+ * quando o gateway reentrega o webhook em paralelo, apenas uma invocação vence
+ * e credita — as demais viram no-op, sem crédito duplicado.
  */
 export async function creditPaidDeposit(service, deposit, remote) {
   const amount = round2(remote?.amount ?? deposit.amount);
-  const updated = await service.Deposit.update(deposit.id, {
-    status: "paid",
-    paid_at: remote?.paid_at || new Date().toISOString(),
-    fee: round2(remote?.fee ?? deposit.fee),
-    // O jogador recebe o valor integral; a taxa da Liqfy (R$ 1 + 3,5%) é custo da casa.
-    net_amount: amount,
-    payer_name: remote?.payer_name || deposit.payer_name,
-    ...(remote?.payer_cpf ? { payer_cpf: String(remote.payer_cpf).replace(/\D/g, '') } : {}),
-    txid: remote?.txid || deposit.txid,
-    ...(remote?.gateway_id ? { gateway_id: String(remote.gateway_id) } : {}),
-  });
+
+  const claim = await service.Deposit.updateMany(
+    { id: deposit.id, status: "pending" },
+    {
+      $set: {
+        status: "paid",
+        paid_at: remote?.paid_at || new Date().toISOString(),
+        fee: round2(remote?.fee ?? deposit.fee),
+        // O jogador recebe o valor integral; a taxa da Liqfy (R$ 1 + 3,5%) é custo da casa.
+        net_amount: amount,
+        payer_name: remote?.payer_name || deposit.payer_name,
+        ...(remote?.payer_cpf ? { payer_cpf: String(remote.payer_cpf).replace(/\D/g, '') } : {}),
+        txid: remote?.txid || deposit.txid,
+        ...(remote?.gateway_id ? { gateway_id: String(remote.gateway_id) } : {}),
+      },
+    },
+  );
+  if (!claim?.updated) {
+    // Outra invocação concorrente já marcou como pago e creditou.
+    const current = await service.Deposit.filter({ id: deposit.id }, { limit: 1 });
+    return current.items?.[0] || deposit;
+  }
 
   const multiplier = Number(deposit.rollover_multiplier ?? 1);
   const rollover = round2(amount * multiplier);
@@ -178,12 +193,13 @@ export async function creditPaidDeposit(service, deposit, remote) {
 
   let balanceAfter = amount;
   if (wallet) {
-    balanceAfter = round2(Number(wallet.balance || 0) + amount);
-    await service.Wallet.update(wallet.id, {
-      balance: balanceAfter,
-      total_deposited: round2(Number(wallet.total_deposited || 0) + amount),
-      rollover_required: round2(Number(wallet.rollover_required || 0) + rollover),
-    });
+    // $inc é atômico no servidor: créditos simultâneos nunca se sobrescrevem.
+    await service.Wallet.updateMany(
+      { id: wallet.id },
+      { $inc: { balance: amount, total_deposited: amount, rollover_required: rollover } },
+    );
+    const after = await service.Wallet.filter({ id: wallet.id }, { limit: 1 });
+    balanceAfter = round2(after.items?.[0]?.balance);
   } else {
     await service.Wallet.create({
       user_id: deposit.user_id,
@@ -202,7 +218,8 @@ export async function creditPaidDeposit(service, deposit, remote) {
     label: 'Depósito PIX confirmado',
   });
 
-  return updated;
+  const updated = await service.Deposit.filter({ id: deposit.id }, { limit: 1 });
+  return updated.items?.[0] || deposit;
 }
 
 /**

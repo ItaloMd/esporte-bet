@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatCurrency, formatDateTime } from "@/lib/format";
 import { toast } from "@/components/ui/use-toast";
+import PlayerAuditCard from "@/components/admin/users/PlayerAuditCard";
 
 const WITHDRAWAL_LABEL = {
   pending: "Aguardando",
@@ -140,6 +141,8 @@ export default function UserDetail({ row, onAdjusted }) {
           </p>
         </div>
       </div>
+
+      <PlayerAuditCard userId={row.user_id} />
 
       <div className="card-surface space-y-2 p-3">
         <h3 className="text-sm font-semibold">Editar saldo</h3>

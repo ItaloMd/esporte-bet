@@ -59,20 +59,31 @@ export default async function (req) {
       return Response.json({ error: 'Carteira não encontrada para este jogador.' }, { status: 409 });
     }
 
-    await db.SimulationTicket.update(ticketId, {
-      status: 'cashed_out',
-      cashed_out: true,
-      cashed_out_at: nowIso,
-      cashed_out_amount: amount,
-      settled_at: nowIso,
-    });
+    // Fechamento atômico: apenas uma invocação concorrente consegue virar o
+    // status do boletim, então o cashout nunca devolve saldo duas vezes.
+    const claimed = await db.SimulationTicket.updateMany(
+      { id: ticketId, status: 'open' },
+      {
+        $set: {
+          status: 'cashed_out',
+          cashed_out: true,
+          cashed_out_at: nowIso,
+          cashed_out_amount: amount,
+          settled_at: nowIso,
+        },
+      },
+    );
+    if (!claimed?.updated) {
+      return Response.json({ error: 'Este boletim não está mais em aberto.' }, { status: 409 });
+    }
     await db.SimulationSelection.updateMany(
       { ticket_id: ticketId, status: 'open' },
       { $set: { status: 'void', settled_at: nowIso } },
     );
 
-    const newBalance = round2(Number(wallet.balance || 0) + amount);
-    await db.Wallet.update(wallet.id, { balance: newBalance });
+    await db.Wallet.updateMany({ id: wallet.id }, { $inc: { balance: amount } });
+    const afterPage = await db.Wallet.filter({ id: wallet.id }, { limit: 1 });
+    const newBalance = round2(afterPage.items?.[0]?.balance);
     await db.WalletTransaction.create({
       user_id: user.id,
       kind: 'cashout',

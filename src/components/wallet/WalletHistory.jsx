@@ -36,6 +36,7 @@ const TRANSACTION_LABEL = {
   bet: "Aposta",
   cashout: "Cashout",
   prize: "Prêmio",
+  adjustment: "Ajuste",
 };
 
 export default function WalletHistory({ deposits, withdrawals, transactions = [] }) {

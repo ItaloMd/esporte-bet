@@ -78,8 +78,26 @@ export default async function (req) {
     // disponível e é recusada quando o jogador não tem saldo suficiente.
     const walletPage = await db.Wallet.filter({ user_id: user.id }, { limit: 1 });
     const wallet = walletPage.items?.[0];
-    const balance = round2(wallet?.balance);
-    if (!wallet || balance < stake) {
+    if (!wallet) {
+      return Response.json(
+        {
+          error: 'Saldo insuficiente. Faça um depósito via PIX para apostar.',
+          code: 'insufficient_balance',
+          balance: 0,
+        },
+        { status: 402 },
+      );
+    }
+
+    // Débito atômico: a condição de saldo é avaliada no servidor junto com o
+    // próprio débito, então apostas simultâneas nunca gastam além do saldo.
+    const debit = await db.Wallet.updateMany(
+      { id: wallet.id, balance: { $gte: stake } },
+      { $inc: { balance: -stake } },
+    );
+    if (!debit?.updated) {
+      const fresh = await db.Wallet.filter({ id: wallet.id }, { limit: 1 });
+      const balance = round2(fresh.items?.[0]?.balance);
       const formatted = balance.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
       return Response.json(
         {
@@ -91,8 +109,8 @@ export default async function (req) {
       );
     }
 
-    const debitedBalance = round2(balance - stake);
-    await db.Wallet.update(wallet.id, { balance: debitedBalance });
+    const afterPage = await db.Wallet.filter({ id: wallet.id }, { limit: 1 });
+    const debitedBalance = round2(afterPage.items?.[0]?.balance);
 
     let ticket;
     try {
@@ -129,7 +147,7 @@ export default async function (req) {
       );
     } catch (error) {
       // Devolve o valor debitado para que o jogador não perca saldo sem aposta.
-      await db.Wallet.update(wallet.id, { balance }).catch(() => null);
+      await db.Wallet.updateMany({ id: wallet.id }, { $inc: { balance: stake } }).catch(() => null);
       throw error;
     }
 
