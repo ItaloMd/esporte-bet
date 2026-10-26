@@ -11,8 +11,10 @@ export function round2(value) {
 }
 
 // Retenção total de cada saque: o valor bruto é o que sai na contabilidade da
-// plataforma; o gateway envia apenas o líquido. A taxa do gateway (3,5%) já
-// está incluída nesses 10% — a diferença é a fatia da plataforma.
+// plataforma; o gateway envia apenas 90% do solicitado como `amount`. No modelo
+// gross-up da Liqfy o recebedor recebe o `amount` e a taxa (3,5% + R$ 1) é
+// debitada por cima — a diferença entre o bruto contábil e o débito real fica
+// na carteira da casa.
 export const WITHDRAWAL_RETENTION_PERCENT = 10;
 
 export function withdrawalSendAmount(amount) {
@@ -27,6 +29,13 @@ export const GATEWAY_FEE_PERCENT = 3.5;
 
 export function gatewayFee(amount) {
   return round2(GATEWAY_FEE_FIXED + (round2(amount) * GATEWAY_FEE_PERCENT) / 100);
+}
+
+// Débito total estimado na carteira Liqfy pelo envio de um saque: o `amount`
+// informado é o que o recebedor recebe e a taxa vem por cima dele.
+export function gatewayDebitEstimate(amount) {
+  const sent = round2(amount);
+  return round2(sent + gatewayFee(sent));
 }
 
 // Apresentação apenas: o painel administrativo mostra o saldo do jogador 5%

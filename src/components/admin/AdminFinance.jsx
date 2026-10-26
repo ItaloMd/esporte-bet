@@ -211,8 +211,9 @@ export default function AdminFinance() {
       <section className="card-surface space-y-3 p-4">
         <h2 className="text-sm font-semibold">Sacar caixa</h2>
         <p className="text-xs text-muted-foreground">
-          Retenção total de 10% sobre o valor solicitado: o gateway envia 90% para a chave de destino e cobra 3,5%
-          pela transferência; a plataforma registra a saída pelo valor integral e fica com os 6,5% restantes.
+          O valor enviado ao gateway é 90% do solicitado (retenção de 10%). No modelo gross-up da Liqfy o recebedor
+          recebe o amount enviado e a taxa de 3,5% + R$ 1,00 é debitada por cima; a plataforma registra a saída pelo
+          valor integral solicitado.
         </p>
         <div className="max-w-xs space-y-2">
           <Label htmlFor="cash-amount">Valor do saque</Label>

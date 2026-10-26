@@ -1,0 +1,115 @@
+{
+  "name": "FinanceSnapshot",
+  "type": "object",
+  "properties": {
+    "day": {
+      "type": "string"
+    },
+    "computed_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "gateway_available": {
+      "type": "number",
+      "default": 0
+    },
+    "gateway_held": {
+      "type": "number",
+      "default": 0
+    },
+    "players_balance": {
+      "type": "number",
+      "default": 0
+    },
+    "players_locked": {
+      "type": "number",
+      "default": 0
+    },
+    "players_count": {
+      "type": "number",
+      "default": 0
+    },
+    "open_stake": {
+      "type": "number",
+      "default": 0
+    },
+    "open_count": {
+      "type": "number",
+      "default": 0
+    },
+    "liability": {
+      "type": "number",
+      "default": 0
+    },
+    "net_exposure": {
+      "type": "number",
+      "default": 0
+    },
+    "free_cash": {
+      "type": "number",
+      "default": 0
+    },
+    "patrimony": {
+      "type": "number",
+      "default": 0
+    },
+    "real_result": {
+      "type": "number",
+      "default": 0
+    },
+    "coverage_index": {
+      "type": "number",
+      "default": 0
+    },
+    "health": {
+      "type": "string",
+      "enum": [
+        "green",
+        "yellow",
+        "red"
+      ],
+      "default": "green"
+    },
+    "staked_total": {
+      "type": "number",
+      "default": 0
+    },
+    "paid_total": {
+      "type": "number",
+      "default": 0
+    },
+    "fees_total": {
+      "type": "number",
+      "default": 0
+    },
+    "projected_profit": {
+      "type": "number",
+      "default": 0
+    }
+  },
+  "required": [
+    "day"
+  ],
+  "rls": {
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

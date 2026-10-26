@@ -1,6 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.54';
 import {
   adminVisibleBalance,
+  gatewayDebitEstimate,
   publicMessage,
   refundWithdrawal,
   round2,
@@ -249,7 +250,7 @@ export default async function (req) {
         status: withdrawalStatus(payload.status),
         correlation_id: correlationId,
         gateway_id: String(payload.id),
-        note: `Retenção total de ${WITHDRAWAL_RETENTION_PERCENT}% (R$ ${round2(amount - sendAmount).toFixed(2)}), incluindo a taxa de R$ ${gatewayFeeValue.toFixed(2)} cobrada pelo gateway.`,
+        note: `Retenção de ${WITHDRAWAL_RETENTION_PERCENT}% (R$ ${round2(amount - sendAmount).toFixed(2)}). Débito real estimado na Liqfy: R$ ${gatewayDebitEstimate(sendAmount).toFixed(2)} (amount de R$ ${sendAmount.toFixed(2)} + taxa de 3,5% + R$ 1,00 cobrada por cima).`,
         processed_at: new Date().toISOString(),
       });
 
