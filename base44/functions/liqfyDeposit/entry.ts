@@ -7,7 +7,8 @@ import { createPixCharge, depositStatus, fromCents, getCharge, toCents } from '.
  *
  * `create` gera a cobrança e guarda o BR Code/QR Code; `sync` consulta a
  * cobrança direto no gateway, como reforço do webhook. O valor creditado ao
- * jogador é sempre o bruto: a taxa do gateway é custo da plataforma.
+ * jogador é sempre o integral do depósito: a taxa da Liqfy (R$ 1 + 3,5%) é
+ * custo da casa e não desconta nada do saldo do jogador.
  */
 
 /** O gateway pode devolver a imagem do QR como URL ou como PNG em base64. */
@@ -118,6 +119,8 @@ export default async function (req) {
 
     const gross = fromCents(charge.amount ?? toCents(amount));
     const pix = charge.pix || {};
+    // Taxa da Liqfy sobre a entrada (R$ 1 + 3,5%): custo da casa. O jogador
+    // recebe o valor integral — nada é descontado do saldo dele.
     const fee = gatewayFee(gross);
 
     const deposit = await service.Deposit.create({
@@ -125,7 +128,7 @@ export default async function (req) {
       external_id: externalId,
       amount: gross,
       fee,
-      net_amount: round2(gross - fee),
+      net_amount: gross,
       status: 'pending',
       pix_copia_cola: pix.br_code || '',
       qr_code_base64: qrImage(pix),

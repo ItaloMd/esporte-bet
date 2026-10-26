@@ -20,11 +20,13 @@ export function withdrawalSendAmount(amount) {
   return round2(gross - (gross * WITHDRAWAL_RETENTION_PERCENT) / 100);
 }
 
-// Taxa cobrada pelo gateway sobre depósitos e saques: custo da plataforma.
+// Taxa da Liqfy sobre cada entrada PIX: R$ 1 fixo + 3,5% do valor. É custo da
+// plataforma — o jogador recebe o valor integral do depósito.
+export const GATEWAY_FEE_FIXED = 1;
 export const GATEWAY_FEE_PERCENT = 3.5;
 
 export function gatewayFee(amount) {
-  return round2((round2(amount) * GATEWAY_FEE_PERCENT) / 100);
+  return round2(GATEWAY_FEE_FIXED + (round2(amount) * GATEWAY_FEE_PERCENT) / 100);
 }
 
 // Apresentação apenas: o painel administrativo mostra o saldo do jogador 5%
@@ -93,7 +95,8 @@ export async function creditPaidDeposit(service, deposit, remote) {
     status: "paid",
     paid_at: remote?.paid_at || new Date().toISOString(),
     fee: round2(remote?.fee ?? deposit.fee),
-    net_amount: round2(remote?.net_amount ?? deposit.net_amount),
+    // O jogador recebe o valor integral; a taxa da Liqfy (R$ 1 + 3,5%) é custo da casa.
+    net_amount: amount,
     payer_name: remote?.payer_name || deposit.payer_name,
     txid: remote?.txid || deposit.txid,
     ...(remote?.gateway_id ? { gateway_id: String(remote.gateway_id) } : {}),

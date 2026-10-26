@@ -51,6 +51,8 @@ export default function AdminFinance() {
     loading: true,
     cash: null,
     cashError: "",
+    gateway: null,
+    gatewayError: "",
     deposits: [],
     withdrawals: [],
     players: [],
@@ -70,6 +72,8 @@ export default function AdminFinance() {
       loading: false,
       cash: data.cash || null,
       cashError: data.cash_error || "",
+      gateway: data.gateway || null,
+      gatewayError: data.gateway_error || "",
       deposits: data.deposits || [],
       withdrawals: data.withdrawals || [],
       players: data.players || [],
@@ -146,12 +150,21 @@ export default function AdminFinance() {
           </Button>
         </div>
         {overview.cash ? (
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+            <Stat
+              label="Disponível para sacar (Liqfy)"
+              value={overview.gateway ? formatCurrency(overview.gateway.available) : "—"}
+              hint={
+                overview.gateway
+                  ? `pendente ${formatCurrency(overview.gateway.pending)} · em trânsito ${formatCurrency(overview.gateway.held)}`
+                  : overview.gatewayError || "Saldo da Liqfy indisponível."
+              }
+              highlight
+            />
             <Stat
               label="Depósitos pagos no mês"
               value={formatCurrency(overview.cash.month_deposits)}
               hint={`${overview.cash.month_deposits_count} depósito(s)`}
-              highlight
             />
             <Stat label="Saques enviados no mês" value={formatCurrency(overview.cash.month_withdrawals)} />
             <Stat label="Resultado do mês" value={formatCurrency(overview.cash.month_net)} />

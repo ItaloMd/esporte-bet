@@ -7,7 +7,7 @@ import {
   WITHDRAWAL_RETENTION_PERCENT,
   withdrawalSendAmount,
 } from '../../shared/payments.ts';
-import { createPixWithdrawal, fromCents, pixKeyType, toCents, withdrawalStatus } from '../../shared/liqfy.ts';
+import { createPixWithdrawal, fromCents, getWalletBalance, pixKeyType, toCents, withdrawalStatus } from '../../shared/liqfy.ts';
 
 const FIELDS = [
   'min_deposit',
@@ -83,7 +83,7 @@ export default async function (req) {
 
     if (action === 'overview') {
       const monthStart = startOfMonthIso();
-      const [paidDeposits, sentWithdrawals, pendingWithdrawals, deposits, withdrawals, wallets, users] =
+      const [paidDeposits, sentWithdrawals, pendingWithdrawals, deposits, withdrawals, wallets, users, gatewayBalance] =
         await Promise.all([
           service.Deposit.aggregate({ query: { status: 'paid', paid_at: { $gte: monthStart } }, sum: ['amount'] }),
           service.Withdrawal.aggregate({
@@ -95,6 +95,7 @@ export default async function (req) {
           service.Withdrawal.filter({}, { sort: '-created_date', limit: 25 }),
           service.Wallet.filter({}, { sort: '-balance', limit: 50 }),
           service.User.list(),
+          getWalletBalance(),
         ]);
 
       const monthDeposits = sumOf(paidDeposits);
@@ -110,7 +111,22 @@ export default async function (req) {
       }));
       const playersTotal = round2(players.reduce((total, player) => total + player.visible_balance, 0));
 
+      // Saldo real da carteira Liqfy: base do "Disponível para sacar" do painel.
+      const gateway = gatewayBalance.ok
+        ? {
+            available: fromCents(gatewayBalance.data?.available),
+            held: fromCents(gatewayBalance.data?.held ?? gatewayBalance.data?.retained ?? 0),
+            pending: fromCents(gatewayBalance.data?.pending),
+            total: fromCents(gatewayBalance.data?.total),
+            currency: String(gatewayBalance.data?.currency || 'BRL'),
+          }
+        : null;
+
       return Response.json({
+        gateway,
+        gateway_error: gateway
+          ? ''
+          : publicMessage(gatewayBalance.data, 'Não foi possível consultar o saldo na Liqfy.'),
         settings: pickSettings(settings),
         cash: {
           month_deposits: monthDeposits,

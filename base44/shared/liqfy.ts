@@ -66,6 +66,11 @@ export function createPixWithdrawal(payload, idempotencyKey) {
   return liqfy('/withdrawals', { method: 'POST', body: payload, idempotencyKey });
 }
 
+/** Saldo da carteira Liqfy; `available` é o valor disponível para sacar. */
+export function getWalletBalance() {
+  return liqfy('/wallets/balance');
+}
+
 /** Tipos de chave aceitos pelo gateway; um tipo desconhecido é omitido. */
 export function pixKeyType(value) {
   const type = String(value || '').trim().toUpperCase();
