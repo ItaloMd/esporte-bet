@@ -52,6 +52,9 @@
     "payer_name": {
       "type": "string"
     },
+    "payer_cpf": {
+      "type": "string"
+    },
     "rollover_multiplier": {
       "type": "number",
       "default": 0

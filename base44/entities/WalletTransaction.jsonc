@@ -11,7 +11,8 @@
         "deposit",
         "bet",
         "cashout",
-        "prize"
+        "prize",
+        "adjustment"
       ],
       "default": "bet"
     },
