@@ -1,6 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.54';
 import { secrets } from 'base44:runtime';
-import { creditPaidDeposit, refundWithdrawal, round2 } from '../../shared/payments.ts';
+import { creditPaidDeposit, extractPayerCpf, isValidCpf, linkCpfToProfile, refundWithdrawal, round2 } from '../../shared/payments.ts';
 import { depositStatus, fromCents, verifyWebhookSignature, withdrawalStatus } from '../../shared/liqfy.ts';
 
 /** Eventos de cobrança e o status interno correspondente. */
@@ -45,11 +45,18 @@ export default async function (req) {
 
       const target = DEPOSIT_EVENTS[event];
       if (target === 'paid') {
+        const payerCpf = extractPayerCpf(data);
         await creditPaidDeposit(service, deposit, {
           amount: data.amount === undefined ? undefined : fromCents(data.amount),
           paid_at: payload.created_at,
           gateway_id: chargeId,
+          payer_cpf: payerCpf || undefined,
         });
+        // CPF do pagador vinculado automaticamente ao perfil quando o retorno
+        // do gateway o traz e a conta ainda não tem CPF.
+        if (payerCpf && isValidCpf(payerCpf)) {
+          await linkCpfToProfile(service, deposit.user_id, payerCpf);
+        }
       } else if (deposit.status === 'pending') {
         await service.Deposit.update(deposit.id, { status: 'cancelled' });
       }

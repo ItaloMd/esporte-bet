@@ -1,10 +1,11 @@
 import React from "react";
 import { Link } from "react-router-dom";
-import { Activity, Gauge, LayoutDashboard, Database, Gift, Images, ShieldAlert, ShieldCheck, SlidersHorizontal, Users, Wallet, Zap } from "lucide-react";
+import { Activity, Gauge, LayoutDashboard, Database, Gift, Images, ShieldAlert, ShieldCheck, SlidersHorizontal, UserCheck, Users, Wallet, Zap } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import AdminDashboard from "@/components/admin/AdminDashboard";
 import AdminUsers from "@/components/admin/AdminUsers";
+import AdminKyc from "@/components/admin/AdminKyc";
 import AdminAffiliates from "@/components/admin/AdminAffiliates";
 import AdminCatalog from "@/components/admin/AdminCatalog";
 import AdminBanners from "@/components/admin/AdminBanners";
@@ -20,6 +21,7 @@ import { useAuth } from "@/lib/AuthContext";
 const TABS = [
   { value: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { value: "users", label: "Usuários", icon: Users },
+  { value: "kyc", label: "Verificação KYC", icon: UserCheck },
   { value: "finance", label: "Financeiro", icon: Wallet },
   { value: "risk", label: "Caixa e risco", icon: Gauge },
   { value: "affiliates", label: "Afiliados", icon: Gift },
@@ -92,6 +94,9 @@ export default function Admin() {
         </TabsContent>
         <TabsContent value="users" className="mt-4">
           <AdminUsers actor={user} />
+        </TabsContent>
+        <TabsContent value="kyc" className="mt-4">
+          <AdminKyc actor={user} />
         </TabsContent>
         <TabsContent value="finance" className="mt-4">
           <AdminFinance />

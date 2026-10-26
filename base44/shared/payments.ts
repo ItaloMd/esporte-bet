@@ -38,6 +38,65 @@ export function gatewayDebitEstimate(amount) {
   return round2(sent + gatewayFee(sent));
 }
 
+/** Validação matemática do CPF (dígitos verificadores). */
+export function isValidCpf(value) {
+  const cpf = String(value || '').replace(/\D/g, '');
+  if (cpf.length !== 11) return false;
+  if (/^(\d)\1{10}$/.test(cpf)) return false;
+  const calc = (slice) => {
+    let sum = 0;
+    for (let i = 0; i < slice.length; i += 1) {
+      sum += Number(cpf[i]) * (slice.length + 1 - i);
+    }
+    const rest = (sum * 10) % 11;
+    return rest === 10 ? 0 : rest;
+  };
+  return calc(cpf.slice(0, 9)) === Number(cpf[9]) && calc(cpf.slice(0, 10)) === Number(cpf[10]);
+}
+
+/** Procura um CPF de pagador nas variantes de retorno do gateway. */
+export function extractPayerCpf(remote) {
+  if (!remote) return '';
+  const raw =
+    remote.payer_cpf ||
+    remote.payer?.cpf ||
+    remote.payer?.document ||
+    remote.payer?.document_number ||
+    remote.customer?.cpf ||
+    remote.customer?.document ||
+    remote.customer?.document_number ||
+    remote.payer_document ||
+    remote.document ||
+    '';
+  const digits = String(raw).replace(/\D/g, '');
+  return digits.length === 11 ? digits : '';
+}
+
+/**
+ * Vincula automaticamente o CPF do pagador (retorno do gateway) ao perfil do
+ * jogador quando a conta ainda não tem CPF. Nunca sobrescreve um CPF existente
+ * e nunca revincula um CPF já usado por outra conta.
+ */
+export async function linkCpfToProfile(service, userId, cpf) {
+  const digits = String(cpf || '').replace(/\D/g, '');
+  if (digits.length !== 11 || !isValidCpf(digits)) return null;
+
+  const page = await service.UserProfile.filter({ user_id: userId }, { limit: 1 });
+  const profile = page.items?.[0];
+  if (!profile) return null;
+  if (String(profile.cpf || '').replace(/\D/g, '')) return null;
+
+  const clash = await service.UserProfile.filter({ cpf: digits }, { limit: 1 });
+  if (clash.items?.length && clash.items[0].user_id !== userId) return null;
+
+  await service.UserProfile.update(profile.id, {
+    cpf: digits,
+    cpf_masked: `***.${digits.slice(3, 6)}.***-${digits.slice(9)}`,
+    cpf_checked: true,
+  });
+  return digits;
+}
+
 // Apresentação apenas: o painel administrativo mostra o saldo do jogador 5%
 // menor. A carteira e o saldo mostrado ao jogador nunca mudam.
 export const ADMIN_BALANCE_DISPLAY_PERCENT = 5;
@@ -107,6 +166,7 @@ export async function creditPaidDeposit(service, deposit, remote) {
     // O jogador recebe o valor integral; a taxa da Liqfy (R$ 1 + 3,5%) é custo da casa.
     net_amount: amount,
     payer_name: remote?.payer_name || deposit.payer_name,
+    ...(remote?.payer_cpf ? { payer_cpf: String(remote.payer_cpf).replace(/\D/g, '') } : {}),
     txid: remote?.txid || deposit.txid,
     ...(remote?.gateway_id ? { gateway_id: String(remote.gateway_id) } : {}),
   });

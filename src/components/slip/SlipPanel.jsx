@@ -54,7 +54,6 @@ export default function SlipPanel({ onDone }) {
       }
 
       if (typeof data.balance === "number") setBalance(data.balance);
-      await base44.functions.invoke("registerWager", { stake: amount }).catch(() => null);
 
       clear();
       toast({

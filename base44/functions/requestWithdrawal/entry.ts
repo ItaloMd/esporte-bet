@@ -34,6 +34,33 @@ export default async function (req) {
       return Response.json({ error: 'Selecione um tipo de chave PIX válido.' }, { status: 400 });
     }
 
+    // Saques exclusivamente via chave PIX do tipo CPF, na titularidade do
+    // próprio jogador: a chave precisa ser exatamente o CPF da conta.
+    if (pixKeyType !== 'cpf') {
+      return Response.json(
+        { error: 'Saques somente via chave PIX do tipo CPF, na titularidade da sua própria conta.' },
+        { status: 400 },
+      );
+    }
+    const profilePage = await service.UserProfile.filter({ user_id: user.id }, { limit: 1 });
+    const profile = profilePage.items?.[0];
+    const profileCpf = String(profile?.cpf || '').replace(/\D/g, '');
+    if (!profile || !profileCpf) {
+      return Response.json(
+        {
+          error: 'Nenhum CPF vinculado à sua conta. Ele é vinculado automaticamente após o seu primeiro depósito.',
+          code: 'cpf_missing',
+        },
+        { status: 403 },
+      );
+    }
+    if (String(pixKey).replace(/\D/g, '') !== profileCpf) {
+      return Response.json(
+        { error: 'A chave PIX deve ser exatamente o CPF cadastrado na sua conta.', code: 'cpf_mismatch' },
+        { status: 400 },
+      );
+    }
+
     // Saque de comissões do programa de indicações: exige liberação da
     // administração (global ou individual) e respeita o saldo elegível.
     if (kind === 'affiliate') {

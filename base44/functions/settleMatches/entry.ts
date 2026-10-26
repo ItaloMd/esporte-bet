@@ -253,7 +253,30 @@ export default async function (req) {
       if (results.length) await db.SimulationResult.bulkCreate(results);
       settledTickets = results.length;
 
-      // 4) Credita o prêmio dos boletins ganhos. O marcador prize_paid garante
+      // 4) Rollover: conta somente na liquidação do boletim, nunca no registro
+      // da aposta e nem no cashout. Anulados não contam.
+      const rolloverTicketIds = results
+        .filter((row) => row.result === 'won' || row.result === 'lost')
+        .map((row) => row.ticket_id);
+      if (rolloverTicketIds.length) {
+        const page = await db.SimulationTicket.filter({ id: { $in: rolloverTicketIds } }, { limit: rolloverTicketIds.length });
+        const rolloverByUser = new Map();
+        (page.items || []).forEach((ticket) => {
+          const stake = round2(ticket.stake_points);
+          if (!stake || stake <= 0) return;
+          rolloverByUser.set(ticket.user_id, round2((rolloverByUser.get(ticket.user_id) || 0) + stake));
+        });
+        for (const [userId, stakeTotal] of rolloverByUser) {
+          const walletPage = await db.Wallet.filter({ user_id: userId }, { limit: 1 });
+          const wallet = walletPage.items?.[0];
+          if (!wallet) continue;
+          await db.Wallet.update(wallet.id, {
+            rollover_completed: round2(Number(wallet.rollover_completed || 0) + stakeTotal),
+          });
+        }
+      }
+
+      // 5) Credita o prêmio dos boletins ganhos. O marcador prize_paid garante
       // que o mesmo prêmio nunca seja pago duas vezes.
       const wonIds = results.filter((row) => row.result === 'won').map((row) => row.ticket_id);
       for (const ids of chunkArray(wonIds, 100)) {

@@ -5,15 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatCurrency } from "@/lib/format";
+import { formatCpf } from "@/lib/cpf";
 import KycForm from "@/components/wallet/KycForm";
-
-const KEY_TYPES = [
-  { value: "cpf", label: "CPF" },
-  { value: "cnpj", label: "CNPJ" },
-  { value: "email", label: "E-mail" },
-  { value: "phone", label: "Telefone" },
-  { value: "random", label: "Chave aleatória" },
-];
 
 export default function WithdrawPanel({
   minWithdrawal,
@@ -28,11 +21,11 @@ export default function WithdrawPanel({
   onKycSubmitted,
 }) {
   const [amount, setAmount] = useState("");
-  const [pixKey, setPixKey] = useState("");
-  const [pixKeyType, setPixKeyType] = useState("cpf");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [done, setDone] = useState(false);
+
+  const cpfDigits = String(profile?.cpf || "").replace(/\D/g, "");
 
   const submit = async () => {
     setError("");
@@ -40,8 +33,8 @@ export default function WithdrawPanel({
     try {
       await base44.functions.invoke("requestWithdrawal", {
         amount: Number(amount),
-        pix_key: pixKey,
-        pix_key_type: pixKeyType,
+        pix_key: cpfDigits,
+        pix_key_type: "cpf",
       });
       setDone(true);
       setAmount("");
@@ -126,28 +119,19 @@ export default function WithdrawPanel({
         <p className="text-[11px] text-muted-foreground">Saque mínimo de {formatCurrency(minWithdrawal)}.</p>
       </div>
       <div className="space-y-2">
-        <Label htmlFor="withdraw-key-type">Tipo de chave PIX</Label>
-        <select
-          id="withdraw-key-type"
-          value={pixKeyType}
-          onChange={(event) => setPixKeyType(event.target.value)}
-          disabled={blocked}
-          className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
-        >
-          {KEY_TYPES.map((type) => (
-            <option key={type.value} value={type.value}>{type.label}</option>
-          ))}
-        </select>
-      </div>
-      <div className="space-y-2">
-        <Label htmlFor="withdraw-key">Chave PIX de destino</Label>
-        <Input
-          id="withdraw-key"
-          value={pixKey}
-          onChange={(event) => setPixKey(event.target.value)}
-          placeholder="Somente sua chave, de sua titularidade"
-          disabled={blocked}
-        />
+        <Label>Chave PIX (seu CPF cadastrado)</Label>
+        {cpfDigits ? (
+          <p className="rounded-lg border border-border bg-secondary/40 px-3 py-2 text-sm font-medium">
+            {formatCpf(cpfDigits)}
+          </p>
+        ) : (
+          <p className="rounded-lg bg-secondary/40 px-3 py-2 text-xs text-muted-foreground">
+            Nenhum CPF vinculado à sua conta. Ele é vinculado automaticamente após o seu primeiro depósito.
+          </p>
+        )}
+        <p className="text-[11px] text-muted-foreground">
+          Saques são enviados exclusivamente para o CPF na titularidade da sua conta.
+        </p>
       </div>
 
       {blocked && (
@@ -157,7 +141,7 @@ export default function WithdrawPanel({
       )}
       {error && <p className="text-xs text-destructive">{error}</p>}
 
-      <Button className="w-full" onClick={submit} disabled={loading || blocked}>
+      <Button className="w-full" onClick={submit} disabled={loading || blocked || !cpfDigits}>
         {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
         Solicitar saque
       </Button>
