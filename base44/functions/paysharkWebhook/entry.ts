@@ -17,10 +17,21 @@ import { fromCents, paymentStatus, transferStatus, verifyWebhookSignature } from
 export default async function (req) {
   try {
     const raw = await req.text();
-    const secret = secrets.get('PAYSHARK_WEBHOOK_SECRET');
-    if (!secret) return Response.json({ error: 'Webhook não configurado.' }, { status: 401 });
+    // O Payshark gera um secret diferente para cada tipo de webhook
+    // (Pagamentos e Transferências); a assinatura é válida com qualquer um
+    // deles — tentamos ambos.
+    const candidates = [
+      secrets.get('PAYSHARK_WEBHOOK_SECRET_PAGAMENTOS'),
+      secrets.get('PAYSHARK_WEBHOOK_SECRET_TRANSFERENCIAS'),
+    ].filter(Boolean);
+    if (!candidates.length) return Response.json({ error: 'Webhook não configurado.' }, { status: 401 });
 
-    const signature = await verifyWebhookSignature(raw, req.headers.get('x-signature'), secret);
+    const header = req.headers.get('x-signature');
+    let signature = { ok: false, reason: 'Assinatura ausente.' };
+    for (const secret of candidates) {
+      signature = await verifyWebhookSignature(raw, header, secret);
+      if (signature.ok) break;
+    }
     if (!signature.ok) return Response.json({ error: signature.reason }, { status: 401 });
 
     const payload = JSON.parse(raw || '{}');

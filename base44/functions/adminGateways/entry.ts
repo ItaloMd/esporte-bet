@@ -53,7 +53,9 @@ async function gatewayStatus() {
 
   const payshark = {
     configured: Boolean(secrets.get('PAYSHARK_API_KEY') && secrets.get('PAYSHARK_SAQUE_KEY')),
-    webhook_configured: Boolean(secrets.get('PAYSHARK_WEBHOOK_SECRET')),
+    webhook_configured: Boolean(
+      secrets.get('PAYSHARK_WEBHOOK_SECRET_PAGAMENTOS') && secrets.get('PAYSHARK_WEBHOOK_SECRET_TRANSFERENCIAS'),
+    ),
     balance: null,
     store: null,
     error: '',
