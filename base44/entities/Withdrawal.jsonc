@@ -18,6 +18,14 @@
       ],
       "default": "player"
     },
+    "gateway": {
+      "type": "string",
+      "enum": [
+        "liqfy",
+        "payshark"
+      ],
+      "default": "liqfy"
+    },
     "affiliate_code": {
       "type": "string"
     },

@@ -5,6 +5,14 @@
     "user_id": {
       "type": "string"
     },
+    "gateway": {
+      "type": "string",
+      "enum": [
+        "liqfy",
+        "payshark"
+      ],
+      "default": "liqfy"
+    },
     "external_id": {
       "type": "string"
     },
