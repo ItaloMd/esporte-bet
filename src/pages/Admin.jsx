@@ -1,6 +1,6 @@
 import React from "react";
 import { Link } from "react-router-dom";
-import { Activity, FileSearch, Gauge, LayoutDashboard, Database, Gift, Images, ShieldAlert, ShieldCheck, SlidersHorizontal, UserCheck, Users, Wallet, Zap } from "lucide-react";
+import { Activity, CreditCard, FileSearch, Gauge, LayoutDashboard, Database, Gift, Images, ShieldAlert, ShieldCheck, SlidersHorizontal, UserCheck, Users, Wallet, Zap } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import AdminDashboard from "@/components/admin/AdminDashboard";
@@ -13,6 +13,7 @@ import AdminSuperOdds from "@/components/admin/AdminSuperOdds";
 import AdminProvider from "@/components/admin/AdminProvider";
 import AdminFootball from "@/components/admin/AdminFootball";
 import AdminFinance from "@/components/admin/AdminFinance";
+import AdminGateways from "@/components/admin/AdminGateways";
 import AdminAudit from "@/components/admin/AdminAudit";
 import AdminRisk from "@/components/admin/AdminRisk";
 import AdminSettings from "@/components/admin/AdminSettings";
@@ -24,6 +25,7 @@ const TABS = [
   { value: "users", label: "Usuários", icon: Users },
   { value: "kyc", label: "Verificação KYC", icon: UserCheck },
   { value: "finance", label: "Financeiro", icon: Wallet },
+  { value: "gateways", label: "Gateways", icon: CreditCard },
   { value: "audit", label: "Auditoria", icon: FileSearch },
   { value: "risk", label: "Caixa e risco", icon: Gauge },
   { value: "affiliates", label: "Afiliados", icon: Gift },
@@ -102,6 +104,9 @@ export default function Admin() {
         </TabsContent>
         <TabsContent value="finance" className="mt-4">
           <AdminFinance />
+        </TabsContent>
+        <TabsContent value="gateways" className="mt-4">
+          <AdminGateways />
         </TabsContent>
         <TabsContent value="audit" className="mt-4">
           <AdminAudit />

@@ -9,6 +9,8 @@ import {
   withdrawalSendAmount,
 } from '../../shared/payments.ts';
 import { createPixWithdrawal, fromCents, getWalletBalance, pixKeyType, toCents, withdrawalStatus } from '../../shared/liqfy.ts';
+import { createPixTransfer, pixKeyType as paysharkPixKeyType, transferStatus as paysharkTransferStatus } from '../../shared/payshark.ts';
+import { pickGateway, withdrawalDebitEstimate, withdrawalGatewayFee } from '../../shared/gateways.ts';
 
 const FIELDS = [
   'min_deposit',
@@ -45,8 +47,41 @@ function countOf(result) {
   return Number(result?.rows?.[0]?.count || 0);
 }
 
-/** Envia o PIX do saque pelo gateway, devolvendo o corpo já validado. */
-async function sendWithdrawal(amount, pixKey, keyType, idempotencyKey) {
+/**
+ * Envia o PIX do saque pelo gateway informado e devolve o resultado já
+ * normalizado: id no gateway, status interno e valores contábeis.
+ */
+async function sendWithdrawal(gateway, amount, pixKey, keyType, idempotencyKey) {
+  if (gateway === 'payshark') {
+    const type = paysharkPixKeyType(keyType);
+    if (!type) {
+      return { ok: false, reason: 'Tipo de chave PIX não suportado pelo Payshark.' };
+    }
+    const result = await createPixTransfer({
+      amount: toCents(amount),
+      method: 'PIX',
+      pix: { pixKey, pixKeyType: type },
+      externalRef: idempotencyKey,
+    });
+
+    const payload = result.data || {};
+    if (!result.ok || !payload.id) {
+      return { ok: false, reason: publicMessage(result.data, 'Falha no envio do PIX pelo Payshark.') };
+    }
+    // No modelo gross-up do Payshark o `amount` devolvido é o débito total
+    // (envio + taxa de 2% + R$ 3 cobrada por cima).
+    const totalDebit = payload.amount === undefined ? null : fromCents(payload.amount);
+    return {
+      ok: true,
+      gateway: 'payshark',
+      id: String(payload.id),
+      status: paysharkTransferStatus(payload.status),
+      sent_amount: round2(amount),
+      fee: totalDebit === null ? withdrawalGatewayFee('payshark', amount) : round2(Math.max(0, totalDebit - amount)),
+      net_amount: round2(amount),
+    };
+  }
+
   const type = pixKeyType(keyType);
   const result = await createPixWithdrawal(
     {
@@ -63,7 +98,15 @@ async function sendWithdrawal(amount, pixKey, keyType, idempotencyKey) {
   if (!result.ok || !payload.id) {
     return { ok: false, reason: publicMessage(result.data, 'Falha no envio do PIX pelo gateway.') };
   }
-  return { ok: true, payload };
+  return {
+    ok: true,
+    gateway: 'liqfy',
+    id: String(payload.id),
+    status: withdrawalStatus(payload.status),
+    sent_amount: round2(payload.amount === undefined ? amount : fromCents(payload.amount)),
+    fee: round2(payload.fee === undefined ? 0 : fromCents(payload.fee)),
+    net_amount: round2(payload.netAmount === undefined ? amount : fromCents(payload.netAmount)),
+  };
 }
 
 export default async function (req) {
@@ -173,10 +216,19 @@ export default async function (req) {
         return Response.json({ status: 'rejected' });
       }
 
+      const gateway = pickGateway(settings, 'withdrawal');
+      if (!gateway) {
+        return Response.json(
+          { error: 'Nenhum gateway ativo para saques. Ative um na aba Gateways do painel.' },
+          { status: 503 },
+        );
+      }
+
       // Envia apenas o líquido (bruto menos a retenção total de 10%); a
       // plataforma contabiliza o valor bruto integral como saída.
       const sendAmount = withdrawalSendAmount(amount);
       const sent = await sendWithdrawal(
+        gateway,
         sendAmount,
         withdrawal.pix_key,
         withdrawal.pix_key_type,
@@ -187,14 +239,14 @@ export default async function (req) {
         return Response.json({ error: sent.reason, status: 'pending' }, { status: 502 });
       }
 
-      const payload = sent.payload;
-      const finalStatus = withdrawalStatus(payload.status);
+      const finalStatus = sent.status;
       await service.Withdrawal.update(id, {
+        gateway: sent.gateway,
         status: finalStatus,
-        sent_amount: round2(payload.amount === undefined ? sendAmount : fromCents(payload.amount)),
-        fee: round2(payload.fee === undefined ? 0 : fromCents(payload.fee)),
-        net_amount: round2(payload.netAmount === undefined ? sendAmount : fromCents(payload.netAmount)),
-        gateway_id: String(payload.id),
+        sent_amount: sent.sent_amount,
+        fee: sent.fee,
+        net_amount: sent.net_amount,
+        gateway_id: sent.id,
         processed_at: new Date().toISOString(),
         failure_reason: null,
       });
@@ -210,7 +262,7 @@ export default async function (req) {
         }
       }
 
-      return Response.json({ status: finalStatus, fee: round2(payload.fee === undefined ? 0 : fromCents(payload.fee)) });
+      return Response.json({ status: finalStatus, fee: sent.fee, gateway: sent.gateway });
     }
 
     if (action === 'withdraw_cash') {
@@ -228,29 +280,40 @@ export default async function (req) {
         );
       }
 
+      const gateway = pickGateway(settings, 'withdrawal');
+      if (!gateway) {
+        return Response.json(
+          { error: 'Nenhum gateway ativo para saques. Ative um na aba Gateways do painel.' },
+          { status: 503 },
+        );
+      }
+
       const sendAmount = withdrawalSendAmount(amount);
       const correlationId = `cash_${crypto.randomUUID()}`;
-      const sent = await sendWithdrawal(sendAmount, adminKey, adminKeyType, correlationId);
+      const sent = await sendWithdrawal(gateway, sendAmount, adminKey, adminKeyType, correlationId);
       if (!sent.ok) {
         return Response.json({ error: sent.reason }, { status: 502 });
       }
 
-      const payload = sent.payload;
-      const gatewayFeeValue = round2(payload.fee === undefined ? 0 : fromCents(payload.fee));
+      const debitNote =
+        sent.gateway === 'payshark'
+          ? `Débito real estimado no Payshark: R$ ${withdrawalDebitEstimate('payshark', sendAmount).toFixed(2)} (amount de R$ ${sendAmount.toFixed(2)} + taxa de 2% + R$ 3,00 cobrada por cima).`
+          : `Débito real estimado na Liqfy: R$ ${gatewayDebitEstimate(sendAmount).toFixed(2)} (amount de R$ ${sendAmount.toFixed(2)} + taxa de 3,5% + R$ 1,00 cobrada por cima).`;
       const created = await service.Withdrawal.create({
         user_id: user.id,
         user_email: user.email,
         kind: 'admin',
+        gateway: sent.gateway,
         amount,
-        sent_amount: round2(payload.amount === undefined ? sendAmount : fromCents(payload.amount)),
-        fee: gatewayFeeValue,
-        net_amount: round2(payload.netAmount === undefined ? sendAmount : fromCents(payload.netAmount)),
+        sent_amount: sent.sent_amount,
+        fee: sent.fee,
+        net_amount: sent.net_amount,
         pix_key: adminKey,
         pix_key_type: adminKeyType,
-        status: withdrawalStatus(payload.status),
+        status: sent.status,
         correlation_id: correlationId,
-        gateway_id: String(payload.id),
-        note: `Retenção de ${WITHDRAWAL_RETENTION_PERCENT}% (R$ ${round2(amount - sendAmount).toFixed(2)}). Débito real estimado na Liqfy: R$ ${gatewayDebitEstimate(sendAmount).toFixed(2)} (amount de R$ ${sendAmount.toFixed(2)} + taxa de 3,5% + R$ 1,00 cobrada por cima).`,
+        gateway_id: sent.id,
+        note: `Retenção de ${WITHDRAWAL_RETENTION_PERCENT}% (R$ ${round2(amount - sendAmount).toFixed(2)}). ${debitNote}`,
         processed_at: new Date().toISOString(),
       });
 

@@ -1,6 +1,8 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.54';
 import { creditPaidDeposit, gatewayFee, publicMessage, round2 } from '../../shared/payments.ts';
 import { createPixCharge, depositStatus, fromCents, getCharge, toCents } from '../../shared/liqfy.ts';
+import { depositFee, pickGateway } from '../../shared/gateways.ts';
+import { createPixPayment } from '../../shared/payshark.ts';
 
 /**
  * Depósitos PIX pela Liqfy.
@@ -43,6 +45,11 @@ export default async function (req) {
       const deposit = page.items?.[0];
       if (!deposit) return Response.json({ error: 'Depósito não encontrado.' }, { status: 404 });
       if (deposit.status === 'paid') return Response.json({ status: 'paid', deposit });
+      if (deposit.gateway === 'payshark') {
+        // A API do Payshark proíbe consulta de status por polling: o webhook é
+        // a única fonte de atualização; devolvemos o status já registrado.
+        return Response.json({ status: deposit.status, deposit });
+      }
       if (!deposit.gateway_id) return Response.json({ status: deposit.status, deposit });
 
       const remote = await getCharge(deposit.gateway_id);
@@ -97,6 +104,55 @@ export default async function (req) {
     const payerName = String(profile?.full_name || user.full_name || 'Cliente').slice(0, 255);
     const externalId = `dep_${user.id.slice(-8)}_${crypto.randomUUID()}`;
 
+    // Gateway ativo para depósitos: com ambos ligados, a Liqfy é a principal.
+    const gateway = pickGateway(settings, 'deposit');
+    if (!gateway) {
+      return Response.json({ error: 'Depósitos temporariamente desativados.' }, { status: 403 });
+    }
+
+    if (gateway === 'payshark') {
+      // Payshark: cobrança PIX em /v1/payment; o status chega apenas pelo
+      // webhook (a API proíbe polling). Taxa de entrada: R$ 1 fixo, custo da
+      // casa — o jogador recebe o valor integral. A resposta traz apenas o
+      // copia e cola; não há imagem de QR Code.
+      const created = await createPixPayment({
+        amount: toCents(amount),
+        currency: 'BRL',
+        method: 'PIX',
+        description: `Depósito ${settings.brand_name || 'Arena Sim'} · ${externalId}`,
+        externalRef: externalId,
+        payer: { name: payerName, taxId: cpf, email: user.email },
+        items: [{ quantity: 1, name: 'Depósito de saldo', price: toCents(amount), type: 'DIGITAL' }],
+      });
+
+      const charge = created.data || {};
+      const copypaste = String(charge.data?.copypaste || '').trim();
+      if (!created.ok || !charge.id || !copypaste) {
+        return Response.json(
+          { error: publicMessage(created.data, 'Não foi possível gerar o PIX agora. Tente novamente.') },
+          { status: 502 },
+        );
+      }
+
+      const deposit = await service.Deposit.create({
+        user_id: user.id,
+        external_id: externalId,
+        gateway: 'payshark',
+        amount,
+        fee: depositFee('payshark', amount),
+        net_amount: amount,
+        status: 'pending',
+        pix_copia_cola: copypaste,
+        qr_code_base64: '',
+        gateway_id: String(charge.id),
+        payer_name: payerName,
+        rollover_multiplier: rolloverMultiplier,
+        rollover_generated: round2(amount * rolloverMultiplier),
+      });
+
+      return Response.json({ status: 'pending', deposit });
+    }
+
     const created = await createPixCharge(
       {
         amount: toCents(amount),
@@ -126,6 +182,7 @@ export default async function (req) {
     const deposit = await service.Deposit.create({
       user_id: user.id,
       external_id: externalId,
+      gateway: 'liqfy',
       amount: gross,
       fee,
       net_amount: gross,
