@@ -81,12 +81,13 @@ export default async function (req) {
 
     const level = quotaLevel(used, limit);
     const policy = quotaPolicy(level);
-    // Em faixa alta o essencial são os placares: as cotações param antes deles.
-    if (level >= 2) {
+    // Somente na contingência as cotações param: a reserva de chamadas abaixo
+    // já protege os placares, que continuam mesmo em consumo reduzido.
+    if (level === 3) {
       await releaseLock(db, quotaRecord);
       return Response.json({
         skipped: true,
-        reason: `Cotações suspensas: orçamento da API-Football em ${quotaPercent(used, limit)}% (${level === 3 ? 'contingência' : 'consumo reduzido'})`,
+        reason: `Cotações suspensas: orçamento da API-Football em ${quotaPercent(used, limit)}% (contingência)`,
         quota: { used, limit, level },
       });
     }

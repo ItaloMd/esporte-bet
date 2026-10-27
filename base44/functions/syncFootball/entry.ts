@@ -80,13 +80,27 @@ function nextAuditAt(nowMs, settings, checks) {
   return new Date(nowMs + (checks >= 2 ? fastMinutes : recheckMinutes) * 60000).toISOString();
 }
 
-/** Partidas com auditoria vencida: nunca consultadas antes do horário agendado. */
-async function loadDueEvents(db, nowIso) {
+/**
+ * Partidas com auditoria vencida: nunca consultadas antes do horário agendado.
+ * Somente partidas já exibidas (com cotação) ou com aposta pendente entram —
+ * partidas importadas que nunca receberam cotação não são exibidas nem aceitam
+ * aposta, então não consomem créditos de auditoria.
+ */
+async function loadDueEvents(db, nowIso, openEventIds = []) {
+  const orConditions = [{ odds_status: { $ne: 'unavailable' } }];
+  for (let index = 0; index < openEventIds.length; index += 100) {
+    orConditions.push({ id: { $in: openEventIds.slice(index, index + 100) } });
+  }
   const due = [];
   let cursor = null;
   for (let round = 0; round < 4; round += 1) {
     const page = await db.Event.filter(
-      { fixture_id: { $exists: true }, next_check_at: { $lte: nowIso }, status: { $in: ['scheduled', 'live'] } },
+      {
+        fixture_id: { $exists: true },
+        next_check_at: { $lte: nowIso },
+        status: { $in: ['scheduled', 'live'] },
+        $or: orConditions,
+      },
       { limit: 500, sort: 'next_check_at', ...(cursor ? { cursor } : {}) },
     );
     due.push(...(page.items || []));
@@ -182,7 +196,8 @@ function buildCreate(fixture, nowIso, competitionId, settings) {
     status: fixture.status,
     tracking: localDate === todayKey ? 'today' : 'upcoming',
     odds_status: 'unavailable',
-    published: true,
+    // Nasce sem publicação: só aparece na grade quando o provedor cota o jogo.
+    published: false,
     source: 'provider',
     discovered_at: nowIso,
     last_sync_at: nowIso,
@@ -230,10 +245,10 @@ function pickCandidate(candidates, fixture) {
 /**
  * Sincronização econômica da API-Football, em dois modos:
  *
- * - `calendar` (importação diária, 23:59): busca as partidas dos próximos dias
- *   em lote, uma chamada por data, e agenda a auditoria de cada partida para
- *   o início + 2 horas. O botão manual inclui hoje, para preencher a grade
- *   imediatamente.
+ * - `calendar` (importação diária, 00:10): busca as partidas do dia e do dia
+ *   seguinte em lote, uma chamada por data, e agenda a auditoria de cada
+ *   partida para o início + 2 horas. O botão manual busca as mesmas datas,
+ *   preenchendo a grade imediatamente.
  * - `audit` (rotina de 5 minutos): consulta em lote (/fixtures?ids, até 20
  *   partidas por chamada) apenas as partidas cujo horário de auditoria venceu.
  *   Nenhuma consulta é feita durante o jogo antes desse horário. Partida
@@ -311,6 +326,20 @@ export default async function (req) {
       statusError = String(error?.message || error);
     }
 
+    // A contagem oficial do provedor (/status) é a verdade sobre o consumo: o
+    // contador interno é corrigido para baixo quando cobrou chamadas que o
+    // provedor não cobrou (ex.: respostas recusadas por limite por minuto).
+    if (account?.current !== null && account?.current !== undefined && account.current < used) {
+      quotaRecord = await saveQuota(db, quotaRecord, {
+        ...(quotaRecord?.id ? {} : { day }),
+        used: account.current,
+        limit,
+        level: quotaLevel(account.current, limit),
+        notes: 'Consumo interno corrigido pela contagem oficial do provedor',
+      });
+      used = account.current;
+    }
+
     const level = quotaLevel(used, limit);
     const policy = quotaPolicy(level);
     const planName = account?.plan || settings.football_plan || '';
@@ -319,13 +348,10 @@ export default async function (req) {
     if (mode === 'calendar') {
       const windowDays = Math.min(Math.max(numberOr(settings.football_window_days, 2), 1), MAX_CALENDAR_DAYS);
       const calendarRefreshSeconds = numberOr(settings.football_calendar_refresh_seconds, 21600);
-      // A rotina das 23:59 busca os próximos dias; o botão manual inclui hoje.
+      // A rotina das 00:10 e o botão manual buscam as mesmas datas: o dia atual
+      // (às 00:10, o dia que acabou de começar) e o(s) seguinte(s).
       const todayKey = localDateString(now, FOOTBALL_TIMEZONE);
-      const dates = [...new Set(
-        payload?.trigger === 'manual'
-          ? [todayKey, ...upcomingDates(now, windowDays)]
-          : upcomingDates(now, windowDays),
-      )];
+      const dates = [...new Set([todayKey, ...upcomingDates(now, Math.max(1, windowDays) - 1)])];
       const planDays = policy.calendarDays > 0 ? dates.slice(0, policy.calendarDays) : dates;
 
       const fixtures = [];
@@ -405,8 +431,11 @@ export default async function (req) {
         const competition = competitionsByName.get(slugify(fixture.competition_name));
         const startMs = Date.parse(fixture.start_time);
         const withinWindow = startMs >= nowMs - CREATE_BEHIND_MS && startMs <= nowMs + CREATE_AHEAD_MS;
-        if (!settings.football_create_events || !competition || !withinWindow) return;
-        creations.push(buildCreate(fixture, nowIso, competition.id, settings));
+        if (!settings.football_create_events || !withinWindow) return;
+        // A curadoria do que aparece na grade é feita pela cotação: a partida é
+        // criada sem publicação e só vira visível quando o provedor cota o jogo.
+        // A competição ativa é vinculada quando o nome casa com o catálogo.
+        creations.push(buildCreate(fixture, nowIso, competition?.id || '', settings));
       });
 
       for (const batch of chunkArray(updates, 200)) await db.Event.bulkUpdate(batch);
@@ -488,17 +517,18 @@ export default async function (req) {
     }
 
     /* --------------------- auditoria de encerramento --------------------- */
-    let due = await loadDueEvents(db, nowIso);
+    // Apostas pendentes sempre precisam de resultado, tenham cotação ou não.
+    const openEventIds = new Set();
+    let openCursor = null;
+    for (let round = 0; round < 4; round += 1) {
+      const page = await db.SimulationSelection.filter({ status: 'open' }, { limit: 500, ...(openCursor ? { cursor: openCursor } : {}) });
+      (page.items || []).forEach((row) => openEventIds.add(row.event_id));
+      openCursor = page.next_cursor;
+      if (!page.has_more) break;
+    }
+    let due = await loadDueEvents(db, nowIso, [...openEventIds]);
     if (policy.criticalOnly) {
       // Contingência: só partidas com apostas pendentes consomem créditos.
-      const openEventIds = new Set();
-      let cursor = null;
-      for (let round = 0; round < 4; round += 1) {
-        const page = await db.SimulationSelection.filter({ status: 'open' }, { limit: 500, ...(cursor ? { cursor } : {}) });
-        (page.items || []).forEach((row) => openEventIds.add(row.event_id));
-        cursor = page.next_cursor;
-        if (!page.has_more) break;
-      }
       due = due.filter((event) => openEventIds.has(event.id));
     }
 

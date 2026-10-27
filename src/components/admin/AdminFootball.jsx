@@ -143,6 +143,33 @@ export default function AdminFootball({ actor }) {
     }
   };
 
+  /** Ciclo completo em um clique: importação, auditoria, cotações e liquidação. */
+  const runAuditNow = async () => {
+    setRunning(true);
+    try {
+      const steps = [
+        { fn: "syncFootball", args: { mode: "calendar", trigger: "manual" }, label: "Calendário importado" },
+        { fn: "syncFootball", args: { mode: "audit", trigger: "manual" }, label: "Partidas auditadas" },
+        { fn: "syncFootballOdds", args: { mode: "auto", trigger: "manual" }, label: "Cotações atualizadas" },
+        { fn: "settleMatches", args: { trigger: "manual" }, label: "Bilhetes liquidados" },
+      ];
+      for (const step of steps) {
+        const response = await base44.functions.invoke(step.fn, step.args);
+        const data = response.data || {};
+        if (data.error) {
+          toast({ title: "Falha na etapa", description: `${step.fn}: ${data.error}`, variant: "destructive" });
+          break;
+        }
+        toast({ title: step.label, description: data.summary || data.reason || "" });
+      }
+      await load();
+    } catch (error) {
+      toast({ title: "Falha na sincronização", description: error.message, variant: "destructive" });
+    } finally {
+      setRunning(false);
+    }
+  };
+
   if (!settings) return <div className="card-surface h-40 animate-pulse" />;
 
   const used = Number(quota?.used || 0);
@@ -167,7 +194,7 @@ export default function AdminFootball({ actor }) {
               <CalendarClock className={`mr-2 h-3.5 w-3.5 ${running ? "animate-spin" : ""}`} />
               Importar calendário
             </Button>
-            <Button size="sm" onClick={() => runSync("audit")} disabled={running}>
+            <Button size="sm" onClick={runAuditNow} disabled={running}>
               <SearchCheck className="mr-2 h-3.5 w-3.5" />
               Auditar agora
             </Button>
@@ -200,7 +227,7 @@ export default function AdminFootball({ actor }) {
         <Progress value={percent} />
 
         <ul className="space-y-1 text-xs text-muted-foreground">
-          <li>• Importação automática: todo dia às 23:59, buscando os próximos {Number(settings.football_window_days || 2)} dias (a partir de amanhã).</li>
+          <li>• Importação automática: todo dia às 00:10, buscando {Number(settings.football_window_days || 2)} dia(s), sempre incluindo o dia atual e o seguinte.</li>
           <li>• Última importação completa: {settings.football_last_calendar_at ? timeAgo(settings.football_last_calendar_at) : "nunca"}</li>
           <li>• Próxima auditoria prevista: {settings.football_next_run_at ? formatDateTime(settings.football_next_run_at) : "nenhuma partida agendada"}</li>
           <li>• Resumo da última execução: {settings.football_last_summary || "—"}</li>
@@ -219,7 +246,7 @@ export default function AdminFootball({ actor }) {
         <div>
           <h2 className="text-sm font-semibold">Como os créditos são economizados</h2>
           <ul className="mt-1 space-y-1 text-xs text-muted-foreground">
-            <li>• Uma chamada por data na importação: todo dia às 23:59, a rotina busca os próximos dias em lote (1 crédito por data).</li>
+            <li>• Uma chamada por data na importação: todo dia às 00:10, a rotina busca o dia e o dia seguinte em lote (1 crédito por data).</li>
             <li>• Nenhuma consulta durante o jogo: a primeira auditoria de cada partida acontece 2 horas depois do horário de início previsto.</li>
             <li>• Se a partida ainda estiver em andamento, nova verificação em 30 minutos; a partir da segunda verificação, a cada 15 minutos até encerrar.</li>
             <li>• Encerrada (tempo normal, prorrogação ou pênaltis), o resultado é gravado e a partida nunca mais é consultada.</li>
@@ -243,8 +270,8 @@ export default function AdminFootball({ actor }) {
             <Label htmlFor="fb_days">Dias importados por dia</Label>
             <Input id="fb_days" type="number" min="1" max="7" value={settings.football_window_days} onChange={(event) => update({ football_window_days: Number(event.target.value) })} />
             <p className="text-[11px] text-muted-foreground">
-              Quantos dias à frente a importação das 23:59 busca, sempre a partir de amanhã. Padrão 2: amanhã e depois.
-              O botão "Importar calendário" inclui também hoje, para preencher a grade imediatamente.
+              Quantos dias a importação das 00:10 busca, sempre incluindo o dia atual. Padrão 2: hoje e amanhã.
+              O botão "Auditar agora" faz o ciclo completo — importação, auditoria, cotações e liquidação — na hora.
             </p>
           </div>
           <div className="space-y-2">
@@ -287,7 +314,7 @@ export default function AdminFootball({ actor }) {
             <Switch checked={Boolean(settings.football_enabled)} onCheckedChange={(value) => update({ football_enabled: value })} />
           </label>
           <label className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2 text-sm">
-            Criar partidas das competições ativas
+            Criar partidas dos dias importados
             <Switch checked={Boolean(settings.football_create_events)} onCheckedChange={(value) => update({ football_create_events: value })} />
           </label>
         </div>
