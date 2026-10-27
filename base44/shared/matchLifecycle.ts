@@ -170,7 +170,7 @@ export async function markStartedEventsLive(db, nowIso) {
     if (recent.length) {
       await db.Event.updateMany(
         { id: { $in: recent.map((row) => row.id) } },
-        { $set: { status: 'live', published: false, odds_status: 'unavailable', next_check_at: nowIso } },
+        { $set: { status: 'live', published: false, odds_status: 'unavailable' } },
       );
       startedIds.push(...recent.map((row) => row.id));
     }

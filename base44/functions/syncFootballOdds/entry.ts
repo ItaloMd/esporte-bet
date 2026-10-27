@@ -19,8 +19,8 @@ import {
   saveQuota,
   writeCache,
 } from '../../shared/footballQuota.ts';
-import { DEFAULT_HOUSE_MARGIN_PERCENT } from '../../shared/oddsApi.ts';
-import { indexByFixtureId, numberOr, windowDates } from '../../shared/footballSync.ts';
+import { DEFAULT_HOUSE_MARGIN_PERCENT, localDateString } from '../../shared/oddsApi.ts';
+import { indexByFixtureId, numberOr, upcomingDates } from '../../shared/footballSync.ts';
 
 const LOCK_MS = 4 * 60 * 1000;
 /** Uma coleta por hora para cada dia: cotações pré-jogo mudam devagar. */
@@ -92,8 +92,12 @@ export default async function (req) {
     }
 
     const days = mode === 'today' ? 1 : MAX_ODDS_DAYS;
+    // Cotações cobrem hoje e amanhã: os jogos do dia precisam de odds atuais.
+    const window = mode === 'today'
+      ? [localDateString(now, FOOTBALL_TIMEZONE)]
+      : [localDateString(now, FOOTBALL_TIMEZONE), ...upcomingDates(now, days - 1)];
     const due = [];
-    for (const date of windowDates(now, days)) {
+    for (const date of window) {
       const cached = await readCache(db, `odds:date:${date}`);
       if (cached?.fresh && !force) continue;
       due.push(date);

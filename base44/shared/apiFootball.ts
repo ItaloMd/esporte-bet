@@ -239,13 +239,12 @@ export function fetchAccountStatus(apiKey, base) {
 }
 
 /**
- * Partidas em andamento. A consulta consolidada devolve todos os jogos ao vivo
- * em uma única chamada; a paginação só é enviada quando há mais de uma página.
+ * Consulta em lote por IDs (até 20 partidas por chamada — /fixtures?ids=1-2-3):
+ * uma única chamada devolve status e placar de todo o lote, reduzindo o consumo
+ * de créditos nas auditorias de encerramento. Não aceita o parâmetro de fuso.
  */
-export function fetchLiveFixtures(apiKey, base, page = 1) {
-  const params = { live: "all", timezone: FOOTBALL_TIMEZONE };
-  if (page > 1) params.page = page;
-  return apiFootballFetch(apiKey, "/fixtures", params, { base });
+export function fetchFixturesByIds(apiKey, base, ids) {
+  return apiFootballFetch(apiKey, "/fixtures", { ids: ids.join("-") }, { base });
 }
 
 export function fetchFixturesByDate(apiKey, base, date) {

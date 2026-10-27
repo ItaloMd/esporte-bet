@@ -11,10 +11,10 @@ export function numberOr(value, fallback) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-/** Próximos `days` dias no calendário brasileiro, começando hoje. */
-export function windowDates(now, days) {
+/** Próximos `days` dias no calendário brasileiro, começando amanhã. */
+export function upcomingDates(now, days) {
   const list = [];
-  for (let index = 0; index < days; index += 1) {
+  for (let index = 1; index <= days; index += 1) {
     list.push(localDateString(new Date(now.getTime() + index * 86400000), FOOTBALL_TIMEZONE));
   }
   return list;

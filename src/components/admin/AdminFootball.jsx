@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Activity, AlertTriangle, Loader2, RefreshCw, Save } from "lucide-react";
+import { AlertTriangle, CalendarClock, Loader2, RefreshCw, Save, SearchCheck } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,12 +14,12 @@ const FOOTBALL_DEFAULTS = {
   football_enabled: false,
   football_base_url: "https://v3.football.api-sports.io",
   football_daily_limit: 100,
-  football_window_days: 7,
+  football_window_days: 2,
   football_calendar_refresh_seconds: 21600,
-  football_live_refresh_seconds: 300,
-  football_live_idle_seconds: 900,
-  football_live_discover_seconds: 1800,
   football_create_events: true,
+  football_audit_offset_hours: 2,
+  football_audit_recheck_minutes: 30,
+  football_audit_fast_minutes: 15,
 };
 
 const LEVEL_LABEL = {
@@ -62,7 +62,7 @@ export default function AdminFootball({ actor }) {
         base44.entities.ApiQuota.filter({ provider: "api_football", day: quotaDay() }, { limit: 1 }),
         base44.entities.ApiCache.filter({ provider: "api_football" }, { sort: "-fetched_at", limit: 8 }),
         base44.entities.SyncJob.filter({ provider: "api_football" }, { sort: "-created_date", limit: 6 }),
-        base44.entities.ApiUsageLog.filter({ provider: "api_football" }, { sort: "-created_date", limit: 8 }),
+        base44.entities.ApiUsageLog.filter({ provider: "api_football" }, { sort: "-created_date", limit: 12 }),
         Promise.all([
           base44.entities.SimulationTicket.count({ status: "won" }),
           base44.entities.SimulationTicket.count({ status: "lost" }),
@@ -115,7 +115,7 @@ export default function AdminFootball({ actor }) {
         action: "provider.football_settings_updated",
         targetType: "ProviderSettings",
         targetId: recordId || "novo",
-        details: `API-Football ${patch.football_enabled ? "habilitada" : "desabilitada"} · limite diário ${patch.football_daily_limit} · janela ${patch.football_window_days} dia(s)`,
+        details: `API-Football ${patch.football_enabled ? "habilitada" : "desabilitada"} · limite diário ${patch.football_daily_limit} · janela ${patch.football_window_days} dia(s) · auditoria ${patch.football_audit_offset_hours}h + ${patch.football_audit_recheck_minutes}/${patch.football_audit_fast_minutes} min`,
         severity: "warning",
       });
       toast({ title: "Configurações salvas" });
@@ -158,18 +158,18 @@ export default function AdminFootball({ actor }) {
           <div>
             <h2 className="text-sm font-semibold">Integração API-Football v3</h2>
             <p className="mt-1 text-xs text-muted-foreground">
-              Calendário, placares ao vivo e resultados oficiais. A chave fica guardada como segredo do backend; o
-              navegador nunca fala com a API-Football. O frontend consome apenas os dados armazenados.
+              Calendário e resultados oficiais com economia de créditos: importação diária em lote e auditoria de
+              encerramento. A chave fica guardada como segredo do backend; o navegador nunca fala com a API-Football.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
             <Button size="sm" variant="outline" onClick={() => runSync("calendar")} disabled={running}>
-              <RefreshCw className={`mr-2 h-3.5 w-3.5 ${running ? "animate-spin" : ""}`} />
-              Calendário
+              <CalendarClock className={`mr-2 h-3.5 w-3.5 ${running ? "animate-spin" : ""}`} />
+              Importar calendário
             </Button>
-            <Button size="sm" onClick={() => runSync("auto")} disabled={running}>
-              <Activity className="mr-2 h-3.5 w-3.5" />
-              Sincronizar agora
+            <Button size="sm" onClick={() => runSync("audit")} disabled={running}>
+              <SearchCheck className="mr-2 h-3.5 w-3.5" />
+              Auditar agora
             </Button>
           </div>
         </div>
@@ -186,7 +186,7 @@ export default function AdminFootball({ actor }) {
             hint={`restantes · limite ${quota?.provider_limit ?? settings.football_account_limit ?? "—"}`}
           />
           <Stat
-            label="Última sincronização"
+            label="Última execução"
             value={settings.football_last_sync_at ? timeAgo(settings.football_last_sync_at) : "nunca"}
             hint={settings.football_last_status || "—"}
           />
@@ -200,12 +200,11 @@ export default function AdminFootball({ actor }) {
         <Progress value={percent} />
 
         <ul className="space-y-1 text-xs text-muted-foreground">
-          <li>• Última leitura de placares: {settings.football_last_live_at ? timeAgo(settings.football_last_live_at) : "nunca"}</li>
-          <li>• Último calendário completo: {settings.football_last_calendar_at ? timeAgo(settings.football_last_calendar_at) : "nunca"}</li>
-          <li>• Próxima execução prevista: {settings.football_next_run_at ? formatDateTime(settings.football_next_run_at) : "—"}</li>
-          <li>• Resumo: {settings.football_last_summary || "—"}</li>
+          <li>• Importação automática: todo dia às 23:59, buscando os próximos {Number(settings.football_window_days || 2)} dias (a partir de amanhã).</li>
+          <li>• Última importação completa: {settings.football_last_calendar_at ? timeAgo(settings.football_last_calendar_at) : "nunca"}</li>
+          <li>• Próxima auditoria prevista: {settings.football_next_run_at ? formatDateTime(settings.football_next_run_at) : "nenhuma partida agendada"}</li>
+          <li>• Resumo da última execução: {settings.football_last_summary || "—"}</li>
           <li>• Alertas de consumo: {quota?.alerts?.length ? quota.alerts.join(", ") : "nenhum"}</li>
-          <li>• Alcance do calendário: {settings.football_plan_note || "sem restrição registrada para o plano atual"}</li>
         </ul>
 
         {settings.football_last_error ? (
@@ -217,32 +216,68 @@ export default function AdminFootball({ actor }) {
       </section>
 
       <section className="card-surface space-y-3 p-4">
+        <div>
+          <h2 className="text-sm font-semibold">Como os créditos são economizados</h2>
+          <ul className="mt-1 space-y-1 text-xs text-muted-foreground">
+            <li>• Uma chamada por data na importação: todo dia às 23:59, a rotina busca os próximos dias em lote (1 crédito por data).</li>
+            <li>• Nenhuma consulta durante o jogo: a primeira auditoria de cada partida acontece 2 horas depois do horário de início previsto.</li>
+            <li>• Se a partida ainda estiver em andamento, nova verificação em 30 minutos; a partir da segunda verificação, a cada 15 minutos até encerrar.</li>
+            <li>• Encerrada (tempo normal, prorrogação ou pênaltis), o resultado é gravado e a partida nunca mais é consultada.</li>
+            <li>• As auditorias consultam até 20 partidas em uma única chamada.</li>
+          </ul>
+        </div>
+      </section>
+
+      <section className="card-surface space-y-3 p-4">
         <h2 className="text-sm font-semibold">Parâmetros de sincronização</h2>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <div className="space-y-2">
             <Label htmlFor="fb_limit">Limite diário interno</Label>
             <Input id="fb_limit" type="number" value={settings.football_daily_limit} onChange={(event) => update({ football_daily_limit: Number(event.target.value) })} />
-            <p className="text-[11px] text-muted-foreground">Alertas em 60%, 80% e 95%. Não é o limite oficial do provedor.</p>
+            <p className="text-[11px] text-muted-foreground">
+              Teto de créditos que as rotinas podem gastar por dia. Alertas em 60%, 80% e 95%. Não é o limite real do
+              provedor — o valor oficial aparece no cartão "Quota do provedor".
+            </p>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="fb_days">Dias do calendário</Label>
+            <Label htmlFor="fb_days">Dias importados por dia</Label>
             <Input id="fb_days" type="number" min="1" max="7" value={settings.football_window_days} onChange={(event) => update({ football_window_days: Number(event.target.value) })} />
+            <p className="text-[11px] text-muted-foreground">
+              Quantos dias à frente a importação das 23:59 busca, sempre a partir de amanhã. Padrão 2: amanhã e depois.
+              O botão "Importar calendário" inclui também hoje, para preencher a grade imediatamente.
+            </p>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="fb_cal">Calendário (horas)</Label>
+            <Label htmlFor="fb_cal">Validade do cache (horas)</Label>
             <Input id="fb_cal" type="number" value={Math.round(Number(settings.football_calendar_refresh_seconds || 0) / 3600)} onChange={(event) => update({ football_calendar_refresh_seconds: Number(event.target.value) * 3600 })} />
+            <p className="text-[11px] text-muted-foreground">
+              Depois de importar uma data, ela não é consultada de novo enquanto o cache estiver válido — evita gastar
+              crédito reimportando o mesmo dia em execuções seguidas.
+            </p>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="fb_live">Placar com apostas pendentes (segundos)</Label>
-            <Input id="fb_live" type="number" value={settings.football_live_refresh_seconds} onChange={(event) => update({ football_live_refresh_seconds: Number(event.target.value) })} />
+            <Label htmlFor="fb_audit_offset">Primeira auditoria (horas após o início)</Label>
+            <Input id="fb_audit_offset" type="number" min="1" max="6" value={settings.football_audit_offset_hours} onChange={(event) => update({ football_audit_offset_hours: Number(event.target.value) })} />
+            <p className="text-[11px] text-muted-foreground">
+              Nenhuma consulta é feita antes desse horário. A primeira auditoria acontece no início previsto da partida
+              mais essas horas — o momento em que a maioria dos jogos já encerrou (padrão 2).
+            </p>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="fb_idle">Placar sem apostas (segundos)</Label>
-            <Input id="fb_idle" type="number" value={settings.football_live_idle_seconds} onChange={(event) => update({ football_live_idle_seconds: Number(event.target.value) })} />
+            <Label htmlFor="fb_recheck">Reavaliação (minutos)</Label>
+            <Input id="fb_recheck" type="number" value={settings.football_audit_recheck_minutes} onChange={(event) => update({ football_audit_recheck_minutes: Number(event.target.value) })} />
+            <p className="text-[11px] text-muted-foreground">
+              Se na primeira auditoria a partida ainda estiver em andamento, uma nova verificação é agendada em X
+              minutos (padrão 30).
+            </p>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="fb_discover">Busca de novos jogos (segundos)</Label>
-            <Input id="fb_discover" type="number" value={settings.football_live_discover_seconds} onChange={(event) => update({ football_live_discover_seconds: Number(event.target.value) })} />
+            <Label htmlFor="fb_fast">Verificações seguintes (minutos)</Label>
+            <Input id="fb_fast" type="number" value={settings.football_audit_fast_minutes} onChange={(event) => update({ football_audit_fast_minutes: Number(event.target.value) })} />
+            <p className="text-[11px] text-muted-foreground">
+              A partir da segunda verificação sem encerramento, novas consultas a cada X minutos até a partida terminar
+              (padrão 15). Ao encerrar, a partida nunca mais é consultada.
+            </p>
           </div>
         </div>
 
@@ -298,7 +333,7 @@ export default function AdminFootball({ actor }) {
       </section>
 
       <section className="card-surface space-y-3 p-4">
-        <h2 className="text-sm font-semibold">Execuções e erros recentes</h2>
+        <h2 className="text-sm font-semibold">Execuções e logs de auditoria</h2>
         <ul className="space-y-1.5 text-xs">
           {jobs.map((job) => (
             <li key={job.id} className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 pb-1.5">
@@ -310,6 +345,18 @@ export default function AdminFootball({ actor }) {
           ))}
           {!jobs.length ? <li className="text-muted-foreground">Nenhuma execução registrada.</li> : null}
         </ul>
+        {logs.length ? (
+          <ul className="space-y-1 text-xs text-muted-foreground">
+            {logs.map((row) => (
+              <li key={row.id} className="border-b border-border/40 pb-1">
+                {row.endpoint} · {row.params || "—"} · {timeAgo(row.created_date)}
+                {row.note ? ` · ${row.note}` : ""}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-xs text-muted-foreground">Sem consultas registradas ainda.</p>
+        )}
         {errors.length ? (
           <ul className="space-y-1 text-xs text-amber-300">
             {errors.map((row) => (
@@ -318,9 +365,7 @@ export default function AdminFootball({ actor }) {
               </li>
             ))}
           </ul>
-        ) : (
-          <p className="text-xs text-muted-foreground">Sem erros recentes.</p>
-        )}
+        ) : null}
       </section>
     </div>
   );

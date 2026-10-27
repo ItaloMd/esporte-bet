@@ -1,15 +1,15 @@
 {
   "name": "Liquidar partidas",
-  "description": "A cada 10 minutos sincroniza o calend\u00e1rio e os placares pela API-Football, atualiza as cota\u00e7\u00f5es pr\u00e9-jogo dos jogos do dia e liquida os boletins com o resultado confirmado pela fonte.",
+  "description": "A cada 5 minutos audita em lote as partidas cujo hor\u00e1rio de auditoria venceu (in\u00edcio + 2 horas; at\u00e9 20 partidas por chamada), atualiza as cota\u00e7\u00f5es pr\u00e9-jogo dos jogos do dia e liquida os boletins com o resultado confirmado pela fonte. Nenhuma consulta \u00e9 feita durante o jogo antes do hor\u00e1rio de auditoria.",
   "trigger": {
     "condition": null,
     "config": {
       "trigger_type": "scheduled",
       "events": [],
       "schedule_mode": "recurring",
-      "cron_expression": "*/10 * * * *",
+      "cron_expression": "*/5 * * * *",
       "one_time_date": null,
-      "timezone": "America/Bahia",
+      "timezone": "America/Sao_Paulo",
       "interval_value": null,
       "interval_unit": null,
       "interval_anchor": null,
@@ -22,24 +22,24 @@
     "document": {
       "dsl": "1.0.0",
       "name": "liquidar_partidas",
-      "version": "1.2",
+      "version": "2.0",
       "namespace": "base44"
     },
     "do": [
       {
-        "sincronizar_api_football": {
+        "auditar_partidas": {
           "call": "invoke_backend_function",
           "with": {
             "function_name": "syncFootball",
             "args": {
-              "mode": "auto",
+              "mode": "audit",
               "trigger": "scheduled"
             }
           },
           "then": "sincronizar_odds_futebol",
           "x-base44": {
-            "title": "Sincronizar calend\u00e1rio e placares",
-            "description": "API-Football \u00b7 cache e or\u00e7amento di\u00e1rio"
+            "title": "Auditar partidas vencidas",
+            "description": "Em lote \u00b7 20 partidas por chamada"
           }
         }
       },

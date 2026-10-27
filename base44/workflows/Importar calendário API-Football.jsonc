@@ -1,0 +1,48 @@
+{
+  "name": "Importar calend\u00e1rio API-Football",
+  "description": "Todos os dias \u00e0s 23:59 importa as partidas dos pr\u00f3ximos 2 dias (amanh\u00e3 e depois) em lote: uma chamada por data, sem nenhuma consulta ao vivo. Cada partida importada recebe o hor\u00e1rio da primeira auditoria (in\u00edcio + 2 horas).",
+  "trigger": {
+    "condition": null,
+    "config": {
+      "trigger_type": "scheduled",
+      "events": [],
+      "schedule_mode": "recurring",
+      "cron_expression": "59 23 * * *",
+      "one_time_date": null,
+      "timezone": "America/Sao_Paulo",
+      "interval_value": null,
+      "interval_unit": null,
+      "interval_anchor": null,
+      "ends_type": "never",
+      "ends_on_date": null,
+      "ends_after_count": null
+    }
+  },
+  "definition": {
+    "document": {
+      "dsl": "1.0.0",
+      "name": "importar_calendario_api_football",
+      "version": "1.0",
+      "namespace": "base44"
+    },
+    "do": [
+      {
+        "importar_calendario": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "syncFootball",
+            "args": {
+              "mode": "calendar",
+              "trigger": "scheduled"
+            }
+          },
+          "then": "end",
+          "x-base44": {
+            "title": "Importar pr\u00f3ximos 2 dias",
+            "description": "Uma chamada por data \u00b7 auditoria em in\u00edcio + 2h"
+          }
+        }
+      }
+    ]
+  }
+}

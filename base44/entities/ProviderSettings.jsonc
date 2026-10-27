@@ -197,27 +197,27 @@
     },
     "football_window_days": {
       "type": "number",
-      "default": 7
+      "default": 2
     },
     "football_calendar_refresh_seconds": {
       "type": "number",
       "default": 21600
     },
-    "football_live_refresh_seconds": {
-      "type": "number",
-      "default": 300
-    },
-    "football_live_idle_seconds": {
-      "type": "number",
-      "default": 900
-    },
-    "football_live_discover_seconds": {
-      "type": "number",
-      "default": 1800
-    },
     "football_create_events": {
       "type": "boolean",
       "default": true
+    },
+    "football_audit_offset_hours": {
+      "type": "number",
+      "default": 2
+    },
+    "football_audit_recheck_minutes": {
+      "type": "number",
+      "default": 30
+    },
+    "football_audit_fast_minutes": {
+      "type": "number",
+      "default": 15
     },
     "football_last_sync_at": {
       "type": "string",

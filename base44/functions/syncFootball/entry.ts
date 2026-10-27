@@ -1,53 +1,52 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.54';
 import { secrets } from 'base44:runtime';
 import {
+  FOOTBALL_TIMEZONE,
   footballApiBase,
   fetchAccountStatus,
-  fetchLiveFixtures,
   fetchFixturesByDate,
+  fetchFixturesByIds,
   mapFixture,
   parseAccountStatus,
-  FOOTBALL_TIMEZONE,
 } from '../../shared/apiFootball.ts';
 import {
-  quotaDayKey,
-  quotaLevel,
-  quotaPolicy,
-  quotaPercent,
+  DEFAULT_DAILY_LIMIT,
+  acquireLock,
   canSpend,
   chargeQuota,
   loadQuota,
-  saveQuota,
-  acquireLock,
-  releaseLock,
   lockHeld,
+  quotaDayKey,
+  quotaLevel,
+  quotaPercent,
+  quotaPolicy,
   readCache,
+  releaseLock,
+  saveQuota,
   writeCache,
-  DEFAULT_DAILY_LIMIT,
 } from '../../shared/footballQuota.ts';
 import { localDateString, slugify } from '../../shared/oddsApi.ts';
 import { chunkArray } from '../../shared/matchLifecycle.ts';
-import { indexByFixtureId, numberOr, windowDates } from '../../shared/footballSync.ts';
+import { indexByFixtureId, numberOr, upcomingDates } from '../../shared/footballSync.ts';
 
 const LOCK_MS = 4 * 60 * 1000;
-const MAX_LIVE_PAGES = 2;
 const CREATE_AHEAD_MS = 8 * 24 * 60 * 60 * 1000;
 const CREATE_BEHIND_MS = 60 * 60 * 1000;
 const MATCH_TOLERANCE_MS = 36 * 60 * 60 * 1000;
 const MAX_CALENDAR_DAYS = 7;
+/** Partidas por chamada em lote: limite documentado de /fixtures?ids. */
+const IDS_PER_CALL = 20;
+/** Após N consultas sem encerramento, a partida vai para revisão manual. */
+const MAX_AUDIT_CHECKS = 12;
+/** Teto de partidas auditadas por execução, protegendo a cota diária. */
+const MAX_AUDIT_EVENTS = 300;
 
 /** O plano tem limite por minuto além da cota diária: nesse caso a execução para. */
 function isRateLimit(message) {
   return /too many requests|requests per minute|rate limit/i.test(String(message || ''));
 }
 
-/**
- * O plano gratuito libera apenas uma janela curta do calendário (hoje e
- * amanhã). Datas fora do alcance não são consultadas — cada tentativa
- * desperdiçaria cota sem trazer dado novo.
- */
-const FREE_PLAN_WINDOW_DAYS = 2;
-
+/** O plano recusa datas fora do alcance: nada é consultado até a janela se renovar. */
 function isPlanBlocked(message) {
   return /free plans do not have access/i.test(String(message || ''));
 }
@@ -66,6 +65,35 @@ function wait(ms) {
 
 function eventKey(homeName, awayName) {
   return `${slugify(homeName)}|${slugify(awayName)}`;
+}
+
+/** Horário da primeira auditoria: início previsto + offset (padrão 2 horas). */
+function firstAuditAt(startMs, settings) {
+  const offsetHours = numberOr(settings.football_audit_offset_hours, 2);
+  return new Date(startMs + offsetHours * 3600000).toISOString();
+}
+
+/** Próxima verificação de uma partida ainda em andamento: 30 min, depois 15 min. */
+function nextAuditAt(nowMs, settings, checks) {
+  const recheckMinutes = numberOr(settings.football_audit_recheck_minutes, 30);
+  const fastMinutes = numberOr(settings.football_audit_fast_minutes, 15);
+  return new Date(nowMs + (checks >= 2 ? fastMinutes : recheckMinutes) * 60000).toISOString();
+}
+
+/** Partidas com auditoria vencida: nunca consultadas antes do horário agendado. */
+async function loadDueEvents(db, nowIso) {
+  const due = [];
+  let cursor = null;
+  for (let round = 0; round < 4; round += 1) {
+    const page = await db.Event.filter(
+      { fixture_id: { $exists: true }, next_check_at: { $lte: nowIso }, status: { $in: ['scheduled', 'live'] } },
+      { limit: 500, sort: 'next_check_at', ...(cursor ? { cursor } : {}) },
+    );
+    due.push(...(page.items || []));
+    cursor = page.next_cursor;
+    if (!page.has_more || due.length >= MAX_AUDIT_EVENTS) break;
+  }
+  return due.slice(0, MAX_AUDIT_EVENTS);
 }
 
 /** Campos comuns gravados em qualquer partida vinda da fonte. */
@@ -112,7 +140,7 @@ function settlementStateFor(fixture, event) {
   return 'none';
 }
 
-function buildPatch(fixture, event, nowIso) {
+function buildPatch(fixture, event, nowIso, settings) {
   const fields = fixtureFields(fixture, nowIso);
   const patch = {};
   Object.entries(fields).forEach(([key, value]) => {
@@ -126,10 +154,15 @@ function buildPatch(fixture, event, nowIso) {
   if (fixture.away_team_crest && !event.away_team_crest) patch.away_team_crest = fixture.away_team_crest;
   const settlement = settlementStateFor(fixture, event);
   if (settlement) patch.settlement_state = settlement;
+  // Autocorreção: partida em aberto sem auditoria agendada recebe o horário padrão.
+  const startMs = Date.parse(fixture.start_time || '');
+  if (!event.next_check_at && Number.isFinite(startMs) && (fixture.status === 'scheduled' || fixture.status === 'live')) {
+    patch.next_check_at = firstAuditAt(startMs, settings);
+  }
   return patch;
 }
 
-function buildCreate(fixture, nowIso, competitionId) {
+function buildCreate(fixture, nowIso, competitionId, settings) {
   const start = new Date(fixture.start_time);
   const localDate = localDateString(start, FOOTBALL_TIMEZONE);
   const todayKey = localDateString(new Date(nowIso), FOOTBALL_TIMEZONE);
@@ -154,6 +187,9 @@ function buildCreate(fixture, nowIso, competitionId) {
     discovered_at: nowIso,
     last_sync_at: nowIso,
     live_updated_at: nowIso,
+    // Auditoria de encerramento: primeira consulta no início + offset (2h).
+    next_check_at: firstAuditAt(Date.parse(fixture.start_time), settings),
+    audit_checks: 0,
     ...fixtureFields(fixture, nowIso),
     settlement_state: settlementStateFor(fixture, null) || 'none',
   };
@@ -192,14 +228,18 @@ function pickCandidate(candidates, fixture) {
 }
 
 /**
- * Sincroniza calendário e placares da API-Football.
+ * Sincronização econômica da API-Football, em dois modos:
  *
- * Regras centrais:
- * - uma chamada por modalidade/dia, nunca uma por partida;
- * - cache compartilhado: a resposta só é buscada quando o dado armazenado venceu;
- * - o placar nunca é substituído por zero nem por ausência de resposta;
- * - partidas vinculadas por `fixture.id`, com reconciliação por equipes e
- *   horário apenas quando a partida ainda não tem vínculo.
+ * - `calendar` (importação diária, 23:59): busca as partidas dos próximos dias
+ *   em lote, uma chamada por data, e agenda a auditoria de cada partida para
+ *   o início + 2 horas. O botão manual inclui hoje, para preencher a grade
+ *   imediatamente.
+ * - `audit` (rotina de 5 minutos): consulta em lote (/fixtures?ids, até 20
+ *   partidas por chamada) apenas as partidas cujo horário de auditoria venceu.
+ *   Nenhuma consulta é feita durante o jogo antes desse horário. Partida
+ *   encerrada (FT, prorrogação ou pênaltis) grava o resultado e nunca mais é
+ *   consultada; partida em andamento é reconsultada em 30 minutos e, a partir
+ *   da segunda verificação, a cada 15 minutos até encerrar.
  */
 export default async function (req) {
   let base44;
@@ -213,8 +253,8 @@ export default async function (req) {
 
     const db = base44.asServiceRole.entities;
     const payload = await req.json().catch(() => ({}));
-    const requested = String(payload?.mode || 'auto');
-    const mode = ['live', 'calendar', 'auto', 'status'].includes(requested) ? requested : 'auto';
+    const requested = String(payload?.mode || 'audit');
+    const mode = ['calendar', 'audit', 'auto'].includes(requested) ? requested : 'audit';
 
     const now = new Date();
     const nowMs = now.getTime();
@@ -243,7 +283,7 @@ export default async function (req) {
     const job = await db.SyncJob.create({
       provider: 'api_football',
       trigger: payload?.trigger === 'manual' ? 'manual' : 'scheduled',
-      job_type: 'results',
+      job_type: mode === 'calendar' ? 'calendar' : 'audit',
       status: 'running',
       started_at: nowIso,
       triggered_by: user.email,
@@ -268,206 +308,299 @@ export default async function (req) {
       applyQuota(statusResult.quota);
       if (statusResult.errors.length) statusError = statusResult.errors.join(' | ');
     } catch (error) {
-      // Ler a quota não altera dado algum: a falha não marca a execução como
-      // parcial nem derruba a sincronização.
       statusError = String(error?.message || error);
     }
 
     const level = quotaLevel(used, limit);
     const policy = quotaPolicy(level);
-
-    // Partidas ao vivo conhecidas e apostas pendentes nelas: definem a frequência.
-    const livePage = await db.Event.filter({ status: 'live' }, { limit: 200 });
-    const liveEvents = livePage.items || [];
-    let pendingLiveBets = 0;
-    if (liveEvents.length) {
-      pendingLiveBets = await db.SimulationSelection.count({
-        status: 'open',
-        event_id: { $in: liveEvents.map((event) => event.id) },
-      });
-    }
-
-    const lastLiveMs = settings.football_last_live_at ? Date.parse(settings.football_last_live_at) : 0;
-    const liveIntervalSeconds =
-      pendingLiveBets > 0
-        ? numberOr(settings.football_live_refresh_seconds, 300)
-        : liveEvents.length
-          ? numberOr(settings.football_live_idle_seconds, 900)
-          : numberOr(settings.football_live_discover_seconds, 1800);
-    const liveDue = mode === 'live' ? true : nowMs - lastLiveMs >= liveIntervalSeconds * 1000;
-
-    const windowDays = Math.min(Math.max(numberOr(settings.football_window_days, MAX_CALENDAR_DAYS), 1), MAX_CALENDAR_DAYS);
-    const calendarRefreshSeconds = numberOr(settings.football_calendar_refresh_seconds, 21600);
     const planName = account?.plan || settings.football_plan || '';
-    const freePlan = /free/i.test(planName);
-    const allowedDays = freePlan ? Math.min(windowDays, FREE_PLAN_WINDOW_DAYS) : windowDays;
-    const calendarDue = [];
-    if (mode === 'calendar' || mode === 'auto') {
-      for (const date of windowDates(now, allowedDays)) {
-        const cached = await readCache(db, `fixtures:date:${date}`);
-        if (cached?.fresh && mode !== 'calendar') continue;
-        calendarDue.push(date);
-      }
-      // Fora do alcance do plano: nada é consultado, e a data não volta a ser
-      // tentada até a virada do dia, quando a janela se renova.
-      for (const date of windowDates(now, windowDays).slice(allowedDays)) {
+
+    /* ------------------------- importação diária ------------------------- */
+    if (mode === 'calendar') {
+      const windowDays = Math.min(Math.max(numberOr(settings.football_window_days, 2), 1), MAX_CALENDAR_DAYS);
+      const calendarRefreshSeconds = numberOr(settings.football_calendar_refresh_seconds, 21600);
+      // A rotina das 23:59 busca os próximos dias; o botão manual inclui hoje.
+      const todayKey = localDateString(now, FOOTBALL_TIMEZONE);
+      const dates = [...new Set(
+        payload?.trigger === 'manual'
+          ? [todayKey, ...upcomingDates(now, windowDays)]
+          : upcomingDates(now, windowDays),
+      )];
+      const planDays = policy.calendarDays > 0 ? dates.slice(0, policy.calendarDays) : dates;
+
+      const fixtures = [];
+      const syncedDays = [];
+      let rateLimited = false;
+      for (const date of planDays) {
+        if (rateLimited || !canSpend(used, limit, policy.reserve, 1)) break;
         const cached = await readCache(db, `fixtures:date:${date}`);
         if (cached?.fresh) continue;
-        await writeCache(db, {
-          key: `fixtures:date:${date}`,
-          endpoint: '/fixtures',
-          params: `date=${date}`,
-          ttlSeconds: secondsUntilEndOfDay(now),
-          records: 0,
-          note: 'Data fora do alcance do plano atual',
-        });
-      }
-    }
-
-    const wantsLive = mode === 'live' || mode === 'auto';
-    const wantsCalendar = mode === 'calendar' || mode === 'auto';
-    const plan = {
-      live: wantsLive && policy.live && liveDue && canSpend(used, limit, policy.reserve, 1),
-      days: wantsCalendar && policy.calendarDays > 0 ? calendarDue.slice(0, policy.calendarDays) : [],
-    };
-    // Na faixa de contingência só o essencial roda: resultados de jogos com apostas.
-    if (policy.criticalOnly && pendingLiveBets === 0) plan.live = false;
-
-    const fixtures = [];
-
-    if (plan.live) {
-      let page = 1;
-      let totalPages = 1;
-      while (page <= MAX_LIVE_PAGES && page <= totalPages) {
-        if (!canSpend(used, limit, policy.reserve, 1)) break;
+        // O plano tem limite por minuto: as consultas de calendário são espaçadas.
+        if (syncedDays.length) await wait(2500);
         try {
-          const result = await fetchLiveFixtures(apiKey, base, page);
-          const charged = await chargeQuota(db, { record: quotaRecord, day, limit, cost: 1, purpose: 'live', reserve: policy.reserve });
+          const result = await fetchFixturesByDate(apiKey, base, date);
+          const charged = await chargeQuota(db, { record: quotaRecord, day, limit, cost: 1, purpose: 'calendar', reserve: policy.reserve });
           quotaRecord = charged.record || quotaRecord;
           used = charged.used;
           applyQuota(result.quota);
-          calls.push({ endpoint: '/fixtures?live=all', records: result.results, errors: result.errors });
+          calls.push({ endpoint: `/fixtures?date=${date}`, records: result.results, errors: result.errors });
           if (result.errors.length) {
-            failures.push(`live: ${result.errors.join(' | ')}`);
-            if (result.errors.some(isRateLimit)) break;
+            failures.push(`importação ${date}: ${result.errors.join(' | ')}`);
+            if (result.errors.some(isRateLimit)) rateLimited = true;
+            if (result.errors.some(isPlanBlocked)) {
+              // O provedor recusou a data: as seguintes também estão fora do
+              // alcance, então nenhuma delas é consultada hoje.
+              for (const blocked of planDays.slice(planDays.indexOf(date))) {
+                await writeCache(db, {
+                  key: `fixtures:date:${blocked}`,
+                  endpoint: '/fixtures',
+                  params: `date=${blocked}`,
+                  ttlSeconds: secondsUntilEndOfDay(now),
+                  records: 0,
+                  note: 'Data fora do alcance do plano atual',
+                });
+              }
+              rateLimited = true;
+            }
+            continue;
           }
           const list = Array.isArray(result.data?.response) ? result.data.response : [];
-          list.map(mapFixture).forEach((item) => item.fixture_id && fixtures.push(item));
-          totalPages = numberOr(result.data?.paging?.total, 1);
+          list.map(mapFixture).forEach((item) => item.fixture_id && item.start_time && fixtures.push(item));
+          syncedDays.push(date);
           await writeCache(db, {
-            key: 'fixtures:live',
-            endpoint: '/fixtures?live=all',
-            params: page > 1 ? `page=${page}` : '',
-            ttlSeconds: liveIntervalSeconds,
+            key: `fixtures:date:${date}`,
+            endpoint: '/fixtures',
+            params: `date=${date}`,
+            ttlSeconds: calendarRefreshSeconds,
             records: result.results,
-            note: `${list.length} partida(s) em andamento`,
+            note: `${list.length} partida(s) importada(s) para ${date}`,
           });
-          page += 1;
         } catch (error) {
-          failures.push(`live: ${String(error?.message || error)}`);
-          break;
+          failures.push(`importação ${date}: ${String(error?.message || error)}`);
         }
       }
-      if (calls.length) await db.ProviderSettings.update(settings.id, { football_last_live_at: nowIso });
+
+      const unique = new Map();
+      fixtures.forEach((fixture) => unique.set(fixture.fixture_id, fixture));
+      const mapped = [...unique.values()];
+
+      const competitionsPage = await db.Competition.filter({ active: true }, { limit: 300 });
+      const competitionsByName = new Map(
+        (competitionsPage.items || []).map((row) => [slugify(row.name), row]),
+      );
+
+      const known = await indexByFixtureId(db, mapped.map((fixture) => fixture.fixture_id));
+      const unresolved = mapped.filter((fixture) => !known.has(fixture.fixture_id));
+      const byName = unresolved.length ? await indexByName(db, unresolved) : new Map();
+
+      const updates = [];
+      const creations = [];
+      mapped.forEach((fixture) => {
+        const linked = known.get(fixture.fixture_id) || pickCandidate(byName.get(eventKey(fixture.home_team_name, fixture.away_team_name)), fixture);
+        if (linked) {
+          const patch = buildPatch(fixture, linked, nowIso, settings);
+          if (Object.keys(patch).length) updates.push({ id: linked.id, ...patch });
+          return;
+        }
+        const competition = competitionsByName.get(slugify(fixture.competition_name));
+        const startMs = Date.parse(fixture.start_time);
+        const withinWindow = startMs >= nowMs - CREATE_BEHIND_MS && startMs <= nowMs + CREATE_AHEAD_MS;
+        if (!settings.football_create_events || !competition || !withinWindow) return;
+        creations.push(buildCreate(fixture, nowIso, competition.id, settings));
+      });
+
+      for (const batch of chunkArray(updates, 200)) await db.Event.bulkUpdate(batch);
+      for (const batch of chunkArray(creations, 100)) await db.Event.bulkCreate(batch);
+
+      const summary = [
+        'importação',
+        `${calls.length} chamada(s)`,
+        `${syncedDays.length} data(s)`,
+        `${mapped.length} partida(s) lida(s)`,
+        `${updates.length} atualizada(s)`,
+        `${creations.length} criada(s)`,
+        `auditoria agendada para ${creations.length ? 'início + 2h' : '—'}`,
+        `orçamento ${used}/${limit}`,
+      ].join(' · ');
+
+      await db.ProviderSettings.update(settings.id, {
+        football_last_sync_at: nowIso,
+        football_last_status: failures.length ? 'partial' : 'success',
+        football_last_error: failures.length ? failures.join(' | ').slice(0, 400) : '',
+        football_last_summary: summary,
+        football_alert_level: quotaLevel(used, limit),
+        football_account_limit: account?.limit_day ?? settings.football_account_limit ?? null,
+        football_account_remaining: account?.current !== null && account?.current !== undefined
+          ? Math.max(0, (account.limit_day || 0) - account.current)
+          : settings.football_account_remaining ?? null,
+        football_plan: planName,
+        ...(syncedDays.length ? { football_last_calendar_at: nowIso } : {}),
+      });
+
+      const savedQuota = await saveQuota(db, quotaRecord, {
+        ...(quotaRecord?.id ? {} : { day }),
+        used,
+        limit,
+        level: quotaLevel(used, limit),
+        ...quotaPatch,
+        last_status_at: nowIso,
+        last_status_code: 200,
+        last_error: [...failures, ...(statusError ? [`status: ${statusError}`] : [])].join(' | ').slice(0, 400),
+      });
+      await releaseLock(db, savedQuota || quotaRecord);
+
+      await db.SyncJob.update(job.id, {
+        status: failures.length ? 'partial' : 'success',
+        finished_at: new Date().toISOString(),
+        requests_used: calls.length,
+        records_upserted: updates.length + creations.length,
+        error_message: failures.length ? failures.join(' | ').slice(0, 400) : '',
+      });
+
+      for (const call of calls) {
+        await db.ApiUsageLog.create({
+          provider: 'api_football',
+          endpoint: call.endpoint,
+          status_code: 200,
+          records_returned: call.records,
+          cache_hit: false,
+          credits_used: 1,
+          params: `dia=${day}`,
+          note: (call.errors?.length ? call.errors.join(' | ') : summary).slice(0, 240),
+          error_message: call.errors?.length ? call.errors.join(' | ').slice(0, 240) : '',
+        });
+      }
+
+      return Response.json({
+        ok: true,
+        mode,
+        calls: calls.length,
+        days_synced: syncedDays,
+        fixtures_read: mapped.length,
+        events_updated: updates.length,
+        events_created: creations.length,
+        quota: { used, limit, percent: quotaPercent(used, limit), level: quotaLevel(used, limit), alerts: quotaRecord?.alerts || [] },
+        account,
+        failures,
+        status_error: statusError,
+        summary,
+      });
     }
 
-    const syncedDays = [];
+    /* --------------------- auditoria de encerramento --------------------- */
+    let due = await loadDueEvents(db, nowIso);
+    if (policy.criticalOnly) {
+      // Contingência: só partidas com apostas pendentes consomem créditos.
+      const openEventIds = new Set();
+      let cursor = null;
+      for (let round = 0; round < 4; round += 1) {
+        const page = await db.SimulationSelection.filter({ status: 'open' }, { limit: 500, ...(cursor ? { cursor } : {}) });
+        (page.items || []).forEach((row) => openEventIds.add(row.event_id));
+        cursor = page.next_cursor;
+        if (!page.has_more) break;
+      }
+      due = due.filter((event) => openEventIds.has(event.id));
+    }
+
+    const updates = [];
+    const auditLogs = [];
+    let audited = 0;
+    let confirmed = 0;
+    let stillRunning = 0;
+    let reviewFlagged = 0;
     let rateLimited = false;
-    for (const date of plan.days) {
+
+    for (const batch of chunkArray(due, IDS_PER_CALL)) {
       if (rateLimited || !canSpend(used, limit, policy.reserve, 1)) break;
-      // O plano tem limite por minuto: as consultas de calendário são espaçadas.
-      if (syncedDays.length) await wait(2500);
       try {
-        const result = await fetchFixturesByDate(apiKey, base, date);
-        const charged = await chargeQuota(db, { record: quotaRecord, day, limit, cost: 1, purpose: 'calendar', reserve: policy.reserve });
+        const ids = batch.map((event) => event.fixture_id);
+        const result = await fetchFixturesByIds(apiKey, base, ids);
+        const charged = await chargeQuota(db, { record: quotaRecord, day, limit, cost: 1, purpose: 'audit', reserve: policy.reserve });
         quotaRecord = charged.record || quotaRecord;
         used = charged.used;
         applyQuota(result.quota);
-        calls.push({ endpoint: `/fixtures?date=${date}`, records: result.results, errors: result.errors });
+        calls.push({ endpoint: `/fixtures?ids=${ids.length}`, records: result.results, errors: result.errors });
         if (result.errors.length) {
-          failures.push(`calendário ${date}: ${result.errors.join(' | ')}`);
+          failures.push(`auditoria: ${result.errors.join(' | ')}`);
           if (result.errors.some(isRateLimit)) rateLimited = true;
-          if (result.errors.some(isPlanBlocked)) {
-            // O provedor recusou a data: as seguintes também estão fora do
-            // alcance, então nenhuma delas é consultada hoje.
-            for (const blocked of plan.days.slice(plan.days.indexOf(date))) {
-              await writeCache(db, {
-                key: `fixtures:date:${blocked}`,
-                endpoint: '/fixtures',
-                params: `date=${blocked}`,
-                ttlSeconds: secondsUntilEndOfDay(now),
-                records: 0,
-                note: 'Data fora do alcance do plano atual',
-              });
-            }
-            rateLimited = true;
-          }
-          continue;
+          break;
         }
-        const list = Array.isArray(result.data?.response) ? result.data.response : [];
-        list.map(mapFixture).forEach((item) => item.fixture_id && fixtures.push(item));
-        syncedDays.push(date);
-        await writeCache(db, {
-          key: `fixtures:date:${date}`,
-          endpoint: '/fixtures',
-          params: `date=${date}`,
-          ttlSeconds: calendarRefreshSeconds,
-          records: result.results,
-          note: `${list.length} partida(s) em ${date}`,
-        });
+
+        const response = Array.isArray(result.data?.response) ? result.data.response : [];
+        const byId = new Map(response.map((row) => [String(row?.fixture?.id), row]));
+
+        for (const event of batch) {
+          const raw = byId.get(String(event.fixture_id));
+          const fixture = raw ? mapFixture(raw) : null;
+          const checks = numberOr(event.audit_checks, 0) + 1;
+          const patch = fixture ? buildPatch(fixture, event, nowIso, settings) : {};
+          patch.audit_checks = checks;
+          let outcome = '';
+
+          if (fixture && (fixture.finished || fixture.void || fixture.review)) {
+            // Encerrada, não disputada ou para revisão manual: nunca mais consultada.
+            patch.next_check_at = null;
+            if (fixture.finished) {
+              confirmed += 1;
+              outcome = 'encerrada';
+            } else if (fixture.void) {
+              outcome = 'não disputada';
+            } else {
+              reviewFlagged += 1;
+              outcome = 'revisão manual';
+            }
+          } else if (checks >= MAX_AUDIT_CHECKS) {
+            // Limite de consultas atingido sem definição: decide um humano.
+            patch.next_check_at = null;
+            patch.settlement_state = 'review';
+            reviewFlagged += 1;
+            outcome = 'limite de consultas atingido, em revisão';
+          } else {
+            // Em andamento ou sem retorno: reconsulta em 30 min, depois 15 min.
+            patch.next_check_at = nextAuditAt(nowMs, settings, checks);
+            stillRunning += 1;
+            outcome = fixture ? `em andamento (${fixture.phase_label || fixture.phase})` : 'sem retorno do provedor';
+          }
+
+          updates.push({ id: event.id, ...patch });
+          audited += 1;
+          // Registro por partida: fixture, horário, status, resultado e nº de consultas.
+          auditLogs.push({
+            provider: 'api_football',
+            endpoint: '/fixtures?ids',
+            status_code: 200,
+            records_returned: fixture ? 1 : 0,
+            cache_hit: false,
+            credits_used: 0,
+            params: `fixture_id=${event.fixture_id} · consulta nº ${checks}`,
+            note: `status ${fixture ? fixture.phase : 'SEM RETORNO'} · placar ${
+              fixture && fixture.home_score !== null && fixture.away_score !== null ? `${fixture.home_score}x${fixture.away_score}` : '—'
+            } · ${outcome}`,
+          });
+        }
       } catch (error) {
-        failures.push(`calendário ${date}: ${String(error?.message || error)}`);
+        failures.push(`auditoria: ${String(error?.message || error)}`);
+        break;
       }
     }
 
-    // Uma partida pode chegar pelo calendário e pelo placar: fica a mais recente.
-    const unique = new Map();
-    fixtures.forEach((fixture) => unique.set(fixture.fixture_id, fixture));
-    const mapped = [...unique.values()].filter((fixture) => fixture.start_time);
-
-    const competitionsPage = await db.Competition.filter({ active: true }, { limit: 300 });
-    const competitionsByName = new Map(
-      (competitionsPage.items || []).map((row) => [slugify(row.name), row]),
-    );
-
-    const known = await indexByFixtureId(db, mapped.map((fixture) => fixture.fixture_id));
-    const unresolved = mapped.filter((fixture) => !known.has(fixture.fixture_id));
-    const byName = unresolved.length ? await indexByName(db, unresolved) : new Map();
-
-    const updates = [];
-    const creations = [];
-    const reviewIds = [];
-
-    mapped.forEach((fixture) => {
-      const linked = known.get(fixture.fixture_id) || pickCandidate(byName.get(eventKey(fixture.home_team_name, fixture.away_team_name)), fixture);
-      if (linked) {
-        const patch = buildPatch(fixture, linked, nowIso);
-        if (Object.keys(patch).length) updates.push({ id: linked.id, ...patch });
-        if (patch.settlement_state === 'review') reviewIds.push(linked.id);
-        return;
-      }
-      const competition = competitionsByName.get(slugify(fixture.competition_name));
-      const startMs = Date.parse(fixture.start_time);
-      const withinWindow = startMs >= nowMs - CREATE_BEHIND_MS && startMs <= nowMs + CREATE_AHEAD_MS;
-      if (!settings.football_create_events || !competition || !withinWindow) return;
-      creations.push(buildCreate(fixture, nowIso, competition.id));
-    });
-
     for (const batch of chunkArray(updates, 200)) await db.Event.bulkUpdate(batch);
-    for (const batch of chunkArray(creations, 100)) await db.Event.bulkCreate(batch);
+    for (const batch of chunkArray(auditLogs, 100)) await db.ApiUsageLog.bulkCreate(batch);
 
-    const finishedSynced = mapped.filter((fixture) => fixture.finished).length;
+    // Próxima auditoria prevista: o evento com horário mais cedo ainda futuro.
+    const nextDuePage = await db.Event.filter({ next_check_at: { $gte: nowIso } }, { sort: 'next_check_at', limit: 1 });
+    const nextAuditIso = nextDuePage.items?.[0]?.next_check_at || null;
+
     const summary = [
-      'api-football',
-      `${calls.length} chamada(s)`,
-      `${mapped.length} partida(s) lida(s)`,
-      `${updates.length} atualizada(s)`,
-      `${creations.length} criada(s)`,
-      `${finishedSynced} encerrada(s)`,
+      'auditoria',
+      `${calls.length} chamada(s) em lote`,
+      `${audited} partida(s) verificada(s)`,
+      `${confirmed} encerrada(s)`,
+      `${stillRunning} em andamento`,
+      `${reviewFlagged} em revisão`,
+      nextAuditIso ? `próxima ${nextAuditIso}` : 'sem auditoria pendente',
       `orçamento ${used}/${limit}`,
     ].join(' · ');
-
-    const nextRunMs = liveIntervalSeconds * 1000;
 
     await db.ProviderSettings.update(settings.id, {
       football_last_sync_at: nowIso,
@@ -475,16 +608,12 @@ export default async function (req) {
       football_last_error: failures.length ? failures.join(' | ').slice(0, 400) : '',
       football_last_summary: summary,
       football_alert_level: quotaLevel(used, limit),
-      football_next_run_at: new Date(nowMs + nextRunMs).toISOString(),
+      football_next_run_at: nextAuditIso,
       football_account_limit: account?.limit_day ?? settings.football_account_limit ?? null,
       football_account_remaining: account?.current !== null && account?.current !== undefined
         ? Math.max(0, (account.limit_day || 0) - account.current)
         : settings.football_account_remaining ?? null,
       football_plan: planName,
-      football_plan_note: freePlan
-        ? `Plano gratuito: a fonte libera o calendário apenas de hoje a amanhã (${allowedDays} de ${windowDays} dias solicitados).`
-        : settings.football_plan_note || '',
-      ...(syncedDays.length ? { football_last_calendar_at: nowIso } : {}),
     });
 
     const savedQuota = await saveQuota(db, quotaRecord, {
@@ -500,10 +629,10 @@ export default async function (req) {
     await releaseLock(db, savedQuota || quotaRecord);
 
     await db.SyncJob.update(job.id, {
-      status: 'success',
+      status: failures.length ? 'partial' : 'success',
       finished_at: new Date().toISOString(),
       requests_used: calls.length,
-      records_upserted: updates.length + creations.length,
+      records_upserted: updates.length,
       error_message: failures.length ? failures.join(' | ').slice(0, 400) : '',
     });
 
@@ -523,17 +652,15 @@ export default async function (req) {
 
     return Response.json({
       ok: true,
-      mode,
+      mode: 'audit',
       calls: calls.length,
-      days_synced: syncedDays,
-      fixtures_read: mapped.length,
-      events_updated: updates.length,
-      events_created: creations.length,
-      results_confirmed: finishedSynced,
-      review_flagged: reviewIds.length,
+      audited,
+      results_confirmed: confirmed,
+      still_running: stillRunning,
+      review_flagged: reviewFlagged,
+      next_audit_at: nextAuditIso,
       quota: { used, limit, percent: quotaPercent(used, limit), level: quotaLevel(used, limit), alerts: quotaRecord?.alerts || [] },
       account,
-      pending_live_bets: pendingLiveBets,
       failures,
       status_error: statusError,
       summary,
