@@ -50,7 +50,7 @@ export default async function (req) {
     const [depositFeesAgg, withdrawalFeesAgg, todayPage] = await Promise.all([
       db.Deposit.aggregate({ query: { status: 'paid' }, sum: ['fee'] }),
       db.Withdrawal.aggregate({
-        query: { kind: { $ne: 'dev_split' }, status: { $in: ['completed', 'processing'] } },
+        query: { kind: { $nin: ['dev_split', 'simulated'] }, status: { $in: ['completed', 'processing'] } },
         sum: ['fee'],
       }),
       db.FinanceSnapshot.filter({ day }, { limit: 1 }),

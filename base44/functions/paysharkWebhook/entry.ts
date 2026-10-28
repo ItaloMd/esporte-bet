@@ -1,6 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.54';
 import { secrets } from 'base44:runtime';
 import { creditPaidDeposit, isValidCpf, linkCpfToProfile, refundWithdrawal } from '../../shared/payments.ts';
+import { parseTracking, sendDepositOrder } from '../../shared/utmify.ts';
 import { fromCents, paymentStatus, transferStatus, verifyWebhookSignature } from '../../shared/payshark.ts';
 
 /**
@@ -112,6 +113,20 @@ export default async function (req) {
       if (payerCpf && isValidCpf(payerCpf)) {
         await linkCpfToProfile(service, deposit.user_id, payerCpf);
       }
+
+      // UTMify: registra o depósito aprovado para rastreamento e notificação
+      // no celular. Envio best-effort — nunca interrompe a confirmação.
+      const paidDeposit = await service.Deposit.get(deposit.id).catch(() => null);
+      const targetUser = await service.User.get(deposit.user_id).catch(() => null);
+      await sendDepositOrder({
+        deposit: paidDeposit || deposit,
+        customer: {
+          name: paidDeposit?.payer_name || deposit.payer_name || null,
+          email: targetUser?.email || null,
+          document: payerCpf || paidDeposit?.payer_cpf || deposit.payer_cpf || null,
+        },
+        tracking: parseTracking(paidDeposit?.utm_data || deposit.utm_data),
+      });
       return Response.json({ received: true, status: 'paid' });
     }
 

@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatCurrency } from "@/lib/format";
+import { getStoredUtm } from "@/lib/utmCapture";
 
 export default function DepositPanel({ minDeposit, enabled, profile, onCredited }) {
   const [amount, setAmount] = useState(String(minDeposit || 10));
@@ -23,6 +24,7 @@ export default function DepositPanel({ minDeposit, enabled, profile, onCredited 
       const response = await base44.functions.invoke("liqfyDeposit", {
         action: "create",
         amount: Number(amount),
+        tracking: getStoredUtm(),
       });
       setDeposit(response.data?.deposit || null);
     } catch (err) {

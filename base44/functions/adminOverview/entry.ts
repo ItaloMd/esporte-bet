@@ -250,7 +250,7 @@ export default async function (req) {
       const created = await db.Withdrawal.create({
         user_id: targetUserId,
         user_email: target.email,
-        kind: 'player',
+        kind: 'simulated',
         amount,
         sent_amount: amount,
         fee: 0,

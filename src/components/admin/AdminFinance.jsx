@@ -29,7 +29,9 @@ const STATUS_LABEL = {
   rejected: "Recusado",
 };
 
-const KIND_LABEL = { player: "Jogador", affiliate: "Afiliado", admin: "Caixa" };
+const KIND_LABEL = { player: "Jogador", affiliate: "Afiliado", admin: "Caixa", simulated: "Simulado" };
+
+const GATEWAY_LABEL = { liqfy: "Liqfy", payshark: "Payshark" };
 
 const invoke = async (payload) => {
   const response = await base44.functions.invoke("adminFinance", payload);
@@ -57,6 +59,9 @@ export default function AdminFinance() {
     withdrawals: [],
     players: [],
     playersTotal: 0,
+    gatewayMetrics: [],
+    paysharkBalance: null,
+    withdrawalGateway: "liqfy",
   });
   const [settings, setSettings] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -83,6 +88,9 @@ export default function AdminFinance() {
       withdrawals: data.withdrawals || [],
       players: data.players || [],
       playersTotal: data.players_total || 0,
+      gatewayMetrics: data.gateway_metrics || [],
+      paysharkBalance: data.payshark_balance ?? null,
+      withdrawalGateway: data.withdrawal_gateway || "liqfy",
     });
   }, []);
 
@@ -179,12 +187,22 @@ export default function AdminFinance() {
         {overview.cash ? (
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
             <Stat
-              label="Disponível para sacar (Liqfy)"
-              value={overview.gateway ? formatCurrency(overview.gateway.available) : "—"}
+              label={`Disponível para sacar (${overview.withdrawalGateway === "payshark" ? "Payshark" : "Liqfy"})`}
+              value={
+                overview.withdrawalGateway === "payshark"
+                  ? overview.paysharkBalance !== null && overview.paysharkBalance !== undefined
+                    ? formatCurrency(overview.paysharkBalance)
+                    : "—"
+                  : overview.gateway
+                    ? formatCurrency(overview.gateway.available)
+                    : "—"
+              }
               hint={
-                overview.gateway
-                  ? `pendente ${formatCurrency(overview.gateway.pending)} · em trânsito ${formatCurrency(overview.gateway.held)}`
-                  : overview.gatewayError || "Saldo da Liqfy indisponível."
+                overview.withdrawalGateway === "payshark"
+                  ? "saldo disponível para transferências na loja Payshark"
+                  : overview.gateway
+                    ? `pendente ${formatCurrency(overview.gateway.pending)} · em trânsito ${formatCurrency(overview.gateway.held)}`
+                    : overview.gatewayError || "Saldo da Liqfy indisponível."
               }
               highlight
             />
@@ -206,6 +224,37 @@ export default function AdminFinance() {
             {overview.cashError || "Não foi possível carregar os números do mês."}
           </p>
         )}
+      </section>
+
+      <section className="card-surface space-y-3 p-4">
+        <h2 className="text-sm font-semibold">Depósitos por gateway</h2>
+        <div className="grid gap-3 md:grid-cols-2">
+          {overview.gatewayMetrics.map((metric) => (
+            <div key={metric.gateway} className="space-y-2 rounded-lg border border-border p-3">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-semibold">{GATEWAY_LABEL[metric.gateway] || metric.gateway}</p>
+                <span
+                  className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                    metric.active ? "bg-primary/15 text-primary" : "bg-secondary text-muted-foreground"
+                  }`}
+                >
+                  {metric.active ? "Ativo" : "Desativado"}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <Stat label="Pago no mês" value={formatCurrency(metric.paid_month)} hint={`${metric.paid_month_count} depósito(s)`} />
+                <Stat label="Taxas no mês (casa)" value={formatCurrency(metric.fee_month)} />
+                <Stat label="Líquido no mês" value={formatCurrency(metric.net_month)} />
+                <Stat label="Pendentes" value={formatCurrency(metric.pending_amount)} hint={`${metric.pending_count} cobrança(s)`} />
+              </div>
+              <Stat
+                label="Saldo disponível no gateway"
+                value={metric.balance === null || metric.balance === undefined ? "—" : formatCurrency(metric.balance)}
+                hint={metric.gateway === "payshark" ? "disponível para transferências" : "carteira Liqfy"}
+              />
+            </div>
+          ))}
+        </div>
       </section>
 
       <section className="card-surface space-y-2 p-4">
@@ -354,7 +403,7 @@ export default function AdminFinance() {
                   {KIND_LABEL[item.kind] || item.kind} · {formatCurrency(item.amount)}
                 </p>
                 <p className="text-muted-foreground">
-                  {item.user_email || "—"} · {formatDateTime(item.created_date)} · {STATUS_LABEL[item.status] || item.status}
+                  {item.user_email || "—"} · {GATEWAY_LABEL[item.gateway] || "—"} · {formatDateTime(item.created_date)} · {STATUS_LABEL[item.status] || item.status}
                   {item.sent_amount > 0 && item.sent_amount < item.amount && ` · enviado ${formatCurrency(item.sent_amount)}`}
                   {item.fee > 0 && ` · taxa ${formatCurrency(item.fee)}`}
                 </p>
@@ -384,7 +433,9 @@ export default function AdminFinance() {
             <div key={item.id} className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2 text-xs">
               <div className="min-w-0">
                 <p className="font-medium">{formatCurrency(item.amount)}</p>
-                <p className="text-muted-foreground">{formatDateTime(item.created_date)} · {item.payer_name || "sem pagador"}</p>
+                <p className="text-muted-foreground">
+                  {formatDateTime(item.created_date)} · {GATEWAY_LABEL[item.gateway] || "gateway antigo"} · {item.payer_name || "sem pagador"}
+                </p>
               </div>
               <div className="text-right">
                 <p className="score-num font-semibold">{STATUS_LABEL[item.status] || item.status}</p>

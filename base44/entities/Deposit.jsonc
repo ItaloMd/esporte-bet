@@ -70,6 +70,10 @@
     "rollover_generated": {
       "type": "number",
       "default": 0
+    },
+    "utm_data": {
+      "type": "string",
+      "description": "Par\u00e2metros de rastreio (UTMify) da visita que originou o dep\u00f3sito, em JSON."
     }
   },
   "required": [

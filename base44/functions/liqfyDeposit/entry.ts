@@ -104,6 +104,15 @@ export default async function (req) {
     const payerName = String(profile?.full_name || user.full_name || 'Cliente').slice(0, 255);
     const externalId = `dep_${user.id.slice(-8)}_${crypto.randomUUID()}`;
 
+    // Parâmetros de rastreio (UTMify) capturados na URL pelo front-end.
+    const TRACKING_KEYS = ['src', 'sck', 'utm_source', 'utm_campaign', 'utm_medium', 'utm_content', 'utm_term'];
+    const tracking = {};
+    TRACKING_KEYS.forEach((key) => {
+      const value = body.tracking?.[key];
+      if (value) tracking[key] = String(value).slice(0, 255);
+    });
+    const utmData = Object.keys(tracking).length ? JSON.stringify(tracking) : undefined;
+
     // Gateway ativo para depósitos: com ambos ligados, a Liqfy é a principal.
     const gateway = pickGateway(settings, 'deposit');
     if (!gateway) {
@@ -146,6 +155,7 @@ export default async function (req) {
         qr_code_base64: '',
         gateway_id: String(charge.id),
         payer_name: payerName,
+        utm_data: utmData,
         rollover_multiplier: rolloverMultiplier,
         rollover_generated: round2(amount * rolloverMultiplier),
       });
@@ -192,6 +202,7 @@ export default async function (req) {
       gateway_id: String(charge.id),
       expires_at: pix.expires_at,
       payer_name: payerName,
+      utm_data: utmData,
       rollover_multiplier: rolloverMultiplier,
       rollover_generated: round2(gross * rolloverMultiplier),
     });

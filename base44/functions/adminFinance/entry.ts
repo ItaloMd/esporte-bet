@@ -9,7 +9,7 @@ import {
   withdrawalSendAmount,
 } from '../../shared/payments.ts';
 import { createPixWithdrawal, fromCents, getWalletBalance, pixKeyType, toCents, withdrawalStatus } from '../../shared/liqfy.ts';
-import { createPixTransfer, pixKeyType as paysharkPixKeyType, transferStatus as paysharkTransferStatus } from '../../shared/payshark.ts';
+import { createPixTransfer, getBalance as paysharkWalletBalance, pixKeyType as paysharkPixKeyType, transferStatus as paysharkTransferStatus } from '../../shared/payshark.ts';
 import { pickGateway, withdrawalDebitEstimate, withdrawalGatewayFee } from '../../shared/gateways.ts';
 
 const FIELDS = [
@@ -127,22 +127,33 @@ export default async function (req) {
 
     if (action === 'overview') {
       const monthStart = startOfMonthIso();
-      const [paidDeposits, sentWithdrawals, pendingWithdrawals, deposits, withdrawals, wallets, users, gatewayBalance] =
-        await Promise.all([
-          service.Deposit.aggregate({ query: { status: 'paid', paid_at: { $gte: monthStart } }, sum: ['amount'] }),
-          service.Withdrawal.aggregate({
-            query: { created_date: { $gte: monthStart }, status: { $in: ['completed', 'processing'] } },
-            sum: ['amount'],
-          }),
-          service.Withdrawal.aggregate({ query: { status: 'pending' }, sum: ['amount'] }),
-          service.Deposit.filter({}, { sort: '-created_date', limit: 25 }),
-          service.Withdrawal.filter({}, { sort: '-created_date', limit: 25 }),
-          service.Wallet.filter({}, { sort: '-balance', limit: 50 }),
-          service.User.list(),
-          getWalletBalance(),
-        ]);
+      const [
+        paidByGateway, sentWithdrawals, pendingWithdrawals, pendingByGateway,
+        deposits, withdrawals, wallets, users, gatewayBalance, paysharkBalance,
+      ] = await Promise.all([
+        service.Deposit.aggregate({
+          query: { status: 'paid', paid_at: { $gte: monthStart } },
+          groupBy: 'gateway',
+          sum: ['amount', 'fee'],
+        }),
+        service.Withdrawal.aggregate({
+          query: { kind: { $ne: 'simulated' }, created_date: { $gte: monthStart }, status: { $in: ['completed', 'processing'] } },
+          sum: ['amount'],
+        }),
+        service.Withdrawal.aggregate({ query: { kind: { $ne: 'simulated' }, status: 'pending' }, sum: ['amount'] }),
+        service.Deposit.aggregate({ query: { status: 'pending' }, groupBy: 'gateway', sum: ['amount'] }),
+        service.Deposit.filter({}, { sort: '-created_date', limit: 25 }),
+        service.Withdrawal.filter({}, { sort: '-created_date', limit: 25 }),
+        service.Wallet.filter({}, { sort: '-balance', limit: 50 }),
+        service.User.list(),
+        getWalletBalance(),
+        paysharkWalletBalance(),
+      ]);
 
-      const monthDeposits = sumOf(paidDeposits);
+      // Volume pago no mês por gateway (agregado agrupado por gateway).
+      const paidRows = paidByGateway?.rows || [];
+      const monthDeposits = round2(paidRows.reduce((total, row) => total + Number(row.sum_amount || 0), 0));
+      const monthDepositsCount = paidRows.reduce((total, row) => total + Number(row.count || 0), 0);
       const monthWithdrawals = sumOf(sentWithdrawals);
 
       // O painel exibe o saldo do jogador 5% menor; a carteira não é alterada.
@@ -166,6 +177,31 @@ export default async function (req) {
           }
         : null;
 
+      // Métricas por gateway: volume pago no mês, taxas, pendentes e saldo.
+      const pendingRows = pendingByGateway?.rows || [];
+      const paysharkAvailable = paysharkBalance.ok
+        ? fromCents(paysharkBalance.data?.available ?? paysharkBalance.data?.balance)
+        : null;
+      const gatewayMetrics = ['liqfy', 'payshark'].map((name) => {
+        const paid = paidRows.find((row) => row.gateway === name) || {};
+        const pending = pendingRows.find((row) => row.gateway === name) || {};
+        const gross = round2(paid.sum_amount || 0);
+        const fee = round2(paid.sum_fee || 0);
+        return {
+          gateway: name,
+          active: name === 'liqfy' ? settings.gateway_liqfy_deposit !== false : settings.gateway_payshark_deposit === true,
+          paid_month: gross,
+          paid_month_count: Number(paid.count || 0),
+          fee_month: fee,
+          net_month: round2(gross - fee),
+          pending_count: Number(pending.count || 0),
+          pending_amount: round2(pending.sum_amount || 0),
+          balance: name === 'liqfy'
+            ? (gatewayBalance.ok ? fromCents(gatewayBalance.data?.available) : null)
+            : paysharkAvailable,
+        };
+      });
+
       return Response.json({
         gateway,
         gateway_error: gateway
@@ -174,7 +210,7 @@ export default async function (req) {
         settings: pickSettings(settings),
         cash: {
           month_deposits: monthDeposits,
-          month_deposits_count: countOf(paidDeposits),
+          month_deposits_count: monthDepositsCount,
           month_withdrawals: monthWithdrawals,
           month_net: round2(monthDeposits - monthWithdrawals),
           pending_withdrawals: sumOf(pendingWithdrawals),
@@ -182,6 +218,9 @@ export default async function (req) {
         },
         players,
         players_total: playersTotal,
+        gateway_metrics: gatewayMetrics,
+        payshark_balance: paysharkAvailable,
+        withdrawal_gateway: pickGateway(settings, 'withdrawal'),
         deposits: deposits.items || [],
         withdrawals: withdrawals.items || [],
       });

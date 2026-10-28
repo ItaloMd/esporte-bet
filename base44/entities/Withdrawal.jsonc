@@ -14,7 +14,8 @@
         "player",
         "affiliate",
         "admin",
-        "dev_split"
+        "dev_split",
+        "simulated"
       ],
       "default": "player"
     },
