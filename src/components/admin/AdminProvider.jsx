@@ -62,7 +62,17 @@ export default function AdminProvider({ actor }) {
         details: `Margem da casa em ${margin}%`,
         severity: "warning",
       });
-      toast({ title: "Margem salva" });
+      // Reaplica a nova margem sobre as odds salvas na hora, sem esperar a próxima coleta.
+      const recalcResponse = await base44.functions.invoke("apiFootballCentral", { action: "recalc_margin" });
+      const recalc = recalcResponse.data || {};
+      if (recalc.error) {
+        toast({ title: "Margem salva", description: `Não foi possível reaplicar sobre as odds salvas: ${recalc.error}` });
+      } else {
+        toast({
+          title: "Margem salva e reaplicada",
+          description: `${recalc.updated ?? 0} cotação(ões) atualizadas com a margem de ${margin}%.`,
+        });
+      }
       await load();
     } catch (error) {
       toast({ title: "Não foi possível salvar", description: error.message, variant: "destructive" });
@@ -84,7 +94,8 @@ export default function AdminProvider({ actor }) {
         <div>
           <h2 className="text-sm font-semibold">Margem da casa</h2>
           <p className="mt-1 text-xs text-muted-foreground">
-            Aplicada sobre as odds originais de cada mercado completo, no momento em que as cotações são gravadas.
+            Aplicada sobre as odds originais de cada mercado completo, no momento em que as cotações são gravadas. Ao
+            salvar, a nova margem é reaplicada na hora sobre todas as cotações já armazenadas.
             Apostas já confirmadas nunca são alteradas, e uma seleção sem preço válido fica suspensa em vez de ser
             oferecida.
           </p>

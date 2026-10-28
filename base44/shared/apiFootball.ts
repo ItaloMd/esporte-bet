@@ -251,6 +251,49 @@ export function fetchFixturesByDate(apiKey, base, date) {
   return apiFootballFetch(apiKey, "/fixtures", { date, timezone: FOOTBALL_TIMEZONE }, { base });
 }
 
+/**
+ * Detector global de jogos ao vivo: uma única chamada devolve todas as partidas
+ * em andamento no mundo (placar, minuto e status), cobrindo a fila inteira por
+ * 1 crédito — é o endpoint principal do monitoramento em tempo real.
+ */
+export function fetchFixturesLiveAll(apiKey, base) {
+  return apiFootballFetch(apiKey, "/fixtures", { live: "all" }, { base, timeoutMs: 25000 });
+}
+
+/** Estatísticas de uma partida (escanteios, cartões, chutes) — consultadas após o FT. */
+export function fetchFixtureStatistics(apiKey, base, fixtureId) {
+  return apiFootballFetch(apiKey, "/fixtures/statistics", { fixture: fixtureId }, { base });
+}
+
+function teamStatValue(teamRow, label) {
+  const found = (teamRow?.statistics || []).find(
+    (item) => String(item?.type || "").trim().toLowerCase() === label,
+  );
+  const value = Number(found?.value);
+  return Number.isFinite(value) ? value : null;
+}
+
+/**
+ * Extrai escanteios e cartões da resposta de /fixtures/statistics.
+ * A primeira linha da resposta é o time da casa; a segunda, o visitante.
+ */
+export function parseFixtureStatistics(payload) {
+  const rows = Array.isArray(payload?.response) ? payload.response : [];
+  const pick = (row, label) => (row ? teamStatValue(row, label) : null);
+  const cardsOf = (row) => {
+    const yellow = pick(row, "yellow cards");
+    const red = pick(row, "red cards");
+    const total = (yellow === null ? 0 : yellow) + (red === null ? 0 : red);
+    return yellow === null && red === null ? null : total;
+  };
+  return {
+    corners_home: pick(rows[0], "corner kicks"),
+    corners_away: pick(rows[1], "corner kicks"),
+    cards_home: cardsOf(rows[0]),
+    cards_away: cardsOf(rows[1]),
+  };
+}
+
 /** Cabeçalhos de quota do provedor, para leitura em qualquer chamada. */
 export function readQuotaFrom(result) {
   return result?.quota || { limit: null, remaining: null, used: null };

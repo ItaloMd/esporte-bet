@@ -8,6 +8,7 @@ import {
   acquireLock,
   canSpend,
   chargeQuota,
+  effectiveDailyLimit,
   loadQuota,
   lockHeld,
   quotaDayKey,
@@ -71,8 +72,10 @@ export default async function (req) {
     if (!apiKey) return Response.json({ skipped: true, reason: 'Chave da API-Football não configurada' });
     const base = footballApiBase(settings);
 
-    const limit = numberOr(settings.football_daily_limit, DEFAULT_DAILY_LIMIT);
+    let limit = numberOr(settings.football_daily_limit, DEFAULT_DAILY_LIMIT);
     quotaRecord = await loadQuota(db, day);
+    // O orçamento real é o menor entre o interno e o limite do plano contratado.
+    limit = effectiveDailyLimit(limit, quotaRecord?.provider_limit);
     if (lockHeld(quotaRecord, nowMs)) {
       return Response.json({ skipped: true, reason: 'Outra sincronização está em andamento' });
     }

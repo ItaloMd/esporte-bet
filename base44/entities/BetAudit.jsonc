@@ -1,0 +1,156 @@
+{
+  "name": "BetAudit",
+  "type": "object",
+  "properties": {
+    "event_id": {
+      "type": "string"
+    },
+    "fixture_id": {
+      "type": "string"
+    },
+    "competition_name": {
+      "type": "string"
+    },
+    "home_team_name": {
+      "type": "string"
+    },
+    "away_team_name": {
+      "type": "string"
+    },
+    "home_score": {
+      "type": "number"
+    },
+    "away_score": {
+      "type": "number"
+    },
+    "reg_home_score": {
+      "type": "number"
+    },
+    "reg_away_score": {
+      "type": "number"
+    },
+    "total_goals": {
+      "type": "number"
+    },
+    "btts": {
+      "type": "boolean",
+      "default": false
+    },
+    "home_win": {
+      "type": "boolean",
+      "default": false
+    },
+    "draw": {
+      "type": "boolean",
+      "default": false
+    },
+    "away_win": {
+      "type": "boolean",
+      "default": false
+    },
+    "over_05": {
+      "type": "boolean",
+      "default": false
+    },
+    "over_15": {
+      "type": "boolean",
+      "default": false
+    },
+    "over_25": {
+      "type": "boolean",
+      "default": false
+    },
+    "over_35": {
+      "type": "boolean",
+      "default": false
+    },
+    "over_45": {
+      "type": "boolean",
+      "default": false
+    },
+    "under_05": {
+      "type": "boolean",
+      "default": false
+    },
+    "under_15": {
+      "type": "boolean",
+      "default": false
+    },
+    "under_25": {
+      "type": "boolean",
+      "default": false
+    },
+    "under_35": {
+      "type": "boolean",
+      "default": false
+    },
+    "under_45": {
+      "type": "boolean",
+      "default": false
+    },
+    "corners_home": {
+      "type": "number",
+      "default": 0
+    },
+    "corners_away": {
+      "type": "number",
+      "default": 0
+    },
+    "cards_home": {
+      "type": "number",
+      "default": 0
+    },
+    "cards_away": {
+      "type": "number",
+      "default": 0
+    },
+    "statistics_fetched": {
+      "type": "boolean",
+      "default": false
+    },
+    "statistics_source": {
+      "type": "string"
+    },
+    "events_fetched": {
+      "type": "boolean",
+      "default": false
+    },
+    "bet_count": {
+      "type": "number",
+      "default": 0
+    },
+    "note": {
+      "type": "string"
+    },
+    "audited_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "required": [
+    "event_id",
+    "fixture_id"
+  ],
+  "rls": {
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

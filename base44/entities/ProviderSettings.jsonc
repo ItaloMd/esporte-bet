@@ -197,7 +197,7 @@
     },
     "football_window_days": {
       "type": "number",
-      "default": 2
+      "default": 5
     },
     "football_calendar_refresh_seconds": {
       "type": "number",
@@ -206,6 +206,30 @@
     "football_create_events": {
       "type": "boolean",
       "default": true
+    },
+    "football_live_interval_minutes": {
+      "type": "number",
+      "default": 2
+    },
+    "football_monitor_default_minutes": {
+      "type": "number",
+      "default": 5
+    },
+    "football_monitor_bets_minutes": {
+      "type": "number",
+      "default": 1
+    },
+    "football_monitor_favorites_minutes": {
+      "type": "number",
+      "default": 1
+    },
+    "football_monitor_critical_minutes": {
+      "type": "number",
+      "default": 0.5
+    },
+    "football_critical_from_minute": {
+      "type": "number",
+      "default": 80
     },
     "football_audit_offset_hours": {
       "type": "number",

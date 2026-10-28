@@ -4,16 +4,19 @@ import {
   FOOTBALL_TIMEZONE,
   footballApiBase,
   fetchAccountStatus,
+  fetchFixtureStatistics,
   fetchFixturesByDate,
   fetchFixturesByIds,
   mapFixture,
   parseAccountStatus,
+  parseFixtureStatistics,
 } from '../../shared/apiFootball.ts';
 import {
   DEFAULT_DAILY_LIMIT,
   acquireLock,
   canSpend,
   chargeQuota,
+  effectiveDailyLimit,
   loadQuota,
   lockHeld,
   quotaDayKey,
@@ -28,6 +31,7 @@ import {
 import { localDateString, slugify } from '../../shared/oddsApi.ts';
 import { chunkArray } from '../../shared/matchLifecycle.ts';
 import { indexByFixtureId, numberOr, upcomingDates } from '../../shared/footballSync.ts';
+import { buildBetAudit } from '../../shared/footballAudit.ts';
 
 const LOCK_MS = 4 * 60 * 1000;
 const CREATE_AHEAD_MS = 8 * 24 * 60 * 60 * 1000;
@@ -40,6 +44,8 @@ const IDS_PER_CALL = 20;
 const MAX_AUDIT_CHECKS = 12;
 /** Teto de partidas auditadas por execução, protegendo a cota diária. */
 const MAX_AUDIT_EVENTS = 300;
+/** Teto de consultas de estatísticas por execução: 1 crédito por partida com apostas. */
+const MAX_STATS_PER_RUN = 15;
 
 /** O plano tem limite por minuto além da cota diária: nesse caso a execução para. */
 function isRateLimit(message) {
@@ -287,8 +293,10 @@ export default async function (req) {
     if (!apiKey) return Response.json({ skipped: true, reason: 'Chave da API-Football não configurada' });
     const base = footballApiBase(settings);
 
-    const limit = numberOr(settings.football_daily_limit, DEFAULT_DAILY_LIMIT);
+    let limit = numberOr(settings.football_daily_limit, DEFAULT_DAILY_LIMIT);
     quotaRecord = await loadQuota(db, day);
+    // O orçamento real é o menor entre o interno e o limite do plano contratado.
+    limit = effectiveDailyLimit(limit, quotaRecord?.provider_limit);
     if (lockHeld(quotaRecord, nowMs)) {
       return Response.json({ skipped: true, reason: 'Outra sincronização está em andamento' });
     }
@@ -338,6 +346,11 @@ export default async function (req) {
         notes: 'Consumo interno corrigido pela contagem oficial do provedor',
       });
       used = account.current;
+    }
+
+    // O /status revela o limite real do plano: o orçamento se ajusta na hora.
+    if (account?.limit_day) {
+      limit = effectiveDailyLimit(numberOr(settings.football_daily_limit, DEFAULT_DAILY_LIMIT), account.limit_day);
     }
 
     const level = quotaLevel(used, limit);
@@ -519,10 +532,14 @@ export default async function (req) {
     /* --------------------- auditoria de encerramento --------------------- */
     // Apostas pendentes sempre precisam de resultado, tenham cotação ou não.
     const openEventIds = new Set();
+    const openBetCounts = new Map();
     let openCursor = null;
     for (let round = 0; round < 4; round += 1) {
       const page = await db.SimulationSelection.filter({ status: 'open' }, { limit: 500, ...(openCursor ? { cursor: openCursor } : {}) });
-      (page.items || []).forEach((row) => openEventIds.add(row.event_id));
+      (page.items || []).forEach((row) => {
+        openEventIds.add(row.event_id);
+        openBetCounts.set(row.event_id, (openBetCounts.get(row.event_id) || 0) + 1);
+      });
       openCursor = page.next_cursor;
       if (!page.has_more) break;
     }
@@ -534,6 +551,7 @@ export default async function (req) {
 
     const updates = [];
     const auditLogs = [];
+    const finishedAudits = [];
     let audited = 0;
     let confirmed = 0;
     let stillRunning = 0;
@@ -573,6 +591,7 @@ export default async function (req) {
             if (fixture.finished) {
               confirmed += 1;
               outcome = 'encerrada';
+              finishedAudits.push({ event, fixture });
             } else if (fixture.void) {
               outcome = 'não disputada';
             } else {
@@ -617,6 +636,40 @@ export default async function (req) {
     for (const batch of chunkArray(updates, 200)) await db.Event.bulkUpdate(batch);
     for (const batch of chunkArray(auditLogs, 100)) await db.ApiUsageLog.bulkCreate(batch);
 
+    /* -------- auditoria de apostas: placar + estatísticas por encerramento -------- */
+    // Toda partida encerrada recebe a auditoria de mercados pelo placar (custo 0);
+    // as estatísticas oficiais (escanteios e cartões) só são consultadas quando
+    // há apostas pendentes na partida, protegendo a cota diária.
+    const betAudits = [];
+    let statisticsCalls = 0;
+    for (const { event, fixture } of finishedAudits) {
+      const hasBets = openEventIds.has(event.id);
+      let statistics = null;
+      let statisticsSource = '';
+      if (hasBets && statisticsCalls < MAX_STATS_PER_RUN && canSpend(used, limit, policy.reserve, 1)) {
+        try {
+          const statsResult = await fetchFixtureStatistics(apiKey, base, fixture.fixture_id);
+          const charged = await chargeQuota(db, { record: quotaRecord, day, limit, cost: 1, purpose: 'statistics', reserve: policy.reserve });
+          quotaRecord = charged.record || quotaRecord;
+          used = charged.used;
+          statisticsCalls += 1;
+          statistics = parseFixtureStatistics(statsResult.data);
+          statisticsSource = 'api_football';
+          calls.push({ endpoint: `/fixtures/statistics?fixture=${fixture.fixture_id}`, records: Number(statsResult.results) || 0, errors: statsResult.errors });
+        } catch (error) {
+          failures.push(`estatísticas ${fixture.fixture_id}: ${String(error?.message || error)}`);
+        }
+      }
+      betAudits.push(buildBetAudit(event, fixture, {
+        betCount: openBetCounts.get(event.id) || 0,
+        statistics,
+        statisticsSource,
+      }));
+    }
+    for (const batch of chunkArray(betAudits, 100)) {
+      if (batch.length) await db.BetAudit.bulkCreate(batch);
+    }
+
     // Próxima auditoria prevista: o evento com horário mais cedo ainda futuro.
     const nextDuePage = await db.Event.filter({ next_check_at: { $gte: nowIso } }, { sort: 'next_check_at', limit: 1 });
     const nextAuditIso = nextDuePage.items?.[0]?.next_check_at || null;
@@ -628,6 +681,7 @@ export default async function (req) {
       `${confirmed} encerrada(s)`,
       `${stillRunning} em andamento`,
       `${reviewFlagged} em revisão`,
+      `${betAudits.length} auditoria(s) de aposta`,
       nextAuditIso ? `próxima ${nextAuditIso}` : 'sem auditoria pendente',
       `orçamento ${used}/${limit}`,
     ].join(' · ');

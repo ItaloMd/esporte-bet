@@ -1,13 +1,13 @@
 {
   "name": "Importar calend\u00e1rio API-Football",
-  "description": "Todo dia \u00e0s 00:10 importa as partidas do dia e do dia seguinte em lote: uma chamada por data, sem nenhuma consulta ao vivo. Cada partida importada recebe o hor\u00e1rio da primeira auditoria (in\u00edcio + 2 horas).",
+  "description": "Todo dia \u00e0s 01:00 importa as partidas de hoje, de amanh\u00e3 e dos pr\u00f3ximos 3 dias em lote: uma chamada por data, sem nenhuma consulta ao vivo. Cada partida importada recebe o hor\u00e1rio da primeira auditoria (in\u00edcio + 2 horas).",
   "trigger": {
     "condition": null,
     "config": {
       "trigger_type": "scheduled",
       "events": [],
       "schedule_mode": "recurring",
-      "cron_expression": "10 0 * * *",
+      "cron_expression": "0 1 * * *",
       "one_time_date": null,
       "timezone": "America/Sao_Paulo",
       "interval_value": null,
@@ -22,7 +22,7 @@
     "document": {
       "dsl": "1.0.0",
       "name": "importar_calendario_api_football",
-      "version": "1.1",
+      "version": "1.2",
       "namespace": "base44"
     },
     "do": [
@@ -38,7 +38,7 @@
           },
           "then": "end",
           "x-base44": {
-            "title": "Importar dia e dia seguinte",
+            "title": "Importar hoje e pr\u00f3ximos 4 dias",
             "description": "Uma chamada por data \u00b7 auditoria em in\u00edcio + 2h"
           }
         }

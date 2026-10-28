@@ -9,7 +9,7 @@
 import { localDateString } from "./oddsApi.ts";
 
 export const QUOTA_PROVIDER = "api_football";
-export const QUOTA_ALERTS = [60, 80, 95];
+export const QUOTA_ALERTS = [50, 75, 90, 95];
 export const DEFAULT_DAILY_LIMIT = 100;
 
 /** Dia operacional no calendário brasileiro. */
@@ -48,6 +48,20 @@ export function quotaPolicy(level) {
 /** Verdadeiro quando ainda há orçamento acima da reserva para a chamada. */
 export function canSpend(used, limit, reserve = 0, cost = 1) {
   return Number(used) + Number(cost) + Number(reserve) <= Number(limit);
+}
+
+/**
+ * Orçamento efetivo do dia: o menor entre o limite interno e o limite real do
+ * plano contratado (cabeçalhos do provedor ou /status). Enquanto a conta está
+ * no plano Free, o orçamento cai para o limite real; ao upgradear o plano, o
+ * valor sobe automaticamente — as rotinas nunca gastam além do plano.
+ */
+export function effectiveDailyLimit(internalLimit, providerLimit) {
+  const provider = Number(providerLimit);
+  if (Number.isFinite(provider) && provider > 0) {
+    return Math.min(Number(internalLimit), provider);
+  }
+  return Number(internalLimit);
 }
 
 export function alertMessages(used, limit, previousAlerts = []) {

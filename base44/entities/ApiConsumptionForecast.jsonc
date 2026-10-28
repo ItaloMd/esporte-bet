@@ -1,0 +1,67 @@
+{
+  "name": "ApiConsumptionForecast",
+  "type": "object",
+  "properties": {
+    "day": {
+      "type": "string"
+    },
+    "computed_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "projected_daily": {
+      "type": "number",
+      "default": 0
+    },
+    "actual_daily": {
+      "type": "number",
+      "default": 0
+    },
+    "percent_used": {
+      "type": "number",
+      "default": 0
+    },
+    "safety_margin": {
+      "type": "number",
+      "default": 0
+    },
+    "risk_level": {
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ],
+      "default": "low"
+    },
+    "notes": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "day"
+  ],
+  "rls": {
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}
