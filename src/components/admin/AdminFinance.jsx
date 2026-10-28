@@ -65,10 +65,13 @@ export default function AdminFinance() {
   const [error, setError] = useState("");
   const [simUser, setSimUser] = useState("");
   const [simAmount, setSimAmount] = useState("");
+  const [adminUsers, setAdminUsers] = useState([]);
 
   const load = useCallback(async () => {
     setOverview((current) => ({ ...current, loading: true }));
     const data = await invoke({ action: "overview" });
+    const users = await base44.entities.User.list().catch(() => []);
+    setAdminUsers((Array.isArray(users) ? users : users.items || []).filter((row) => row.role === "admin"));
     setSettings({ ...EMPTY, ...(data.settings || {}) });
     setOverview({
       loading: false,
@@ -278,9 +281,9 @@ export default function AdminFinance() {
               onChange={(event) => setSimUser(event.target.value)}
               className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
             >
-              <option value="">Selecione o jogador</option>
-              {overview.players.map((item) => (
-                <option key={item.user_id} value={item.user_id}>{item.email || item.user_id}</option>
+              <option value="">Selecione a conta de administrador</option>
+              {adminUsers.map((item) => (
+                <option key={item.id} value={item.id}>{item.email || item.id}</option>
               ))}
             </select>
           </div>
