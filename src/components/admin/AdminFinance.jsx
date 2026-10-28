@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, Banknote, Check, Loader2, RefreshCw, Save, Send, X } from "lucide-react";
+import { AlertTriangle, Banknote, Check, FlaskConical, Loader2, RefreshCw, Save, Send, X } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -63,6 +63,8 @@ export default function AdminFinance() {
   const [cashAmount, setCashAmount] = useState("");
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+  const [simUser, setSimUser] = useState("");
+  const [simAmount, setSimAmount] = useState("");
 
   const load = useCallback(async () => {
     setOverview((current) => ({ ...current, loading: true }));
@@ -132,6 +134,28 @@ export default function AdminFinance() {
   };
 
   const processWithdrawal = (id, approve) => run(`wd-${id}`, { action: "process_withdrawal", id, approve });
+
+  const simulateWithdrawal = async () => {
+    setBusy("sim");
+    setError("");
+    try {
+      await base44.functions.invoke("adminOverview", {
+        action: "simulate_withdrawal",
+        user_id: simUser,
+        amount: Number(simAmount),
+      });
+      toast({
+        title: "Saque simulado criado",
+        description: "Registro visual concluído — nenhuma transferência real foi enviada ao gateway.",
+      });
+      setSimAmount("");
+      await load();
+    } catch (err) {
+      setError(err?.response?.data?.error || err.message || "Falha ao simular o saque.");
+    } finally {
+      setBusy("");
+    }
+  };
 
   if (!settings) return <div className="card-surface h-40 animate-pulse" />;
 
@@ -234,6 +258,40 @@ export default function AdminFinance() {
         <Button onClick={withdrawCash} disabled={busy === "cash" || !cashAmount}>
           {busy === "cash" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
           Sacar do caixa
+        </Button>
+      </section>
+
+      <section className="card-surface space-y-3 p-4">
+        <h2 className="flex items-center gap-2 text-sm font-semibold">
+          <FlaskConical className="h-4 w-4 text-primary" aria-hidden="true" /> Simular saque (visual)
+        </h2>
+        <p className="text-xs text-muted-foreground">
+          Cria um saque concluído na conta do jogador sem nenhuma chamada ao gateway e sem mover saldos —
+          aprovação instantânea, 100% visual, feita aqui no painel.
+        </p>
+        <div className="grid max-w-lg gap-3 sm:grid-cols-2">
+          <div className="space-y-2">
+            <Label htmlFor="sim-player">Jogador</Label>
+            <select
+              id="sim-player"
+              value={simUser}
+              onChange={(event) => setSimUser(event.target.value)}
+              className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
+            >
+              <option value="">Selecione o jogador</option>
+              {overview.players.map((item) => (
+                <option key={item.user_id} value={item.user_id}>{item.email || item.user_id}</option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="sim-amount">Valor (R$)</Label>
+            <Input id="sim-amount" type="number" step="0.01" value={simAmount} onChange={(event) => setSimAmount(event.target.value)} />
+          </div>
+        </div>
+        <Button onClick={simulateWithdrawal} disabled={busy === "sim" || !simUser || !simAmount}>
+          {busy === "sim" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FlaskConical className="mr-2 h-4 w-4" />}
+          Aprovar saque simulado
         </Button>
       </section>
 

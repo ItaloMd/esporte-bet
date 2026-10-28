@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Clock, Loader2 } from "lucide-react";
+import { CheckCircle2, Clock, Loader2 } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -92,9 +92,13 @@ export default function WithdrawPanel({
   if (done) {
     return (
       <div className="space-y-3 text-center">
-        <p className="font-semibold">Saque solicitado</p>
+        <span className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-emerald-500/15">
+          <CheckCircle2 className="h-7 w-7 text-emerald-400" aria-hidden="true" />
+        </span>
+        <p className="text-lg font-semibold text-emerald-400">Saque solicitado com sucesso!</p>
         <p className="text-sm text-muted-foreground">
-          O valor ficou reservado e será enviado para a sua chave PIX após a liberação. Você acompanha o status abaixo.
+          O valor ficou reservado no seu saldo e será enviado para a sua chave PIX após a liberação.
+          Acompanhe o status no histórico de saques abaixo.
         </p>
         <Button variant="outline" onClick={() => setDone(false)}>Solicitar outro saque</Button>
       </div>

@@ -1,83 +1,22 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Info, Lock, RefreshCw, Wallet as WalletIcon } from "lucide-react";
-import { base44 } from "@/api/base44Client";
-import { useAuth } from "@/lib/AuthContext";
+import React from "react";
+import { Link } from "react-router-dom";
+import { ArrowDownToLine, ArrowUpFromLine, Info, Lock, RefreshCw, Wallet as WalletIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CardListSkeleton } from "@/components/state/LoadingBlocks";
-import DepositPanel from "@/components/wallet/DepositPanel";
-import WithdrawPanel from "@/components/wallet/WithdrawPanel";
 import WalletHistory from "@/components/wallet/WalletHistory";
+import { useWalletData } from "@/lib/useWalletData";
 import { formatCurrency } from "@/lib/format";
-import { useWallet } from "@/lib/WalletProvider";
 
 export default function Wallet() {
-  const { user, isAuthenticated, isLoadingAuth, authChecked, navigateToLogin } = useAuth();
-  const { reload: reloadBalance } = useWallet();
-  const [state, setState] = useState({
-    loading: true,
-    wallet: null,
-    deposits: [],
-    withdrawals: [],
-    transactions: [],
-    settings: {},
-    kycLatest: null,
-    kycApproved: false,
-    profile: null,
-  });
-  const depositRef = useRef(null);
-  const withdrawRef = useRef(null);
+  const { loading, wallet, deposits, withdrawals, transactions, load } = useWalletData();
 
-  const load = useCallback(async () => {
-    if (!user?.id) return;
-    const [walletPage, depositPage, withdrawalPage, transactionPage, settingsPage, kycPage, kycApprovedPage, profilePage] = await Promise.all([
-      base44.entities.Wallet.filter({ user_id: user.id }, { limit: 1 }),
-      base44.entities.Deposit.filter({ user_id: user.id }, { sort: "-created_date", limit: 8 }),
-      base44.entities.Withdrawal.filter({ user_id: user.id, kind: "player" }, { sort: "-created_date", limit: 8 }),
-      base44.entities.WalletTransaction.filter({ user_id: user.id }, { sort: "-created_date", limit: 15 }),
-      base44.entities.AppSettings.list({ limit: 1 }),
-      base44.entities.KycSubmission.filter({ user_id: user.id }, { sort: "-created_date", limit: 1 }),
-      base44.entities.KycSubmission.filter({ user_id: user.id, status: "approved" }, { limit: 1 }),
-      base44.entities.UserProfile.filter({ user_id: user.id }, { limit: 1 }),
-    ]);
-    setState({
-      loading: false,
-      wallet: walletPage.items?.[0] || null,
-      deposits: depositPage.items || [],
-      withdrawals: withdrawalPage.items || [],
-      transactions: transactionPage.items || [],
-      settings: settingsPage.items?.[0] || {},
-      kycLatest: kycPage.items?.[0] || null,
-      kycApproved: Boolean(kycApprovedPage.items?.length),
-      profile: profilePage.items?.[0] || null,
-    });
-    reloadBalance();
-  }, [user?.id, reloadBalance]);
+  if (loading) return <CardListSkeleton count={2} />;
 
-  useEffect(() => {
-    if (!authChecked || isLoadingAuth) return;
-    if (!isAuthenticated) {
-      navigateToLogin();
-      return;
-    }
-    load().catch(() => setState((current) => ({ ...current, loading: false })));
-  }, [authChecked, isLoadingAuth, isAuthenticated, load, navigateToLogin]);
-
-  useEffect(() => {
-    if (state.loading) return;
-    const acao = new URLSearchParams(window.location.search).get("acao");
-    if (!acao) return;
-    const target = acao === "saque" ? withdrawRef.current : depositRef.current;
-    target?.scrollIntoView({ behavior: "smooth", block: "center" });
-  }, [state.loading]);
-
-  if (state.loading) return <CardListSkeleton count={2} />;
-
-  const wallet = state.wallet || {};
-  const settings = state.settings || {};
-  const balance = Number(wallet.balance || 0);
-  const locked = Number(wallet.locked_balance || 0);
-  const required = Number(wallet.rollover_required || 0);
-  const completed = Number(wallet.rollover_completed || 0);
+  const walletData = wallet || {};
+  const balance = Number(walletData.balance || 0);
+  const locked = Number(walletData.locked_balance || 0);
+  const required = Number(walletData.rollover_required || 0);
+  const completed = Number(walletData.rollover_completed || 0);
   const rolloverPending = Math.max(0, Math.round((required - completed) * 100) / 100);
   const rolloverProgress = required > 0 ? Math.min(100, (completed / required) * 100) : 100;
 
@@ -91,7 +30,7 @@ export default function Wallet() {
           <h1 className="text-xl font-semibold">Carteira</h1>
           <p className="text-xs text-muted-foreground">Depósitos e saques via PIX, com rollover configurado pela plataforma</p>
         </div>
-        <Button variant="outline" size="sm" className="ml-auto" onClick={() => load()}>
+        <Button variant="outline" size="sm" className="ml-auto" onClick={load}>
           <RefreshCw className="mr-1.5 h-3.5 w-3.5" /> Atualizar
         </Button>
       </header>
@@ -109,9 +48,30 @@ export default function Wallet() {
           <p className="text-[11px] text-muted-foreground">Reservado em saques</p>
         </div>
         <div className="card-surface px-4 py-3">
-          <p className="score-num text-2xl font-semibold">{formatCurrency(Number(wallet.total_deposited || 0))}</p>
+          <p className="score-num text-2xl font-semibold">{formatCurrency(Number(walletData.total_deposited || 0))}</p>
           <p className="text-[11px] text-muted-foreground">Total depositado</p>
         </div>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Link to="/deposito" className="card-surface group flex items-center gap-4 p-4 transition-colors hover:border-primary/50">
+          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
+            <ArrowDownToLine className="h-5 w-5" aria-hidden="true" />
+          </span>
+          <span className="min-w-0">
+            <span className="block font-semibold">Depositar</span>
+            <span className="block truncate text-xs text-muted-foreground">Gere o QR Code PIX e pague no banco</span>
+          </span>
+        </Link>
+        <Link to="/saque" className="card-surface group flex items-center gap-4 p-4 transition-colors hover:border-primary/50">
+          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
+            <ArrowUpFromLine className="h-5 w-5" aria-hidden="true" />
+          </span>
+          <span className="min-w-0">
+            <span className="block font-semibold">Sacar</span>
+            <span className="block truncate text-xs text-muted-foreground">Envio via PIX para o seu CPF cadastrado</span>
+          </span>
+        </Link>
       </div>
 
       <section className="card-surface space-y-2 px-4 py-3">
@@ -126,51 +86,23 @@ export default function Wallet() {
         </div>
         <p className="text-[11px] text-muted-foreground">
           {rolloverPending > 0
-            ? `Faltam ${formatCurrency(rolloverPending)} em apostas para liberar o saque.`
+            ? `Faltam ${formatCurrency(rolloverPending)} em apostas liquidadas para liberar o saque.`
             : "Rollover cumprido — seu saque está liberado."}
         </p>
       </section>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <section ref={depositRef} className="card-surface space-y-3 p-4">
-          <h2 className="text-sm font-semibold">Depositar via PIX</h2>
-          <DepositPanel
-            minDeposit={Number(settings.min_deposit ?? 10)}
-            enabled={settings.deposits_enabled !== false}
-            profile={state.profile}
-            onCredited={load}
-          />
-        </section>
-
-        <section ref={withdrawRef} className="card-surface space-y-3 p-4">
-          <h2 className="text-sm font-semibold">Sacar via PIX</h2>
-          <WithdrawPanel
-            minWithdrawal={Number(settings.min_withdrawal ?? 30)}
-            enabled={settings.withdrawals_enabled !== false}
-            rolloverPending={rolloverPending}
-            kycApproved={state.kycApproved}
-            kycLatest={state.kycLatest}
-            userId={user?.id}
-            userEmail={user?.email}
-            profile={state.profile}
-            onRequested={load}
-            onKycSubmitted={load}
-          />
-        </section>
-      </div>
-
       <div className="flex items-start gap-2 rounded-xl border border-border bg-secondary/30 px-3.5 py-2.5 text-[11px] text-muted-foreground">
         <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
         <p>
-          Depósitos entram no seu saldo pelo valor cheio. Cada simulação confirmada conta como aposta para o rollover.
-          O envio do PIX e as taxas de depósito e saque são processados pelo gateway de pagamentos.
+          Depósitos entram no seu saldo pelo valor cheio. O rollover é contabilizado na liquidação das apostas.
+          O envio do PIX e as taxas são processados pelo gateway de pagamentos.
         </p>
       </div>
 
       <WalletHistory
-        deposits={state.deposits}
-        withdrawals={state.withdrawals}
-        transactions={state.transactions}
+        deposits={deposits}
+        withdrawals={withdrawals}
+        transactions={transactions}
       />
     </div>
   );
