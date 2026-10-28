@@ -2,6 +2,7 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.54';
 import { secrets } from 'base44:runtime';
 import {
   FOOTBALL_TIMEZONE,
+  fetchFixturesByIds,
   fetchFixturesLiveAll,
   footballApiBase,
   mapFixture,
@@ -21,7 +22,7 @@ import {
   releaseLock,
   saveQuota,
 } from '../../shared/footballQuota.ts';
-import { chunkArray } from '../../shared/matchLifecycle.ts';
+import { LIVE_WINDOW_MS, chunkArray } from '../../shared/matchLifecycle.ts';
 import { indexByFixtureId, numberOr } from '../../shared/footballSync.ts';
 import {
   isCriticalMinute,
@@ -31,14 +32,20 @@ import {
 } from '../../shared/footballMonitor.ts';
 
 const LOCK_MS = 90 * 1000;
+/** Partidas por chamada em lote: limite documentado de /fixtures?ids. */
+const IDS_PER_CALL = 20;
+/** Teto de suspeitas confirmadas por execução, protegendo a cota diária. */
+const MAX_SUSPECTS_PER_RUN = 100;
 
 /**
  * Detector global de jogos ao vivo (GET /fixtures?live=all).
  *
  * Uma única chamada por execução detecta partidas iniciadas, atualiza
- * placares, minutos, status e tempo de jogo, mantém a fila de prioridades
- * (crítica / favorita / com apostas / padrão) e encerra o monitoramento no FT —
- * a partida sai da fila e nunca mais é consultada pelo detector.
+ * placares, minutos, status e tempo de jogo e mantém a fila de prioridades
+ * (crítica / favorita / com apostas / padrão). Partidas que saem do feed ao
+ * vivo sem o encerramento visto — o feed não devolve partidas encerradas —
+ * são confirmadas em lote na hora (/fixtures?ids): nenhuma fica "ao vivo"
+ * com placar congelado até a janela de 6 horas.
  *
  * O intervalo é configurável (padrão 2 minutos) e respeitado mesmo quando o
  * workflow dispara antes. Em contingência (orçamento acima de 95%), o detector
@@ -196,16 +203,14 @@ export default async function (req) {
 
       const known = await indexByFixtureId(db, fixtures.map((fixture) => fixture.fixture_id));
 
-      const eventUpdates = [];
-      const queueRows = [];
-      let liveCount = 0;
-      let finishedCount = 0;
-      let updatedCount = 0;
-
-      fixtures.forEach((fixture) => {
-        const event = known.get(fixture.fixture_id);
-        if (!event) return;
-
+      /**
+       * Patch comum de uma partida da fonte aplicada ao evento conhecido. Fase
+       * e rótulo evoluem independentemente do status — durante a partida o
+       * status permanece 'live' enquanto 1H → HT → 2H avançam, e o rótulo
+       * precisa acompanhar o jogo. Encerradas e anuladas recebem o tratamento
+       * completo: resultado confirmado, publicação encerrada e fila liberada.
+       */
+      const patchFromFixture = (fixture, event, { forceTouch = false } = {}) => {
         const patch = {};
         const touch = () => {
           patch.live_updated_at = nowIso;
@@ -213,6 +218,9 @@ export default async function (req) {
         };
         if (fixture.status !== event.status) {
           patch.status = fixture.status;
+          touch();
+        }
+        if (fixture.phase !== event.phase || fixture.phase_label !== event.phase_label) {
           patch.phase = fixture.phase;
           patch.phase_label = fixture.phase_label;
           touch();
@@ -229,15 +237,18 @@ export default async function (req) {
           patch.away_score = fixture.away_score;
           touch();
         }
-        if (fixture.reg_home_score !== null && fixture.reg_away_score !== null) {
+        if (
+          fixture.reg_home_score !== null &&
+          fixture.reg_away_score !== null &&
+          (fixture.reg_home_score !== event.reg_home_score || fixture.reg_away_score !== event.reg_away_score)
+        ) {
           patch.reg_home_score = fixture.reg_home_score;
           patch.reg_away_score = fixture.reg_away_score;
+          touch();
         }
         if (fixture.extra_time) patch.extra_time = true;
         if (fixture.penalties) patch.penalties = true;
-
         if (fixture.finished) {
-          finishedCount += 1;
           patch.status = 'finished';
           patch.tracking = 'finished';
           patch.published = false;
@@ -246,9 +257,31 @@ export default async function (req) {
           patch.result_source = 'api_football';
           patch.next_check_at = null;
           if (event.settlement_state !== 'settled') patch.settlement_state = 'waiting';
-        } else if (fixture.live) {
-          liveCount += 1;
+        } else if (fixture.void) {
+          patch.status = fixture.status;
+          patch.tracking = 'finished';
+          patch.published = false;
+          patch.odds_status = 'unavailable';
+          patch.next_check_at = null;
         }
+        if (fixture.review) patch.settlement_state = 'review';
+        if (forceTouch) touch();
+        return patch;
+      };
+
+      const eventUpdates = [];
+      const queueRows = [];
+      let liveCount = 0;
+      let finishedCount = 0;
+      let updatedCount = 0;
+
+      fixtures.forEach((fixture) => {
+        const event = known.get(fixture.fixture_id);
+        if (!event) return;
+
+        const patch = patchFromFixture(fixture, event);
+        if (fixture.finished) finishedCount += 1;
+        else if (fixture.live) liveCount += 1;
 
         if (Object.keys(patch).length) {
           eventUpdates.push({ id: event.id, ...patch });
@@ -303,6 +336,144 @@ export default async function (req) {
         if (batch.length) await db.MatchMonitorQueue.bulkCreate(batch);
       }
 
+      /* --------- suspeitas: saíram do feed ao vivo sem o FT visto --------- */
+      // O feed live=all não devolve partidas encerradas: quando a partida sai
+      // do feed, ela ficaria "ao vivo" com placar congelado até a janela de 6
+      // horas — a auditoria de rotina só alcança partidas com cotação ou aposta
+      // pendente. Toda suspeita é confirmada em lote na hora e o resultado
+      // correto chega em minutos, não em horas.
+      let suspectsQueued = 0;
+      let suspectsConfirmed = 0;
+      let suspectsFinished = 0;
+      const suspectFixtureIds = new Map();
+      if (!result.errors.length) {
+        // 1) Fila: partidas monitoradas que não vieram no feed desta execução.
+        const seenIds = new Set(fixtures.map((fixture) => fixture.fixture_id));
+        const goneQueueUpdates = [];
+        let goneCursor = null;
+        for (let round = 0; round < 4; round += 1) {
+          const page = await db.MatchMonitorQueue.filter(
+            { status: { $in: ['queued', 'live'] } },
+            { limit: 500, ...(goneCursor ? { cursor: goneCursor } : {}) },
+          );
+          (page.items || []).forEach((row) => {
+            if (seenIds.has(row.fixture_id) || !row.fixture_id || !row.event_id) return;
+            goneQueueUpdates.push({
+              id: row.id,
+              status: 'removed',
+              reason: 'saiu do feed ao vivo',
+              next_check_at: null,
+              last_checked_at: nowIso,
+            });
+            suspectFixtureIds.set(row.fixture_id, row.event_id);
+          });
+          goneCursor = page.next_cursor;
+          if (!page.has_more) break;
+        }
+        if (goneQueueUpdates.length) {
+          for (const batch of chunkArray(goneQueueUpdates, 200)) await db.MatchMonitorQueue.bulkUpdate(batch);
+        }
+
+        // 2) Rede de segurança: partida "ao vivo" sem atualização há 45 minutos
+        // também é suspeita — cobre falhas da fila e do próprio detector.
+        const staleLiveIso = new Date(nowMs - 45 * 60000).toISOString();
+        const staleFloorIso = new Date(nowMs - LIVE_WINDOW_MS).toISOString();
+        let staleCursor = null;
+        for (let round = 0; round < 4; round += 1) {
+          const page = await db.Event.filter(
+            {
+              source: 'provider',
+              status: 'live',
+              start_time: { $gte: staleFloorIso, $lt: staleLiveIso },
+              live_updated_at: { $lt: staleLiveIso },
+            },
+            { limit: 200, sort: 'start_time', ...(staleCursor ? { cursor: staleCursor } : {}) },
+          );
+          (page.items || []).forEach((row) => {
+            if (row.fixture_id) suspectFixtureIds.set(row.fixture_id, row.id);
+          });
+          staleCursor = page.next_cursor;
+          if (!page.has_more || suspectFixtureIds.size >= MAX_SUSPECTS_PER_RUN) break;
+        }
+      }
+
+      // Confirmação em lote: até 20 suspeitas por chamada, teto por execução.
+      const suspectIds = [...suspectFixtureIds.keys()].slice(0, MAX_SUSPECTS_PER_RUN);
+      suspectsQueued = suspectIds.length;
+      if (suspectIds.length) {
+        const suspectEvents = new Map();
+        for (const ids of chunkArray(suspectIds, 100)) {
+          const page = await db.Event.filter(
+            { fixture_id: { $in: ids }, status: { $in: ['scheduled', 'live'] } },
+            { limit: ids.length + 5 },
+          );
+          (page.items || []).forEach((row) => suspectEvents.set(row.fixture_id, row));
+        }
+        for (const batch of chunkArray(suspectIds, IDS_PER_CALL)) {
+          if (!canSpend(used, limit, policy.reserve, 1)) break;
+          const confirmStartedAt = Date.now();
+          try {
+            const confirmResult = await fetchFixturesByIds(apiKey, base, batch);
+            const charged = await chargeQuota(db, {
+              record: quotaRecord,
+              day,
+              limit,
+              cost: 1,
+              purpose: 'live_confirm',
+              endpoint: `/fixtures?ids=${batch.length}`,
+              reserve: policy.reserve,
+            });
+            quotaRecord = charged.record || quotaRecord;
+            used = charged.used;
+            applyQuota(confirmResult.quota);
+            if (confirmResult.errors.length) {
+              failures.push(`confirmação: ${confirmResult.errors.join(' | ')}`);
+              break;
+            }
+            const response = Array.isArray(confirmResult.data?.response) ? confirmResult.data.response : [];
+            const byId = new Map(response.map((row) => [String(row?.fixture?.id), row]));
+            const confirmUpdates = [];
+            batch.forEach((fixtureId) => {
+              const event = suspectEvents.get(fixtureId);
+              if (!event) return;
+              const raw = byId.get(String(fixtureId));
+              const fixture = raw ? mapFixture(raw) : null;
+              if (!fixture) {
+                // Sem retorno do provedor: registra a checagem e deixa a
+                // janela de 6 horas encerrar depois — resultado não é inventado.
+                confirmUpdates.push({ id: event.id, live_updated_at: nowIso, last_sync_at: nowIso });
+                return;
+              }
+              suspectsConfirmed += 1;
+              const patch = patchFromFixture(fixture, event, { forceTouch: true });
+              if (fixture.finished) {
+                suspectsFinished += 1;
+                patch.audit_checks = numberOr(event.audit_checks, 0) + 1;
+              }
+              confirmUpdates.push({ id: event.id, ...patch });
+            });
+            for (const inner of chunkArray(confirmUpdates, 200)) {
+              if (inner.length) await db.Event.bulkUpdate(inner);
+            }
+            await db.ApiUsageLog.create({
+              provider: 'api_football',
+              endpoint: `/fixtures?ids=${batch.length}`,
+              status_code: 200,
+              duration_ms: Date.now() - confirmStartedAt,
+              records_returned: response.length,
+              cache_hit: false,
+              credits_used: 1,
+              params: `confirmação de suspeitas · dia=${day}`,
+              note: `${batch.length} suspeita(s) confirmada(s) · ${suspectsFinished} encerrada(s)`,
+              error_message: '',
+            });
+          } catch (error) {
+            failures.push(`confirmação: ${String(error?.message || error)}`);
+            break;
+          }
+        }
+      }
+
       const priorityCounts = { p1: 0, p2: 0, p3: 0, p4: 0 };
       queueRows.forEach((row) => {
         if (row.status !== 'queued') return;
@@ -316,6 +487,7 @@ export default async function (req) {
         `${liveCount} em andamento`,
         `${finishedCount} encerrada(s)`,
         `fila ${queueRows.length} (críticas ${priorityCounts.p4} · favoritas ${priorityCounts.p3} · com apostas ${priorityCounts.p2} · padrão ${priorityCounts.p1})`,
+        `suspeitas ${suspectsQueued} · ${suspectsFinished} encerrada(s) na confirmação`,
         `orçamento ${used}/${limit}`,
       ].join(' · ');
 
@@ -370,6 +542,7 @@ export default async function (req) {
         live_matches: liveCount,
         finished_matches: finishedCount,
         queue: { total: queueRows.length, ...priorityCounts },
+        suspects: { queued: suspectsQueued, confirmed: suspectsConfirmed, finished: suspectsFinished },
         quota: { used, limit, percent: quotaPercent(used, limit), level: quotaLevel(used, limit) },
         failures,
         summary,
