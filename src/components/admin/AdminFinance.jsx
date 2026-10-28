@@ -466,7 +466,7 @@ export default function AdminFinance() {
               <div className="min-w-0">
                 <p className="font-medium">{formatCurrency(item.amount)}</p>
                 <p className="text-muted-foreground">
-                  {formatDateTime(item.created_date)} · {GATEWAY_LABEL[item.gateway] || "gateway antigo"} · {item.payer_name || "sem pagador"}
+                  {formatDateTime(item.created_date)} · {GATEWAY_LABEL[item.gateway] || "Payshark"} · {item.payer_name || "sem pagador"}
                 </p>
               </div>
               <div className="text-right">
