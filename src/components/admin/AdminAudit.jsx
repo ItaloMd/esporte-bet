@@ -60,11 +60,11 @@ export default function AdminAudit() {
           </Button>
         </div>
         <p className="text-xs text-muted-foreground">
-          Extrato reconstruído a partir das movimentações reais e comparado com os depósitos Liqfy pagos e com o saldo de
+          Extrato reconstruído a partir das movimentações reais e comparado com os depósitos pagos e com o saldo de
           cada carteira.
         </p>
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
-          <Stat label="Depósitos Liqfy pagos" value={formatCurrency(summary.paid_deposits)} />
+          <Stat label="Depósitos pagos" value={formatCurrency(summary.paid_deposits)} />
           <Stat
             label={`Créditos duplicados (${summary.duplicate_credits_count})`}
             value={formatCurrency(summary.duplicate_credits)}

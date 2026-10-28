@@ -4,7 +4,7 @@ import { round2 } from '../../shared/payments.ts';
 /**
  * Auditoria financeira (somente leitura, restrita a administradores).
  * Reconstrói o extrato de cada jogador a partir das movimentações reais e
- * compara com os depósitos Liqfy pagos e com o saldo da carteira, sinalizando:
+ * compara com os depósitos pagos e com o saldo da loja, sinalizando:
  * créditos de depósito duplicados, apostas/cashouts duplicados, apostas acima
  * dos créditos recebidos e divergência entre carteira e extrato.
  */

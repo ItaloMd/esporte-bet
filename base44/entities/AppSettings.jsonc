@@ -107,14 +107,6 @@
       "type": "string",
       "default": "cpf"
     },
-    "gateway_liqfy_deposit": {
-      "type": "boolean",
-      "default": true
-    },
-    "gateway_liqfy_withdrawal": {
-      "type": "boolean",
-      "default": true
-    },
     "gateway_payshark_deposit": {
       "type": "boolean",
       "default": false

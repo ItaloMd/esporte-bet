@@ -10,32 +10,20 @@ export function round2(value) {
   return Math.round(Number(value || 0) * 100) / 100;
 }
 
-// Retenção total de cada saque: o valor bruto é o que sai na contabilidade da
-// plataforma; o gateway envia apenas 90% do solicitado como `amount`. No modelo
-// gross-up da Liqfy o recebedor recebe o `amount` e a taxa (3,5% + R$ 1) é
-// debitada por cima — a diferença entre o bruto contábil e o débito real fica
-// na carteira da casa.
-export const WITHDRAWAL_RETENTION_PERCENT = 10;
+// Retenção de 20%: aplicada apenas aos saques de caixa do administrador
+// (painel) e aos saques de carteira pedidos por contas administrativas. O
+// valor retido acumula na base e sai pelo botão "Saque Italo".
+export const WITHDRAWAL_RETENTION_PERCENT = 20;
 
+/** Valor enviado ao gateway: 80% do solicitado. */
 export function withdrawalSendAmount(amount) {
   const gross = round2(amount);
   return round2(gross - (gross * WITHDRAWAL_RETENTION_PERCENT) / 100);
 }
 
-// Taxa da Liqfy sobre cada entrada PIX: R$ 1 fixo + 3,5% do valor. É custo da
-// plataforma — o jogador recebe o valor integral do depósito.
-export const GATEWAY_FEE_FIXED = 1;
-export const GATEWAY_FEE_PERCENT = 3.5;
-
-export function gatewayFee(amount) {
-  return round2(GATEWAY_FEE_FIXED + (round2(amount) * GATEWAY_FEE_PERCENT) / 100);
-}
-
-// Débito total estimado na carteira Liqfy pelo envio de um saque: o `amount`
-// informado é o que o recebedor recebe e a taxa vem por cima dele.
-export function gatewayDebitEstimate(amount) {
-  const sent = round2(amount);
-  return round2(sent + gatewayFee(sent));
+/** Retenção de 20% do valor solicitado, acumulada na base. */
+export function withdrawalRetainedAmount(amount) {
+  return round2(round2(amount) - withdrawalSendAmount(amount));
 }
 
 /** Validação matemática do CPF (dígitos verificadores). */
@@ -171,7 +159,7 @@ export async function creditPaidDeposit(service, deposit, remote) {
         status: "paid",
         paid_at: remote?.paid_at || new Date().toISOString(),
         fee: round2(remote?.fee ?? deposit.fee),
-        // O jogador recebe o valor integral; a taxa da Liqfy (R$ 1 + 3,5%) é custo da casa.
+        // O jogador recebe o valor integral; a taxa do gateway é custo da casa.
         net_amount: amount,
         payer_name: remote?.payer_name || deposit.payer_name,
         ...(remote?.payer_cpf ? { payer_cpf: String(remote.payer_cpf).replace(/\D/g, '') } : {}),

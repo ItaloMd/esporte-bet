@@ -8,10 +8,9 @@
     "gateway": {
       "type": "string",
       "enum": [
-        "liqfy",
         "payshark"
       ],
-      "default": "liqfy"
+      "default": "payshark"
     },
     "external_id": {
       "type": "string"

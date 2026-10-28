@@ -1,5 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.54';
-import { round2, withdrawalSendAmount } from '../../shared/payments.ts';
+import { round2 } from '../../shared/payments.ts';
 import { summarizeAffiliate } from '../../shared/affiliateCommissions.ts';
 
 const KEY_TYPES = ['cpf', 'cnpj', 'email', 'phone', 'random'];
@@ -96,7 +96,7 @@ export default async function (req) {
         kind: 'affiliate',
         affiliate_code: affiliate.code,
         amount,
-        sent_amount: withdrawalSendAmount(amount),
+        sent_amount: amount,
         pix_key: pixKey,
         pix_key_type: pixKeyType,
         status: 'pending',
@@ -150,7 +150,9 @@ export default async function (req) {
       user_email: user.email,
       kind: 'player',
       amount,
-      sent_amount: withdrawalSendAmount(amount),
+      sent_amount: amount,
+      // Contas administrativas sacando pela carteira também retêm 20%.
+      retention_applies: user.role === 'admin',
       pix_key: pixKey,
       pix_key_type: pixKeyType,
       status: 'pending',

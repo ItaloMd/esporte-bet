@@ -1,21 +1,17 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.54';
 import { secrets } from 'base44:runtime';
 import { publicMessage } from '../../shared/payments.ts';
-import { fromCents, getWalletBalance } from '../../shared/liqfy.ts';
-import { getBalance, getStoreInfo } from '../../shared/payshark.ts';
+import { fromCents, getBalance, getStoreInfo } from '../../shared/payshark.ts';
 import { GATEWAYS, GATEWAY_FIELDS, pickGateway } from '../../shared/gateways.ts';
 
 /**
- * Painel de gateways (somente administradores): liga/desliga cada gateway por
- * função (depósitos e saques) e consulta o saldo de cada um. O roteamento real
- * acontece no liqfyDeposit (entradas) e no adminFinance (saques), sempre pela
- * gateway ativa de cada função.
+ * Painel de gateways (somente administradores): liga/desliga o Payshark por
+ * função (depósitos e saques) e consulta o saldo da loja. O roteamento real
+ * acontece no paysharkDeposit (entradas) e no adminFinance (saques).
  */
 
 function gatewaySettings(record) {
   return {
-    liqfy_deposit: record?.gateway_liqfy_deposit !== false,
-    liqfy_withdrawal: record?.gateway_liqfy_withdrawal !== false,
     payshark_deposit: record?.gateway_payshark_deposit === true,
     payshark_withdrawal: record?.gateway_payshark_withdrawal === true,
   };
@@ -29,28 +25,6 @@ function activeGateways(record) {
 }
 
 async function gatewayStatus() {
-  const liqfy = {
-    configured: Boolean(secrets.get('LIQFY_API_KEY')),
-    webhook_configured: Boolean(secrets.get('LIQFY_WEBHOOK_SECRET')),
-    balance: null,
-    error: '',
-  };
-  if (liqfy.configured) {
-    const result = await getWalletBalance();
-    if (result.ok) {
-      liqfy.balance = {
-        available: fromCents(result.data?.available),
-        held: fromCents(result.data?.held ?? result.data?.retained ?? 0),
-        pending: fromCents(result.data?.pending),
-        total: fromCents(result.data?.total),
-      };
-    } else {
-      liqfy.error = publicMessage(result.data, 'Não foi possível consultar o saldo na Liqfy.');
-    }
-  } else {
-    liqfy.error = 'LIQFY_API_KEY não configurada nos Secrets.';
-  }
-
   const payshark = {
     configured: Boolean(secrets.get('PAYSHARK_API_KEY') && secrets.get('PAYSHARK_SAQUE_KEY')),
     webhook_configured: Boolean(
@@ -87,7 +61,7 @@ async function gatewayStatus() {
     payshark.error = 'PAYSHARK_API_KEY / PAYSHARK_SAQUE_KEY não configuradas nos Secrets.';
   }
 
-  return { liqfy, payshark };
+  return { payshark };
 }
 
 export default async function (req) {
@@ -130,7 +104,6 @@ export default async function (req) {
       active: activeGateways(record),
       gateways: status,
       fees: {
-        liqfy: GATEWAYS.liqfy.fees,
         payshark: GATEWAYS.payshark.fees,
       },
     });

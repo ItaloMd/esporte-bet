@@ -1,6 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.54';
 import { round2 } from '../../shared/payments.ts';
-import { fromCents, getWalletBalance } from '../../shared/liqfy.ts';
+import { fromCents, getBalance } from '../../shared/payshark.ts';
 
 function sumOf(result, field) {
   return round2(result?.rows?.[0]?.[field] || 0);
@@ -8,7 +8,7 @@ function sumOf(result, field) {
 
 /**
  * Análise de caixa e exposição financeira: agrega no servidor o saldo real da
- * carteira Liqfy, os saldos dos jogadores e as apostas reais ainda abertas
+ * carteira Payshark, os saldos dos jogadores e as apostas reais ainda abertas
  * (apenas boletins com débito de carteira confirmado), calcula
  * responsabilidade, exposição, caixa livre, cobertura e lucro projetado, grava
  * um snapshot diário e devolve os últimos 30 dias para os gráficos.
@@ -26,7 +26,7 @@ export default async function (req) {
     const computedAt = new Date().toISOString();
 
     const [gatewayBalance, walletSums, playersWithBalance, openTicketsPage, stakedAgg, paidAgg] = await Promise.all([
-      getWalletBalance(),
+      getBalance(),
       db.Wallet.aggregate({ sum: ['balance', 'locked_balance'] }),
       db.Wallet.count({ balance: { $gt: 0 } }),
       db.SimulationTicket.filter({ status: 'open' }, { sort: '-created_date', limit: 500 }),
@@ -59,9 +59,9 @@ export default async function (req) {
     const gateway = gatewayBalance.ok
       ? {
           available: fromCents(gatewayBalance.data?.available),
-          held: fromCents(gatewayBalance.data?.held ?? gatewayBalance.data?.retained ?? 0),
-          pending: fromCents(gatewayBalance.data?.pending ?? 0),
-          total: fromCents(gatewayBalance.data?.total ?? 0),
+          held: fromCents(gatewayBalance.data?.transfers?.pending ?? 0),
+          pending: fromCents(gatewayBalance.data?.reserve?.pending ?? 0),
+          total: fromCents(gatewayBalance.data?.available ?? 0),
         }
       : null;
     const gatewayAvailable = gateway ? gateway.available : null;
@@ -154,7 +154,7 @@ export default async function (req) {
       gateway,
       gateway_error: gateway
         ? ''
-        : 'Não foi possível consultar o saldo da carteira Liqfy. Os demais indicadores não dependem dele.',
+        : 'Não foi possível consultar o saldo da loja Payshark. Os demais indicadores não dependem dele.',
       players: { balance: playersBalance, locked: playersLocked, count: playersCount },
       open_bets: {
         stake: openStake,

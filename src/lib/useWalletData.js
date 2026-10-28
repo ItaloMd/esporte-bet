@@ -17,7 +17,10 @@ export function useWalletData() {
     const [walletPage, depositPage, withdrawalPage, transactionPage, settingsPage, kycPage, kycApprovedPage, profilePage] = await Promise.all([
       base44.entities.Wallet.filter({ user_id: user.id }, { limit: 1 }),
       base44.entities.Deposit.filter({ user_id: user.id }, { sort: "-created_date", limit: 10 }),
-      base44.entities.Withdrawal.filter({ user_id: user.id, kind: "player" }, { sort: "-created_date", limit: 10 }),
+      base44.entities.Withdrawal.filter(
+        { user_id: user.id, kind: { $in: ["player", "simulated"] } },
+        { sort: "-created_date", limit: 10 },
+      ),
       base44.entities.WalletTransaction.filter({ user_id: user.id }, { sort: "-created_date", limit: 15 }),
       base44.entities.AppSettings.list({ limit: 1 }),
       base44.entities.KycSubmission.filter({ user_id: user.id }, { sort: "-created_date", limit: 1 }),

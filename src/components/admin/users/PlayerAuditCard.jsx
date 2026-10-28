@@ -41,7 +41,7 @@ export default function PlayerAuditCard({ userId }) {
       <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
         <div>
           <p className="score-num font-semibold">{formatCurrency(row.credits.valid_sum)}</p>
-          <p className="text-[10px] text-muted-foreground">Créditos Liqfy válidos</p>
+          <p className="text-[10px] text-muted-foreground">Créditos de depósito válidos</p>
         </div>
         <div>
           <p className="score-num font-semibold">{formatCurrency(row.bets.staked)}</p>

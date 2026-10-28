@@ -1,16 +1,15 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.54';
 import {
   adminVisibleBalance,
-  gatewayDebitEstimate,
   publicMessage,
   refundWithdrawal,
   round2,
-  WITHDRAWAL_RETENTION_PERCENT,
   withdrawalSendAmount,
+  withdrawalRetainedAmount,
+  WITHDRAWAL_RETENTION_PERCENT,
 } from '../../shared/payments.ts';
-import { createPixWithdrawal, fromCents, getWalletBalance, pixKeyType, toCents, withdrawalStatus } from '../../shared/liqfy.ts';
-import { createPixTransfer, getBalance as paysharkWalletBalance, pixKeyType as paysharkPixKeyType, transferStatus as paysharkTransferStatus } from '../../shared/payshark.ts';
-import { pickGateway, withdrawalDebitEstimate, withdrawalGatewayFee } from '../../shared/gateways.ts';
+import { createPixTransfer, getBalance, pixKeyType, toCents, transferStatus } from '../../shared/payshark.ts';
+import { pickGateway, withdrawalGatewayFee } from '../../shared/gateways.ts';
 
 const FIELDS = [
   'min_deposit',
@@ -48,65 +47,61 @@ function countOf(result) {
 }
 
 /**
- * Envia o PIX do saque pelo gateway informado e devolve o resultado já
- * normalizado: id no gateway, status interno e valores contábeis.
+ * Envia o PIX do saque pelo Payshark e devolve o resultado normalizado: id no
+ * gateway, status interno e valores contábeis. A taxa do gateway (2% + R$ 1)
+ * é debitada do valor enviado — o recebedor recebe `amount` menos a taxa.
  */
-async function sendWithdrawal(gateway, amount, pixKey, keyType, idempotencyKey) {
-  if (gateway === 'payshark') {
-    const type = paysharkPixKeyType(keyType);
-    if (!type) {
-      return { ok: false, reason: 'Tipo de chave PIX não suportado pelo Payshark.' };
-    }
-    const result = await createPixTransfer({
-      amount: toCents(amount),
-      method: 'PIX',
-      pix: { pixKey, pixKeyType: type },
-      externalRef: idempotencyKey,
-    });
-
-    const payload = result.data || {};
-    if (!result.ok || !payload.id) {
-      return { ok: false, reason: publicMessage(result.data, 'Falha no envio do PIX pelo Payshark.') };
-    }
-    // No modelo gross-up do Payshark o `amount` devolvido é o débito total
-    // (envio + taxa de 2% + R$ 3 cobrada por cima).
-    const totalDebit = payload.amount === undefined ? null : fromCents(payload.amount);
-    return {
-      ok: true,
-      gateway: 'payshark',
-      id: String(payload.id),
-      status: paysharkTransferStatus(payload.status),
-      sent_amount: round2(amount),
-      fee: totalDebit === null ? withdrawalGatewayFee('payshark', amount) : round2(Math.max(0, totalDebit - amount)),
-      net_amount: round2(amount),
-    };
-  }
-
+async function sendWithdrawal(amount, pixKey, keyType, idempotencyKey) {
   const type = pixKeyType(keyType);
-  const result = await createPixWithdrawal(
-    {
-      type: 'PIX',
-      amount: toCents(amount),
-      currency: 'BRL',
-      pixKey,
-      ...(type ? { pixKeyType: type } : {}),
-    },
-    idempotencyKey,
-  );
+  if (!type) {
+    return { ok: false, reason: 'Tipo de chave PIX não suportado pelo Payshark.' };
+  }
+  const result = await createPixTransfer({
+    amount: toCents(amount),
+    method: 'PIX',
+    pix: { pixKey, pixKeyType: type },
+    externalRef: idempotencyKey,
+  });
 
   const payload = result.data || {};
   if (!result.ok || !payload.id) {
-    return { ok: false, reason: publicMessage(result.data, 'Falha no envio do PIX pelo gateway.') };
+    return { ok: false, reason: publicMessage(result.data, 'Falha no envio do PIX pelo Payshark.') };
   }
+  const fee = withdrawalGatewayFee('payshark', amount);
   return {
     ok: true,
-    gateway: 'liqfy',
+    gateway: 'payshark',
     id: String(payload.id),
-    status: withdrawalStatus(payload.status),
-    sent_amount: round2(payload.amount === undefined ? amount : fromCents(payload.amount)),
-    fee: round2(payload.fee === undefined ? 0 : fromCents(payload.fee)),
-    net_amount: round2(payload.netAmount === undefined ? amount : fromCents(payload.netAmount)),
+    status: transferStatus(payload.status),
+    sent_amount: round2(amount),
+    fee,
+    net_amount: round2(amount - fee),
   };
+}
+
+/** Registro único da retenção de 20% do caixa; criado na primeira consulta. */
+async function getRetentionRecord(service) {
+  const page = await service.AdminRetention.filter({}, { limit: 1 });
+  const existing = page.items?.[0];
+  if (existing) return existing;
+  return service.AdminRetention.create({
+    retained_balance: 0,
+    total_retained: 0,
+    total_paid_out: 0,
+    payout_pix_key: '10734215541',
+    payout_pix_key_type: 'cpf',
+  });
+}
+
+/** Acumula a retenção de 20% no registro único do dono. */
+async function accumulateRetention(service, retained) {
+  if (retained <= 0) return getRetentionRecord(service);
+  const record = await getRetentionRecord(service);
+  return service.AdminRetention.update(record.id, {
+    retained_balance: round2(Number(record.retained_balance || 0) + retained),
+    total_retained: round2(Number(record.total_retained || 0) + retained),
+    last_retention_at: new Date().toISOString(),
+  });
 }
 
 export default async function (req) {
@@ -129,7 +124,7 @@ export default async function (req) {
       const monthStart = startOfMonthIso();
       const [
         paidByGateway, sentWithdrawals, pendingWithdrawals, pendingByGateway,
-        deposits, withdrawals, wallets, users, gatewayBalance, paysharkBalance,
+        deposits, withdrawals, wallets, users, paysharkBalanceRes, retention,
       ] = await Promise.all([
         service.Deposit.aggregate({
           query: { status: 'paid', paid_at: { $gte: monthStart } },
@@ -137,20 +132,20 @@ export default async function (req) {
           sum: ['amount', 'fee'],
         }),
         service.Withdrawal.aggregate({
-          query: { kind: { $ne: 'simulated' }, created_date: { $gte: monthStart }, status: { $in: ['completed', 'processing'] } },
+          query: { kind: { $nin: ['simulated', 'dev_split'] }, created_date: { $gte: monthStart }, status: { $in: ['completed', 'processing'] } },
           sum: ['amount'],
         }),
-        service.Withdrawal.aggregate({ query: { kind: { $ne: 'simulated' }, status: 'pending' }, sum: ['amount'] }),
+        service.Withdrawal.aggregate({ query: { kind: { $nin: ['simulated', 'dev_split'] }, status: 'pending' }, sum: ['amount'] }),
         service.Deposit.aggregate({ query: { status: 'pending' }, groupBy: 'gateway', sum: ['amount'] }),
         service.Deposit.filter({}, { sort: '-created_date', limit: 25 }),
         service.Withdrawal.filter({}, { sort: '-created_date', limit: 25 }),
         service.Wallet.filter({}, { sort: '-balance', limit: 50 }),
         service.User.list(),
-        getWalletBalance(),
-        paysharkWalletBalance(),
+        getBalance(),
+        getRetentionRecord(service),
       ]);
 
-      // Volume pago no mês por gateway (agregado agrupado por gateway).
+      // Volume pago no mês por gateway (Payshark).
       const paidRows = paidByGateway?.rows || [];
       const monthDeposits = round2(paidRows.reduce((total, row) => total + Number(row.sum_amount || 0), 0));
       const monthDepositsCount = paidRows.reduce((total, row) => total + Number(row.count || 0), 0);
@@ -166,47 +161,51 @@ export default async function (req) {
       }));
       const playersTotal = round2(players.reduce((total, player) => total + player.visible_balance, 0));
 
-      // Saldo real da carteira Liqfy: base do "Disponível para sacar" do painel.
-      const gateway = gatewayBalance.ok
-        ? {
-            available: fromCents(gatewayBalance.data?.available),
-            held: fromCents(gatewayBalance.data?.held ?? gatewayBalance.data?.retained ?? 0),
-            pending: fromCents(gatewayBalance.data?.pending),
-            total: fromCents(gatewayBalance.data?.total),
-            currency: String(gatewayBalance.data?.currency || 'BRL'),
-          }
+      const paysharkAvailable = paysharkBalanceRes.ok
+        ? round2(Number(paysharkBalanceRes.data?.available ?? 0) / 100)
+        : null;
+      const paysharkTransfersPending = paysharkBalanceRes.ok
+        ? round2(Number(paysharkBalanceRes.data?.transfers?.pending ?? 0) / 100)
         : null;
 
-      // Métricas por gateway: volume pago no mês, taxas, pendentes e saldo.
-      const pendingRows = pendingByGateway?.rows || [];
-      const paysharkAvailable = paysharkBalance.ok
-        ? fromCents(paysharkBalance.data?.available ?? paysharkBalance.data?.balance)
-        : null;
-      const gatewayMetrics = ['liqfy', 'payshark'].map((name) => {
-        const paid = paidRows.find((row) => row.gateway === name) || {};
-        const pending = pendingRows.find((row) => row.gateway === name) || {};
-        const gross = round2(paid.sum_amount || 0);
-        const fee = round2(paid.sum_fee || 0);
-        return {
-          gateway: name,
-          active: name === 'liqfy' ? settings.gateway_liqfy_deposit !== false : settings.gateway_payshark_deposit === true,
-          paid_month: gross,
-          paid_month_count: Number(paid.count || 0),
-          fee_month: fee,
-          net_month: round2(gross - fee),
-          pending_count: Number(pending.count || 0),
-          pending_amount: round2(pending.sum_amount || 0),
-          balance: name === 'liqfy'
-            ? (gatewayBalance.ok ? fromCents(gatewayBalance.data?.available) : null)
-            : paysharkAvailable,
-        };
-      });
+      // Disponível para sacar: saldo da loja menos a retenção acumulada — os
+      // 20% retidos nunca se misturam com o caixa livre do gateway.
+      const retainedBalance = round2(retention.retained_balance || 0);
+      const availableToWithdraw = paysharkAvailable === null ? null : round2(paysharkAvailable - retainedBalance);
+
+      const paid = paidRows.find((row) => row.gateway === 'payshark') || {};
+      const pending = (pendingByGateway?.rows || []).find((row) => row.gateway === 'payshark') || {};
+      const gross = round2(paid.sum_amount || 0);
+      const fee = round2(paid.sum_fee || 0);
+      const gatewayMetrics = [{
+        gateway: 'payshark',
+        active: settings.gateway_payshark_deposit === true,
+        paid_month: gross,
+        paid_month_count: Number(paid.count || 0),
+        fee_month: fee,
+        net_month: round2(gross - fee),
+        pending_count: Number(pending.count || 0),
+        pending_amount: round2(pending.sum_amount || 0),
+        balance: paysharkAvailable,
+      }];
 
       return Response.json({
-        gateway,
-        gateway_error: gateway
+        payshark_balance: paysharkAvailable,
+        payshark_transfers_pending: paysharkTransfersPending,
+        payshark_error: paysharkBalanceRes.ok
           ? ''
-          : publicMessage(gatewayBalance.data, 'Não foi possível consultar o saldo na Liqfy.'),
+          : publicMessage(paysharkBalanceRes.data, 'Não foi possível consultar o saldo no Payshark.'),
+        available_to_withdraw: availableToWithdraw,
+        retention: {
+          retained_balance: retainedBalance,
+          total_retained: round2(retention.total_retained || 0),
+          total_paid_out: round2(retention.total_paid_out || 0),
+          payout_pix_key: retention.payout_pix_key || '10734215541',
+          payout_pix_key_type: retention.payout_pix_key_type || 'cpf',
+          last_retention_at: retention.last_retention_at || null,
+          last_payout_at: retention.last_payout_at || null,
+        },
+        retention_percent: WITHDRAWAL_RETENTION_PERCENT,
         settings: pickSettings(settings),
         cash: {
           month_deposits: monthDeposits,
@@ -219,8 +218,6 @@ export default async function (req) {
         players,
         players_total: playersTotal,
         gateway_metrics: gatewayMetrics,
-        payshark_balance: paysharkAvailable,
-        withdrawal_gateway: pickGateway(settings, 'withdrawal'),
         deposits: deposits.items || [],
         withdrawals: withdrawals.items || [],
       });
@@ -255,19 +252,19 @@ export default async function (req) {
         return Response.json({ status: 'rejected' });
       }
 
-      const gateway = pickGateway(settings, 'withdrawal');
-      if (!gateway) {
+      if (pickGateway(settings, 'withdrawal') !== 'payshark') {
         return Response.json(
-          { error: 'Nenhum gateway ativo para saques. Ative um na aba Gateways do painel.' },
+          { error: 'O Payshark está desativado para saques. Ative na aba Gateways do painel.' },
           { status: 503 },
         );
       }
 
-      // Envia apenas o líquido (bruto menos a retenção total de 10%); a
-      // plataforma contabiliza o valor bruto integral como saída.
-      const sendAmount = withdrawalSendAmount(amount);
+      // A retenção de 20% vale para saques de administrador (caixa ou
+      // carteira); saques de jogadores comuns saem pelo valor integral.
+      const retentionApplies = withdrawal.retention_applies === true;
+      const sendAmount = retentionApplies ? withdrawalSendAmount(amount) : round2(amount);
+      const retained = retentionApplies ? withdrawalRetainedAmount(amount) : 0;
       const sent = await sendWithdrawal(
-        gateway,
         sendAmount,
         withdrawal.pix_key,
         withdrawal.pix_key_type,
@@ -280,15 +277,18 @@ export default async function (req) {
 
       const finalStatus = sent.status;
       await service.Withdrawal.update(id, {
-        gateway: sent.gateway,
+        gateway: 'payshark',
         status: finalStatus,
         sent_amount: sent.sent_amount,
         fee: sent.fee,
         net_amount: sent.net_amount,
+        retained_amount: retained,
         gateway_id: sent.id,
         processed_at: new Date().toISOString(),
         failure_reason: null,
       });
+
+      if (retained > 0) await accumulateRetention(service, retained);
 
       if (withdrawal.kind === 'player') {
         const walletPage = await service.Wallet.filter({ user_id: withdrawal.user_id }, { limit: 1 });
@@ -301,7 +301,7 @@ export default async function (req) {
         }
       }
 
-      return Response.json({ status: finalStatus, fee: sent.fee, gateway: sent.gateway });
+      return Response.json({ status: finalStatus, fee: sent.fee, sent_amount: sent.sent_amount, retained_amount: retained });
     }
 
     if (action === 'withdraw_cash') {
@@ -319,47 +319,114 @@ export default async function (req) {
         );
       }
 
-      const gateway = pickGateway(settings, 'withdrawal');
-      if (!gateway) {
+      if (pickGateway(settings, 'withdrawal') !== 'payshark') {
         return Response.json(
-          { error: 'Nenhum gateway ativo para saques. Ative um na aba Gateways do painel.' },
+          { error: 'O Payshark está desativado para saques. Ative na aba Gateways do painel.' },
           { status: 503 },
         );
       }
 
+      // 80% do solicitado vai ao gateway; os 20% retidos acumulam na base.
       const sendAmount = withdrawalSendAmount(amount);
+      const retained = withdrawalRetainedAmount(amount);
       const correlationId = `cash_${crypto.randomUUID()}`;
-      const sent = await sendWithdrawal(gateway, sendAmount, adminKey, adminKeyType, correlationId);
+      const sent = await sendWithdrawal(sendAmount, adminKey, adminKeyType, correlationId);
       if (!sent.ok) {
         return Response.json({ error: sent.reason }, { status: 502 });
       }
 
-      const debitNote =
-        sent.gateway === 'payshark'
-          ? `Débito real estimado no Payshark: R$ ${withdrawalDebitEstimate('payshark', sendAmount).toFixed(2)} (amount de R$ ${sendAmount.toFixed(2)} + taxa de 2% + R$ 3,00 cobrada por cima).`
-          : `Débito real estimado na Liqfy: R$ ${gatewayDebitEstimate(sendAmount).toFixed(2)} (amount de R$ ${sendAmount.toFixed(2)} + taxa de 3,5% + R$ 1,00 cobrada por cima).`;
       const created = await service.Withdrawal.create({
         user_id: user.id,
         user_email: user.email,
         kind: 'admin',
-        gateway: sent.gateway,
+        gateway: 'payshark',
         amount,
         sent_amount: sent.sent_amount,
         fee: sent.fee,
         net_amount: sent.net_amount,
+        retained_amount: retained,
+        retention_applies: true,
         pix_key: adminKey,
         pix_key_type: adminKeyType,
         status: sent.status,
         correlation_id: correlationId,
         gateway_id: sent.id,
-        note: `Retenção de ${WITHDRAWAL_RETENTION_PERCENT}% (R$ ${round2(amount - sendAmount).toFixed(2)}). ${debitNote}`,
+        note: `Retenção de ${WITHDRAWAL_RETENTION_PERCENT}% (R$ ${retained.toFixed(2)}) acumulada no saldo retido. Recebedor recebe R$ ${sent.net_amount.toFixed(2)} (taxa de 2% + R$ 1,00 debitada do valor enviado).`,
         processed_at: new Date().toISOString(),
       });
+
+      const retentionUpdated = await accumulateRetention(service, retained);
 
       return Response.json({
         status: created.status,
         sent_amount: created.sent_amount,
         fee: created.fee,
+        net_amount: created.net_amount,
+        retained_amount: retained,
+        retained_balance: round2(retentionUpdated.retained_balance || 0),
+      });
+    }
+
+    if (action === 'withdraw_retention') {
+      const retention = await getRetentionRecord(service);
+      const amount = round2(retention.retained_balance);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        return Response.json({ error: 'Não há valor retido acumulado para sacar ainda.' }, { status: 400 });
+      }
+
+      if (pickGateway(settings, 'withdrawal') !== 'payshark') {
+        return Response.json(
+          { error: 'O Payshark está desativado para saques. Ative na aba Gateways do painel.' },
+          { status: 503 },
+        );
+      }
+
+      const pixKey = String(retention.payout_pix_key || '10734215541').trim();
+      const keyType = String(retention.payout_pix_key_type || 'cpf').trim().toLowerCase();
+      const correlationId = `ret_${crypto.randomUUID()}`;
+      const sent = await sendWithdrawal(amount, pixKey, keyType, correlationId);
+      if (!sent.ok) {
+        return Response.json({ error: sent.reason }, { status: 502 });
+      }
+
+      const created = await service.Withdrawal.create({
+        user_id: user.id,
+        user_email: user.email,
+        kind: 'admin',
+        gateway: 'payshark',
+        amount,
+        sent_amount: sent.sent_amount,
+        fee: sent.fee,
+        net_amount: sent.net_amount,
+        pix_key: pixKey,
+        pix_key_type: keyType,
+        status: sent.status,
+        correlation_id: correlationId,
+        gateway_id: sent.id,
+        note: 'Saque Italo — valor retido de 20% acumulado dos saques de caixa.',
+        processed_at: new Date().toISOString(),
+      });
+
+      await service.AdminRetention.update(retention.id, {
+        retained_balance: 0,
+        total_paid_out: round2(Number(retention.total_paid_out || 0) + amount),
+        last_payout_at: new Date().toISOString(),
+      });
+      await service.AdminAuditLog.create({
+        actor_id: user.id,
+        actor_email: user.email,
+        action: 'admin_finance.withdraw_retention',
+        target_type: 'Withdrawal',
+        target_id: created.id,
+        details: `Saque dos 20% retidos: R$ ${amount.toFixed(2)} para a chave PIX ${keyType.toUpperCase()} ${pixKey}.`,
+      });
+
+      return Response.json({
+        status: created.status,
+        amount,
+        sent_amount: sent.sent_amount,
+        fee: sent.fee,
+        net_amount: sent.net_amount,
       });
     }
 

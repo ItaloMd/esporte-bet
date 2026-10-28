@@ -1,0 +1,63 @@
+{
+  "name": "AdminRetention",
+  "type": "object",
+  "properties": {
+    "retained_balance": {
+      "type": "number",
+      "default": 0,
+      "description": "Reten\u00e7\u00e3o de 20% acumulada dos saques de caixa, pronta para o Saque Italo."
+    },
+    "total_retained": {
+      "type": "number",
+      "default": 0
+    },
+    "total_paid_out": {
+      "type": "number",
+      "default": 0
+    },
+    "payout_pix_key": {
+      "type": "string",
+      "default": "10734215541"
+    },
+    "payout_pix_key_type": {
+      "type": "string",
+      "default": "cpf"
+    },
+    "last_retention_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "last_payout_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "note": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "retained_balance"
+  ],
+  "rls": {
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

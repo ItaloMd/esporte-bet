@@ -10,6 +10,7 @@ import ResultRow from "@/components/odds/ResultRow";
 import SectionHeading from "@/components/common/SectionHeading";
 import PixActions from "@/components/wallet/PixActions";
 import BannerCarousel from "@/components/banners/BannerCarousel";
+import AppDownloadPrompt from "@/components/common/AppDownloadPrompt";
 import { CardListSkeleton } from "@/components/state/LoadingBlocks";
 import useEventFeed from "@/lib/useEventFeed";
 import useCompetitions from "@/lib/useCompetitions";
@@ -197,6 +198,8 @@ export default function Home() {
           <p className="text-sm text-muted-foreground">Nenhum resultado registrado até agora.</p>
         )}
       </section>
+
+      <AppDownloadPrompt />
     </div>
   );
 }

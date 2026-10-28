@@ -240,23 +240,21 @@ export default async function (req) {
       const target = (Array.isArray(users) ? users : users.items || []).find((row) => row.id === targetUserId);
       if (!target) return Response.json({ error: 'Jogador não encontrado.' }, { status: 404 });
 
+      // CPF é opcional na simulação: o registro é 100% visual.
       const profilePage = await db.UserProfile.filter({ user_id: targetUserId }, { limit: 1 });
       const cpf = String(profilePage.items?.[0]?.cpf || '').replace(/\D/g, '');
-      if (!cpf) {
-        return Response.json({ error: 'O jogador não tem CPF vinculado ao perfil.' }, { status: 400 });
-      }
 
       // Registro 100% visual: nenhum gateway é chamado e nenhum saldo é movido.
       const created = await db.Withdrawal.create({
         user_id: targetUserId,
         user_email: target.email,
         kind: 'simulated',
+        gateway: 'payshark',
         amount,
         sent_amount: amount,
         fee: 0,
         net_amount: amount,
-        pix_key: cpf,
-        pix_key_type: 'cpf',
+        ...(cpf ? { pix_key: cpf, pix_key_type: 'cpf' } : {}),
         status: 'completed',
         correlation_id: `sim_${crypto.randomUUID()}`,
         note: 'Saque simulado pelo painel administrativo — registro visual, sem transferência real.',

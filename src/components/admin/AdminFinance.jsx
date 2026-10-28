@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, Banknote, Check, FlaskConical, Loader2, RefreshCw, Save, Send, X } from "lucide-react";
+import { AlertTriangle, Banknote, Check, FlaskConical, Loader2, PiggyBank, RefreshCw, Save, Send, X } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -31,7 +31,7 @@ const STATUS_LABEL = {
 
 const KIND_LABEL = { player: "Jogador", affiliate: "Afiliado", admin: "Caixa", simulated: "Simulado" };
 
-const GATEWAY_LABEL = { liqfy: "Liqfy", payshark: "Payshark" };
+const GATEWAY_LABEL = { payshark: "Payshark" };
 
 const invoke = async (payload) => {
   const response = await base44.functions.invoke("adminFinance", payload);
@@ -53,15 +53,16 @@ export default function AdminFinance() {
     loading: true,
     cash: null,
     cashError: "",
-    gateway: null,
-    gatewayError: "",
+    paysharkBalance: null,
+    paysharkError: "",
+    availableToWithdraw: null,
+    retention: null,
+    retentionPercent: 20,
+    gatewayMetrics: [],
     deposits: [],
     withdrawals: [],
     players: [],
     playersTotal: 0,
-    gatewayMetrics: [],
-    paysharkBalance: null,
-    withdrawalGateway: "liqfy",
   });
   const [settings, setSettings] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -82,15 +83,16 @@ export default function AdminFinance() {
       loading: false,
       cash: data.cash || null,
       cashError: data.cash_error || "",
-      gateway: data.gateway || null,
-      gatewayError: data.gateway_error || "",
+      paysharkBalance: data.payshark_balance ?? null,
+      paysharkError: data.payshark_error || "",
+      availableToWithdraw: data.available_to_withdraw ?? null,
+      retention: data.retention || null,
+      retentionPercent: data.retention_percent || 20,
+      gatewayMetrics: data.gateway_metrics || [],
       deposits: data.deposits || [],
       withdrawals: data.withdrawals || [],
       players: data.players || [],
       playersTotal: data.players_total || 0,
-      gatewayMetrics: data.gateway_metrics || [],
-      paysharkBalance: data.payshark_balance ?? null,
-      withdrawalGateway: data.withdrawal_gateway || "liqfy",
     });
   }, []);
 
@@ -139,8 +141,21 @@ export default function AdminFinance() {
   const withdrawCash = async () => {
     const data = await run("cash", { action: "withdraw_cash", amount: Number(cashAmount) });
     if (data && !data.error) {
-      toast({ title: "Saque do caixa enviado" });
+      toast({
+        title: "Saque do caixa enviado",
+        description: `Enviado ${formatCurrency(data.sent_amount)} ao gateway · retido ${formatCurrency(data.retained_amount)} no seu saldo de 20%.`,
+      });
       setCashAmount("");
+    }
+  };
+
+  const withdrawRetention = async () => {
+    const data = await run("retention", { action: "withdraw_retention" });
+    if (data && !data.error) {
+      toast({
+        title: "Saque Italo enviado",
+        description: `${formatCurrency(data.amount)} dos 20% retidos foram enviados para a sua chave PIX.`,
+      });
     }
   };
 
@@ -172,6 +187,8 @@ export default function AdminFinance() {
 
   const pendingWithdrawals = overview.withdrawals.filter((item) => item.status === "pending");
   const visibleWithdrawals = overview.withdrawals.filter((item) => item.kind !== "dev_split");
+  const retention = overview.retention || { retained_balance: 0, total_retained: 0, total_paid_out: 0, payout_pix_key: "" };
+  const paysharkMetric = overview.gatewayMetrics[0];
 
   return (
     <div className="space-y-5">
@@ -187,22 +204,12 @@ export default function AdminFinance() {
         {overview.cash ? (
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
             <Stat
-              label={`Disponível para sacar (${overview.withdrawalGateway === "payshark" ? "Payshark" : "Liqfy"})`}
-              value={
-                overview.withdrawalGateway === "payshark"
-                  ? overview.paysharkBalance !== null && overview.paysharkBalance !== undefined
-                    ? formatCurrency(overview.paysharkBalance)
-                    : "—"
-                  : overview.gateway
-                    ? formatCurrency(overview.gateway.available)
-                    : "—"
-              }
+              label="Disponível para sacar (Payshark)"
+              value={overview.availableToWithdraw === null ? "—" : formatCurrency(overview.availableToWithdraw)}
               hint={
-                overview.withdrawalGateway === "payshark"
-                  ? "saldo disponível para transferências na loja Payshark"
-                  : overview.gateway
-                    ? `pendente ${formatCurrency(overview.gateway.pending)} · em trânsito ${formatCurrency(overview.gateway.held)}`
-                    : overview.gatewayError || "Saldo da Liqfy indisponível."
+                overview.paysharkBalance === null
+                  ? overview.paysharkError || "Saldo da loja Payshark indisponível."
+                  : `loja Payshark ${formatCurrency(overview.paysharkBalance)} · retidos ${formatCurrency(retention.retained_balance)} fora do caixa livre`
               }
               highlight
             />
@@ -227,35 +234,57 @@ export default function AdminFinance() {
       </section>
 
       <section className="card-surface space-y-3 p-4">
-        <h2 className="text-sm font-semibold">Depósitos por gateway</h2>
-        <div className="grid gap-3 md:grid-cols-2">
-          {overview.gatewayMetrics.map((metric) => (
-            <div key={metric.gateway} className="space-y-2 rounded-lg border border-border p-3">
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-sm font-semibold">{GATEWAY_LABEL[metric.gateway] || metric.gateway}</p>
-                <span
-                  className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                    metric.active ? "bg-primary/15 text-primary" : "bg-secondary text-muted-foreground"
-                  }`}
-                >
-                  {metric.active ? "Ativo" : "Desativado"}
-                </span>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <Stat label="Pago no mês" value={formatCurrency(metric.paid_month)} hint={`${metric.paid_month_count} depósito(s)`} />
-                <Stat label="Taxas no mês (casa)" value={formatCurrency(metric.fee_month)} />
-                <Stat label="Líquido no mês" value={formatCurrency(metric.net_month)} />
-                <Stat label="Pendentes" value={formatCurrency(metric.pending_amount)} hint={`${metric.pending_count} cobrança(s)`} />
-              </div>
-              <Stat
-                label="Saldo disponível no gateway"
-                value={metric.balance === null || metric.balance === undefined ? "—" : formatCurrency(metric.balance)}
-                hint={metric.gateway === "payshark" ? "disponível para transferências" : "carteira Liqfy"}
-              />
-            </div>
-          ))}
+        <h2 className="flex items-center gap-2 text-sm font-semibold">
+          <PiggyBank className="h-4 w-4 text-primary" aria-hidden="true" /> Meu saldo retido ({overview.retentionPercent}%)
+        </h2>
+        <p className="text-xs text-muted-foreground">
+          Cada saque de caixa retém {overview.retentionPercent}% do valor solicitado e acumula aqui, separado do caixa
+          livre do gateway. O botão abaixo envia tudo o que estiver acumulado para a chave PIX{" "}
+          <span className="font-medium text-foreground">{retention.payout_pix_key}</span>.
+        </p>
+        <div className="grid gap-2 sm:grid-cols-3">
+          <Stat
+            label="Acumulado agora"
+            value={formatCurrency(retention.retained_balance)}
+            hint="pronto para o Saque Italo"
+            highlight
+          />
+          <Stat label="Total retido no histórico" value={formatCurrency(retention.total_retained)} />
+          <Stat label="Total já sacado" value={formatCurrency(retention.total_paid_out)} />
         </div>
+        {error && (
+          <p className="flex items-start gap-2 text-xs text-destructive">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            {error}
+          </p>
+        )}
+        <Button onClick={withdrawRetention} disabled={busy === "retention" || !retention.retained_balance}>
+          {busy === "retention" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
+          Saque Italo — sacar {formatCurrency(retention.retained_balance)}
+        </Button>
       </section>
+
+      {paysharkMetric && (
+        <section className="card-surface space-y-3 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold">Gateway Payshark</h2>
+            <span
+              className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                paysharkMetric.active ? "bg-primary/15 text-primary" : "bg-secondary text-muted-foreground"
+              }`}
+            >
+              {paysharkMetric.active ? "Ativo" : "Desativado"}
+            </span>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+            <Stat label="Pago no mês" value={formatCurrency(paysharkMetric.paid_month)} hint={`${paysharkMetric.paid_month_count} depósito(s)`} />
+            <Stat label="Taxas no mês (casa)" value={formatCurrency(paysharkMetric.fee_month)} />
+            <Stat label="Líquido no mês" value={formatCurrency(paysharkMetric.net_month)} />
+            <Stat label="Pendentes" value={formatCurrency(paysharkMetric.pending_amount)} hint={`${paysharkMetric.pending_count} cobrança(s)`} />
+            <Stat label="Saldo da loja" value={paysharkMetric.balance === null ? "—" : formatCurrency(paysharkMetric.balance)} />
+          </div>
+        </section>
+      )}
 
       <section className="card-surface space-y-2 p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -287,9 +316,9 @@ export default function AdminFinance() {
       <section className="card-surface space-y-3 p-4">
         <h2 className="text-sm font-semibold">Sacar caixa</h2>
         <p className="text-xs text-muted-foreground">
-          O valor enviado ao gateway é 90% do solicitado (retenção de 10%). No modelo gross-up da Liqfy o recebedor
-          recebe o amount enviado e a taxa de 3,5% + R$ 1,00 é debitada por cima; a plataforma registra a saída pelo
-          valor integral solicitado.
+          O valor enviado ao gateway é 80% do solicitado (retenção de 20% acumula no seu saldo retido). O Payshark
+          recebe o valor enviado e debita a taxa de 2% + R$ 1,00 dele: um saque de R$ 100 envia R$ 80 e o recebedor
+          leva R$ 77,40. Seus R$ 20 retidos ficam acumulando no card acima.
         </p>
         <div className="max-w-xs space-y-2">
           <Label htmlFor="cash-amount">Valor do saque</Label>
@@ -318,8 +347,8 @@ export default function AdminFinance() {
           <FlaskConical className="h-4 w-4 text-primary" aria-hidden="true" /> Simular saque (visual)
         </h2>
         <p className="text-xs text-muted-foreground">
-          Cria um saque concluído na conta do jogador sem nenhuma chamada ao gateway e sem mover saldos —
-          aprovação instantânea, 100% visual, feita aqui no painel.
+          Cria um saque concluído na conta de administrador escolhida, sem nenhuma chamada ao gateway e sem mover
+          saldos. O registro aparece em "Saques solicitados" aqui no painel e em "Meus saques" da conta escolhida.
         </p>
         <div className="grid max-w-lg gap-3 sm:grid-cols-2">
           <div className="space-y-2">
@@ -394,7 +423,10 @@ export default function AdminFinance() {
       </section>
 
       <section className="card-surface space-y-2 p-4">
-        <h2 className="text-sm font-semibold">Saques ({pendingWithdrawals.length} aguardando liberação)</h2>
+        <h2 className="text-sm font-semibold">Saques solicitados ({pendingWithdrawals.length} aguardando liberação)</h2>
+        <p className="text-[11px] text-muted-foreground">
+          Saques simulados aparecem marcados como "Simulado" — existem apenas em contas de administrador.
+        </p>
         {visibleWithdrawals.length ? (
           visibleWithdrawals.map((item) => (
             <div key={item.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border px-3 py-2 text-xs">

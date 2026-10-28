@@ -22,10 +22,9 @@
     "gateway": {
       "type": "string",
       "enum": [
-        "liqfy",
         "payshark"
       ],
-      "default": "liqfy"
+      "default": "payshark"
     },
     "affiliate_code": {
       "type": "string"
@@ -44,6 +43,16 @@
     "net_amount": {
       "type": "number",
       "default": 0
+    },
+    "retained_amount": {
+      "type": "number",
+      "default": 0,
+      "description": "Reten\u00e7\u00e3o de 20% deste saque, acumulada no saldo retido do dono."
+    },
+    "retention_applies": {
+      "type": "boolean",
+      "default": false,
+      "description": "Marcado quando a reten\u00e7\u00e3o de 20% se aplica (saque de caixa ou carteira de administrador)."
     },
     "pix_key": {
       "type": "string"

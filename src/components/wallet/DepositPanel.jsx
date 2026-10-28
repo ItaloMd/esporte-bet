@@ -21,7 +21,7 @@ export default function DepositPanel({ minDeposit, enabled, profile, onCredited 
     setError("");
     setLoading(true);
     try {
-      const response = await base44.functions.invoke("liqfyDeposit", {
+      const response = await base44.functions.invoke("paysharkDeposit", {
         action: "create",
         amount: Number(amount),
         tracking: getStoredUtm(),
@@ -38,7 +38,7 @@ export default function DepositPanel({ minDeposit, enabled, profile, onCredited 
     if (!deposit || deposit.status !== "pending") return undefined;
     const timer = setInterval(async () => {
       try {
-        const response = await base44.functions.invoke("liqfyDeposit", {
+        const response = await base44.functions.invoke("paysharkDeposit", {
           action: "sync",
           external_id: deposit.external_id,
         });
