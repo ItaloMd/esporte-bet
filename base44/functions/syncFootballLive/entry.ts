@@ -237,6 +237,14 @@ export default async function (req) {
           patch.away_score = fixture.away_score;
           touch();
         }
+        if (fixture.ht_home_score !== null && fixture.ht_away_score !== null) {
+          if (fixture.ht_home_score !== event.ht_home_score || fixture.ht_away_score !== event.ht_away_score) {
+            patch.ht_home_score = fixture.ht_home_score;
+            patch.ht_away_score = fixture.ht_away_score;
+            touch();
+          }
+        }
+        if (fixture.season && fixture.season !== event.season) patch.season = fixture.season;
         if (
           fixture.reg_home_score !== null &&
           fixture.reg_away_score !== null &&

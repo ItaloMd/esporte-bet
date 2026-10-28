@@ -1,6 +1,6 @@
 import React from "react";
 import { Link } from "react-router-dom";
-import { Activity, CreditCard, FileSearch, Gauge, LayoutDashboard, Database, Gift, Images, Radio, ShieldAlert, ShieldCheck, SlidersHorizontal, UserCheck, Users, Wallet, Zap } from "lucide-react";
+import { Activity, CreditCard, FileSearch, Gauge, LayoutDashboard, Database, Gift, Images, Radio, ShieldAlert, ShieldCheck, SlidersHorizontal, Target, UserCheck, Users, Wallet, Zap } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import AdminDashboard from "@/components/admin/AdminDashboard";
@@ -11,6 +11,7 @@ import AdminCatalog from "@/components/admin/AdminCatalog";
 import AdminBanners from "@/components/admin/AdminBanners";
 import AdminSuperOdds from "@/components/admin/AdminSuperOdds";
 import AdminProvider from "@/components/admin/AdminProvider";
+import AdminMarkets from "@/components/admin/AdminMarkets";
 import AdminFootball from "@/components/admin/AdminFootball";
 import FootballCentral from "@/components/admin/FootballCentral";
 import AdminFinance from "@/components/admin/AdminFinance";
@@ -34,6 +35,7 @@ const TABS = [
   { value: "super-odds", label: "Super odds", icon: Zap },
   { value: "catalog", label: "Esportes e competições", icon: Database },
   { value: "provider", label: "Margem e cotações", icon: SlidersHorizontal },
+  { value: "markets", label: "Configuração de Mercados", icon: Target },
   { value: "football-central", label: "Central API-Football", icon: Radio },
   { value: "football", label: "API-Football", icon: Activity },
   { value: "settings", label: "Identidade e textos", icon: ShieldCheck },
@@ -130,6 +132,9 @@ export default function Admin() {
         </TabsContent>
         <TabsContent value="provider" className="mt-4">
           <AdminProvider actor={user} />
+        </TabsContent>
+        <TabsContent value="markets" className="mt-4">
+          <AdminMarkets />
         </TabsContent>
         <TabsContent value="football-central" className="mt-4">
           <FootballCentral />

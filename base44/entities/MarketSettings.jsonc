@@ -1,0 +1,71 @@
+{
+  "name": "MarketSettings",
+  "type": "object",
+  "properties": {
+    "market_key": {
+      "type": "string"
+    },
+    "market_name": {
+      "type": "string"
+    },
+    "market_group": {
+      "type": "string"
+    },
+    "provider_bet": {
+      "type": "string"
+    },
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "priority": {
+      "type": "number",
+      "default": 5
+    },
+    "auto_audit": {
+      "type": "boolean",
+      "default": true
+    },
+    "support_status": {
+      "type": "string",
+      "enum": [
+        "available",
+        "unavailable",
+        "upgrade"
+      ],
+      "default": "available"
+    },
+    "support_checked_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "support_note": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "market_key"
+  ],
+  "rls": {
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

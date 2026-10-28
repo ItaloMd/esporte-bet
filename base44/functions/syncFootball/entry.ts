@@ -4,13 +4,16 @@ import {
   FOOTBALL_TIMEZONE,
   footballApiBase,
   fetchAccountStatus,
+  fetchFixtureEvents,
   fetchFixtureStatistics,
   fetchFixturesByDate,
   fetchFixturesByIds,
   mapFixture,
   parseAccountStatus,
+  parseFixtureEvents,
   parseFixtureStatistics,
 } from '../../shared/apiFootball.ts';
+import { upsertMarketCapability } from '../../shared/footballMarkets.ts';
 import {
   DEFAULT_DAILY_LIMIT,
   acquireLock,
@@ -46,6 +49,8 @@ const MAX_AUDIT_CHECKS = 12;
 const MAX_AUDIT_EVENTS = 300;
 /** Teto de consultas de estatísticas por execução: 1 crédito por partida com apostas. */
 const MAX_STATS_PER_RUN = 15;
+/** Teto de consultas de eventos (gols) por execução: 1 crédito por partida com apostas. */
+const MAX_EVENTS_PER_RUN = 15;
 
 /** O plano tem limite por minuto além da cota diária: nesse caso a execução para. */
 function isRateLimit(message) {
@@ -131,6 +136,11 @@ function fixtureFields(fixture, nowIso) {
     fields.home_score = fixture.home_score;
     fields.away_score = fixture.away_score;
   }
+  if (fixture.ht_home_score !== null && fixture.ht_away_score !== null) {
+    fields.ht_home_score = fixture.ht_home_score;
+    fields.ht_away_score = fixture.ht_away_score;
+  }
+  if (fixture.season) fields.season = fixture.season;
   if (fixture.reg_home_score !== null && fixture.reg_away_score !== null) {
     fields.reg_home_score = fixture.reg_home_score;
     fields.reg_away_score = fixture.reg_away_score;
@@ -533,12 +543,15 @@ export default async function (req) {
     // Apostas pendentes sempre precisam de resultado, tenham cotação ou não.
     const openEventIds = new Set();
     const openBetCounts = new Map();
+    const openMarketKeys = new Map();
     let openCursor = null;
     for (let round = 0; round < 4; round += 1) {
       const page = await db.SimulationSelection.filter({ status: 'open' }, { limit: 500, ...(openCursor ? { cursor: openCursor } : {}) });
       (page.items || []).forEach((row) => {
         openEventIds.add(row.event_id);
         openBetCounts.set(row.event_id, (openBetCounts.get(row.event_id) || 0) + 1);
+        if (!openMarketKeys.has(row.event_id)) openMarketKeys.set(row.event_id, new Set());
+        openMarketKeys.get(row.event_id).add(String(row.market_key || ''));
       });
       openCursor = page.next_cursor;
       if (!page.has_more) break;
@@ -641,9 +654,13 @@ export default async function (req) {
     // as estatísticas oficiais (escanteios e cartões) só são consultadas quando
     // há apostas pendentes na partida, protegendo a cota diária.
     const betAudits = [];
+    const eventStatUpdates = [];
+    const capabilitySamples = [];
     let statisticsCalls = 0;
+    let eventsCalls = 0;
     for (const { event, fixture } of finishedAudits) {
       const hasBets = openEventIds.has(event.id);
+      const marketKeys = openMarketKeys.get(event.id) || new Set();
       let statistics = null;
       let statisticsSource = '';
       if (hasBets && statisticsCalls < MAX_STATS_PER_RUN && canSpend(used, limit, policy.reserve, 1)) {
@@ -660,14 +677,65 @@ export default async function (req) {
           failures.push(`estatísticas ${fixture.fixture_id}: ${String(error?.message || error)}`);
         }
       }
+
+      // Eventos da partida (gols): necessários para "time marca o primeiro gol".
+      let events = null;
+      let eventsSource = '';
+      if (hasBets && marketKeys.has('first_goal') && eventsCalls < MAX_EVENTS_PER_RUN && canSpend(used, limit, policy.reserve, 1)) {
+        try {
+          const eventsResult = await fetchFixtureEvents(apiKey, base, fixture.fixture_id);
+          const charged = await chargeQuota(db, { record: quotaRecord, day, limit, cost: 1, purpose: 'events', reserve: policy.reserve });
+          quotaRecord = charged.record || quotaRecord;
+          used = charged.used;
+          eventsCalls += 1;
+          events = parseFixtureEvents(eventsResult.data, {
+            homeName: event.home_team_name,
+            awayName: event.away_team_name,
+          });
+          eventsSource = 'api_football';
+          calls.push({ endpoint: `/fixtures/events?fixture=${fixture.fixture_id}`, records: Number(eventsResult.results) || 0, errors: eventsResult.errors });
+        } catch (error) {
+          failures.push(`eventos ${fixture.fixture_id}: ${String(error?.message || error)}`);
+        }
+      }
+
+      // Escanteios, cartões e primeiro gol ficam na própria partida: a
+      // liquidação lê daí, e a auditoria registra o relatório completo.
+      const statsPatch = {};
+      if (statistics && statistics.corners_home !== null && statistics.corners_away !== null) {
+        statsPatch.corners_home = statistics.corners_home;
+        statsPatch.corners_away = statistics.corners_away;
+      }
+      if (statistics && statistics.cards_home !== null && statistics.cards_away !== null) {
+        statsPatch.cards_home = statistics.cards_home;
+        statsPatch.cards_away = statistics.cards_away;
+      }
+      if (events?.first_goal) {
+        statsPatch.first_goal_minute = events.first_goal.minute;
+        statsPatch.first_goal_team = events.first_goal.side;
+      }
+      if (Object.keys(statsPatch).length) {
+        eventStatUpdates.push({ id: event.id, ...statsPatch });
+      }
+
       betAudits.push(buildBetAudit(event, fixture, {
         betCount: openBetCounts.get(event.id) || 0,
         statistics,
         statisticsSource,
+        events,
+        eventsSource,
       }));
+      capabilitySamples.push({ event, statistics, events });
     }
     for (const batch of chunkArray(betAudits, 100)) {
       if (batch.length) await db.BetAudit.bulkCreate(batch);
+    }
+    for (const batch of chunkArray(eventStatUpdates, 200)) {
+      if (batch.length) await db.Event.bulkUpdate(batch);
+    }
+    // Descoberta de capacidade por liga/temporada: o que a fonte realmente fornece.
+    for (const sample of capabilitySamples) {
+      await upsertMarketCapability(db, sample.event, sample.statistics, sample.events).catch(() => null);
     }
 
     // Próxima auditoria prevista: o evento com horário mais cedo ainda futuro.

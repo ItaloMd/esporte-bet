@@ -125,6 +125,91 @@ export function settleSelection(selection, event) {
     return null;
   }
 
+  /* --------- mercados de intervalo, estatísticas e especiais --------- */
+  const htHome = Number(event?.ht_home_score);
+  const htAway = Number(event?.ht_away_score);
+  const htAvailable = Number.isFinite(htHome) && Number.isFinite(htAway);
+  const htTotal = htAvailable ? htHome + htAway : null;
+  const secondHalfTotal = htAvailable ? home + away - htTotal : null;
+
+  if (marketKey === 'double_chance') {
+    if (code === '1x') return home >= away ? 'won' : 'lost';
+    if (code === '12') return home !== away ? 'won' : 'lost';
+    if (code === 'x2') return away >= home ? 'won' : 'lost';
+    return null;
+  }
+
+  if (marketKey === 'btts') {
+    if (code === 'yes') return home > 0 && away > 0 ? 'won' : 'lost';
+    if (code === 'no') return home === 0 || away === 0 ? 'won' : 'lost';
+    return null;
+  }
+
+  if (marketKey === 'ht_result') {
+    if (!htAvailable) return null;
+    if (code === 'draw') return htHome === htAway ? 'won' : 'lost';
+    if (code === homeSlug) return htHome > htAway ? 'won' : 'lost';
+    if (code === awaySlug) return htAway > htHome ? 'won' : 'lost';
+    return null;
+  }
+
+  if (marketKey === 'ht_double_chance') {
+    if (!htAvailable) return null;
+    if (code === '1x') return htHome >= htAway ? 'won' : 'lost';
+    if (code === '12') return htHome !== htAway ? 'won' : 'lost';
+    if (code === 'x2') return htAway >= htHome ? 'won' : 'lost';
+    return null;
+  }
+
+  if (marketKey === 'ht_btts') {
+    if (!htAvailable) return null;
+    if (code === 'yes') return htHome > 0 && htAway > 0 ? 'won' : 'lost';
+    if (code === 'no') return htHome === 0 || htAway === 0 ? 'won' : 'lost';
+    return null;
+  }
+
+  if (marketKey === 'ht_totals') {
+    if (htTotal === null) return null;
+    const parsed = /^(over|under)_(-?\d+(?:\.\d+)?)$/.exec(code);
+    if (!parsed) return null;
+    const line = Number(parsed[2]);
+    if (htTotal === line) return 'void';
+    return (parsed[1] === 'over') === (htTotal > line) ? 'won' : 'lost';
+  }
+
+  if (marketKey === 'goal_both_halves') {
+    if (htTotal === null || secondHalfTotal === null) return null;
+    if (code === 'yes') return htTotal > 0 && secondHalfTotal > 0 ? 'won' : 'lost';
+    if (code === 'no') return htTotal === 0 || secondHalfTotal === 0 ? 'won' : 'lost';
+    return null;
+  }
+
+  if (marketKey === 'first_goal') {
+    const firstTeam = String(event?.first_goal_team || '').toLowerCase();
+    if (!firstTeam) return null;
+    if (code !== homeSlug && code !== awaySlug) return null;
+    return code === (firstTeam === 'home' ? homeSlug : awaySlug) ? 'won' : 'lost';
+  }
+
+  const statisticTotals = {
+    corners: [Number(event?.corners_home), Number(event?.corners_away)],
+    corners_home: [Number(event?.corners_home), 0],
+    corners_away: [Number(event?.corners_away), 0],
+    cards: [Number(event?.cards_home), Number(event?.cards_away)],
+    cards_home: [Number(event?.cards_home), 0],
+    cards_away: [Number(event?.cards_away), 0],
+  };
+  if (statisticTotals[marketKey]) {
+    const [first, second] = statisticTotals[marketKey];
+    if (!Number.isFinite(first) || !Number.isFinite(second)) return null;
+    const statTotal = first + second;
+    const parsed = /^(over|under)_(-?\d+(?:\.\d+)?)$/.exec(code);
+    if (!parsed) return null;
+    const line = Number(parsed[2]);
+    if (statTotal === line) return 'void';
+    return (parsed[1] === 'over') === (statTotal > line) ? 'won' : 'lost';
+  }
+
   return null;
 }
 

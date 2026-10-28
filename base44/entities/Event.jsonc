@@ -14,6 +14,9 @@
     "country": {
       "type": "string"
     },
+    "season": {
+      "type": "string"
+    },
     "home_team_id": {
       "type": "string"
     },
@@ -101,6 +104,44 @@
     "away_score": {
       "type": "number"
     },
+    "ht_home_score": {
+      "type": "number"
+    },
+    "ht_away_score": {
+      "type": "number"
+    },
+    "reg_home_score": {
+      "type": "number"
+    },
+    "reg_away_score": {
+      "type": "number"
+    },
+    "corners_home": {
+      "type": "number"
+    },
+    "corners_away": {
+      "type": "number"
+    },
+    "cards_home": {
+      "type": "number"
+    },
+    "cards_away": {
+      "type": "number"
+    },
+    "first_goal_minute": {
+      "type": "number"
+    },
+    "first_goal_team": {
+      "type": "string"
+    },
+    "extra_time": {
+      "type": "boolean",
+      "default": false
+    },
+    "penalties": {
+      "type": "boolean",
+      "default": false
+    },
     "venue": {
       "type": "string"
     },
@@ -134,20 +175,6 @@
     },
     "phase_label": {
       "type": "string"
-    },
-    "reg_home_score": {
-      "type": "number"
-    },
-    "reg_away_score": {
-      "type": "number"
-    },
-    "extra_time": {
-      "type": "boolean",
-      "default": false
-    },
-    "penalties": {
-      "type": "boolean",
-      "default": false
     },
     "result_source": {
       "type": "string"

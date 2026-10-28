@@ -48,6 +48,8 @@ export function marketGroupLabel(group) {
     handicap: "Handicap",
     escanteios: "Escanteios",
     cartoes: "Cartões",
+    intervalo: "Mercados de intervalo (1º tempo)",
+    especiais: "Mercados especiais",
     estatisticas: "Estatísticas",
   }[group] || "Outros mercados";
 }

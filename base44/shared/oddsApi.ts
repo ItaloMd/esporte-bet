@@ -183,6 +183,12 @@ export function marketGroup(marketKey) {
   if (marketKey === "h2h") return "principal";
   if (marketKey === "spreads") return "handicap";
   if (marketKey === "totals") return "gols";
+  if (marketKey === "double_chance" || marketKey === "ht_double_chance") return "dupla_chance";
+  if (marketKey === "btts" || marketKey === "ht_btts" || marketKey === "goal_both_halves") return "ambas_marcam";
+  if (marketKey === "ht_result" || marketKey === "ht_totals") return "intervalo";
+  if (String(marketKey || "").startsWith("corners")) return "escanteios";
+  if (String(marketKey || "").startsWith("cards")) return "cartoes";
+  if (marketKey === "first_goal") return "especiais";
   return "estatisticas";
 }
 
@@ -190,6 +196,20 @@ export function marketName(marketKey, sportSlugValue) {
   if (marketKey === "h2h") return "Resultado da partida";
   if (marketKey === "spreads") return "Handicap";
   if (marketKey === "totals") return sportSlugValue === "futebol" ? "Total de gols" : "Total de pontos";
+  if (marketKey === "double_chance") return "Dupla Chance";
+  if (marketKey === "ht_double_chance") return "Dupla Chance 1º Tempo";
+  if (marketKey === "btts") return "Ambas Marcam";
+  if (marketKey === "ht_btts") return "Ambas Marcam 1º Tempo";
+  if (marketKey === "ht_result") return "Resultado do 1º Tempo";
+  if (marketKey === "ht_totals") return "Gols 1º Tempo (Mais/Menos)";
+  if (marketKey === "corners") return "Escanteios (Mais/Menos)";
+  if (marketKey === "corners_home") return "Escanteios Casa (Mais/Menos)";
+  if (marketKey === "corners_away") return "Escanteios Visitante (Mais/Menos)";
+  if (marketKey === "cards") return "Cartões (Mais/Menos)";
+  if (marketKey === "cards_home") return "Cartões Casa (Mais/Menos)";
+  if (marketKey === "cards_away") return "Cartões Visitante (Mais/Menos)";
+  if (marketKey === "first_goal") return "Time Marca o Primeiro Gol";
+  if (marketKey === "goal_both_halves") return "Gol nos Dois Tempos";
   return marketKey;
 }
 
@@ -208,6 +228,7 @@ export function selectionLabel(marketKey, outcome) {
 }
 
 export function selectionCode(marketKey, outcome) {
+  if (outcome?.code) return String(outcome.code);
   const name = String(outcome?.name || "").trim();
   const point = outcome?.point;
   if (marketKey === "totals") {

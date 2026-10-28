@@ -16,12 +16,29 @@ import { HOUSE_MARGIN_VERSION, PRIORITY_MARKETS, applyHouseMargin, marketGroup, 
 const ID_CHUNK = 100;
 const WRITE_CHUNK = 400;
 
-/** Ordem de exibição dos mercados conhecidos. */
+/** Ordem de exibição dos mercados conhecidos (espelha o catálogo). */
+const MARKET_ORDER = {
+  h2h: 1,
+  double_chance: 2,
+  btts: 3,
+  totals: 4,
+  spreads: 5,
+  ht_result: 6,
+  ht_double_chance: 7,
+  ht_totals: 8,
+  ht_btts: 9,
+  corners: 10,
+  corners_home: 11,
+  corners_away: 12,
+  cards: 13,
+  cards_home: 14,
+  cards_away: 15,
+  first_goal: 16,
+  goal_both_halves: 17,
+};
+
 export function marketSortOrder(marketKey) {
-  if (marketKey === 'h2h') return 1;
-  if (marketKey === 'spreads') return 2;
-  if (marketKey === 'totals') return 3;
-  return 9;
+  return MARKET_ORDER[marketKey] || 20;
 }
 
 function chunk(list, size) {

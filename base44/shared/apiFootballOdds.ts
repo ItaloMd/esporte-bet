@@ -9,6 +9,7 @@
  * Nenhum segredo é lido aqui: a chave chega por parâmetro, sempre do backend.
  */
 import { apiFootballFetch, FOOTBALL_TIMEZONE } from './apiFootball.ts';
+import { BET_NAME_TO_MARKET_KEY } from './footballMarkets.ts';
 import { selectionCode, selectionLabel } from './oddsApi.ts';
 
 /**
@@ -63,13 +64,9 @@ export function pickBookmaker(bookmakers = []) {
 const OVER_UNDER = /^(over|under)\s+(-?\d+(?:\.\d+)?)$/i;
 const HANDICAP = /^(home|away)\s+([+-]?\d+(?:\.\d+)?)$/i;
 
-/** Nome do mercado na API-Football → chave interna da aplicação. */
+/** Nome do mercado na API-Football → chave interna da aplicação (catálogo oficial). */
 function marketKeyFor(betName) {
-  const value = String(betName || '').trim().toLowerCase();
-  if (value === 'match winner') return 'h2h';
-  if (value === 'goals over/under') return 'totals';
-  if (value === 'asian handicap') return 'spreads';
-  return null;
+  return BET_NAME_TO_MARKET_KEY.get(String(betName || '').trim().toLowerCase()) || null;
 }
 
 /**
@@ -78,16 +75,31 @@ function marketKeyFor(betName) {
  */
 function outcomeFor(marketKey, value, teams) {
   const raw = String(value || '').trim();
-  if (marketKey === 'h2h') {
+  if (marketKey === 'h2h' || marketKey === 'ht_result' || marketKey === 'first_goal') {
     if (/^home$/i.test(raw)) return { name: teams.home };
     if (/^away$/i.test(raw)) return { name: teams.away };
-    if (/^draw$/i.test(raw)) return { name: 'Draw' };
+    if (marketKey !== 'first_goal' && /^draw$/i.test(raw)) return { name: 'Draw' };
     return null;
   }
-  if (marketKey === 'totals') {
+  if (
+    marketKey === 'totals' || marketKey === 'ht_totals' ||
+    marketKey === 'corners' || marketKey === 'corners_home' || marketKey === 'corners_away' ||
+    marketKey === 'cards' || marketKey === 'cards_home' || marketKey === 'cards_away'
+  ) {
     const match = OVER_UNDER.exec(raw);
     if (!match) return null;
     return { name: `${match[1]} ${match[2]}`, point: Number(match[2]) };
+  }
+  if (marketKey === 'double_chance' || marketKey === 'ht_double_chance') {
+    if (/^home\/draw$/i.test(raw)) return { name: 'Casa ou Empate', code: '1x' };
+    if (/^home\/away$/i.test(raw)) return { name: 'Casa ou Visitante', code: '12' };
+    if (/^draw\/away$/i.test(raw)) return { name: 'Empate ou Visitante', code: 'x2' };
+    return null;
+  }
+  if (marketKey === 'btts' || marketKey === 'ht_btts' || marketKey === 'goal_both_halves') {
+    if (/^yes$/i.test(raw)) return { name: 'Sim', code: 'yes' };
+    if (/^no$/i.test(raw)) return { name: 'Não', code: 'no' };
+    return null;
   }
   const match = HANDICAP.exec(raw);
   if (!match) return null;

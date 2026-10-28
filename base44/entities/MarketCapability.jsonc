@@ -1,0 +1,72 @@
+{
+  "name": "MarketCapability",
+  "type": "object",
+  "properties": {
+    "league_key": {
+      "type": "string"
+    },
+    "league_name": {
+      "type": "string"
+    },
+    "season": {
+      "type": "string"
+    },
+    "statistics_available": {
+      "type": "boolean",
+      "default": false
+    },
+    "corners_available": {
+      "type": "boolean",
+      "default": false
+    },
+    "cards_available": {
+      "type": "boolean",
+      "default": false
+    },
+    "events_available": {
+      "type": "boolean",
+      "default": false
+    },
+    "goals_events_available": {
+      "type": "boolean",
+      "default": false
+    },
+    "samples": {
+      "type": "number",
+      "default": 0
+    },
+    "last_checked_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "note": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "league_key",
+    "season"
+  ],
+  "rls": {
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

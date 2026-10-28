@@ -6,6 +6,8 @@
  * de backend, que reutilizam o cache compartilhado.
  */
 
+import { slugify } from './oddsApi.ts';
+
 export const DEFAULT_BASE_URL = "https://v3.football.api-sports.io";
 
 /** Fuso oficial de exibição e de agrupamento por dia. */
@@ -79,11 +81,14 @@ export function mapFixture(fixture) {
   const goals = fixture?.goals || {};
   const score = fixture?.score || {};
   const fulltime = score.fulltime || {};
+  const halftime = score.halftime || {};
   const extraTimeScore = score.extratime || {};
   const penaltyScore = score.penalty || {};
 
   const home = numberOrNull(goals.home);
   const away = numberOrNull(goals.away);
+  const htHome = numberOrNull(halftime.home);
+  const htAway = numberOrNull(halftime.away);
   const hasExtraTime = numberOrNull(extraTimeScore.home) !== null || numberOrNull(extraTimeScore.away) !== null;
   const hasPenalties = numberOrNull(penaltyScore.home) !== null || numberOrNull(penaltyScore.away) !== null;
   const regHome = numberOrNull(fulltime.home);
@@ -116,6 +121,8 @@ export function mapFixture(fixture) {
     minute,
     home_score: home,
     away_score: away,
+    ht_home_score: htHome,
+    ht_away_score: htAway,
     reg_home_score: regulationAvailable ? regHome : null,
     reg_away_score: regulationAvailable ? regAway : null,
     extra_time: Boolean(info.extraTime || hasExtraTime),
@@ -265,6 +272,51 @@ export function fetchFixtureStatistics(apiKey, base, fixtureId) {
   return apiFootballFetch(apiKey, "/fixtures/statistics", { fixture: fixtureId }, { base });
 }
 
+/** Eventos da partida (gols, cartões, substituições) — consultados após o FT. */
+export function fetchFixtureEvents(apiKey, base, fixtureId) {
+  return apiFootballFetch(apiKey, "/fixtures/events", { fixture: fixtureId }, { base });
+}
+
+/**
+ * Extrai os gols da resposta de /fixtures/events. O lado de cada gol é decidido
+ * pelo time do evento; gol contra é creditado ao adversário, como nas casas de
+ * apostas. Devolve o primeiro gol (minuto, lado e detalhe) e a lista completa.
+ */
+export function parseFixtureEvents(payload, { homeName, awayName }) {
+  const rows = Array.isArray(payload?.response) ? payload.response : [];
+  const homeSlug = slugify(homeName);
+  const awaySlug = slugify(awayName);
+  const goals = [];
+  rows.forEach((row) => {
+    if (String(row?.type || "").toLowerCase() !== "goal") return;
+    const teamSlug = slugify(row?.team?.name);
+    const side = teamSlug === homeSlug ? "home" : teamSlug === awaySlug ? "away" : null;
+    if (!side) return;
+    const isOwnGoal = /own goal/i.test(String(row?.detail || ""));
+    // Gol contra: o crédito é do time beneficiado.
+    const credited = isOwnGoal ? (side === "home" ? "away" : "home") : side;
+    const elapsed = numberOrNull(row?.time?.elapsed);
+    const extra = numberOrNull(row?.time?.extra);
+    goals.push({
+      minute: elapsed === null ? null : elapsed + (extra && extra > 0 ? extra : 0),
+      side: credited,
+      team_name: row?.team?.name || "",
+      player: row?.player?.name || "",
+      detail: row?.detail || "",
+      own_goal: isOwnGoal,
+    });
+  });
+  goals.sort((a, b) => (a.minute ?? 999) - (b.minute ?? 999));
+  const first = goals.length ? goals[0] : null;
+  return {
+    first_goal: first
+      ? { minute: first.minute, side: first.side, team_name: first.team_name, detail: first.detail }
+      : null,
+    goals,
+    goal_count: goals.length,
+  };
+}
+
 function teamStatValue(teamRow, label) {
   const found = (teamRow?.statistics || []).find(
     (item) => String(item?.type || "").trim().toLowerCase() === label,
@@ -291,6 +343,10 @@ export function parseFixtureStatistics(payload) {
     corners_away: pick(rows[1], "corner kicks"),
     cards_home: cardsOf(rows[0]),
     cards_away: cardsOf(rows[1]),
+    yellow_home: pick(rows[0], "yellow cards"),
+    yellow_away: pick(rows[1], "yellow cards"),
+    red_home: pick(rows[0], "red cards"),
+    red_away: pick(rows[1], "red cards"),
   };
 }
 

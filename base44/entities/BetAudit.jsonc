@@ -29,7 +29,19 @@
     "reg_away_score": {
       "type": "number"
     },
+    "ht_home_score": {
+      "type": "number"
+    },
+    "ht_away_score": {
+      "type": "number"
+    },
     "total_goals": {
+      "type": "number"
+    },
+    "goal_first_half": {
+      "type": "number"
+    },
+    "goal_second_half": {
       "type": "number"
     },
     "btts": {
@@ -88,6 +100,15 @@
       "type": "boolean",
       "default": false
     },
+    "first_goal_minute": {
+      "type": "number"
+    },
+    "first_goal_team": {
+      "type": "string"
+    },
+    "first_goal_detail": {
+      "type": "string"
+    },
     "corners_home": {
       "type": "number",
       "default": 0
@@ -104,6 +125,22 @@
       "type": "number",
       "default": 0
     },
+    "yellow_home": {
+      "type": "number",
+      "default": 0
+    },
+    "yellow_away": {
+      "type": "number",
+      "default": 0
+    },
+    "red_home": {
+      "type": "number",
+      "default": 0
+    },
+    "red_away": {
+      "type": "number",
+      "default": 0
+    },
     "statistics_fetched": {
       "type": "boolean",
       "default": false
@@ -115,9 +152,15 @@
       "type": "boolean",
       "default": false
     },
+    "events_source": {
+      "type": "string"
+    },
     "bet_count": {
       "type": "number",
       "default": 0
+    },
+    "audit_report": {
+      "type": "string"
     },
     "note": {
       "type": "string"
