@@ -65,23 +65,55 @@ export default async function (req) {
             processed_at: new Date().toISOString(),
             failure_reason: null,
           });
-          // Retenção de 20% contabilizada somente na confirmação do saque.
-          await accrueWithdrawalRetention(service, withdrawal).catch(() => null);
+        }
+        // Retenção de 20% contabilizada na confirmação — idempotente pela
+        // marca do saque, então uma reentrega só completa o que faltou.
+        try {
+          await accrueWithdrawalRetention(service, withdrawal);
+        } catch (error) {
+          await service.AdminAuditLog.create({
+            actor_id: 'system',
+            actor_email: 'payshark-webhook',
+            action: 'payshark_webhook.retention_failure',
+            target_type: 'Withdrawal',
+            target_id: withdrawal.id,
+            severity: 'error',
+            details: `Falha ao contabilizar a retenção do saque concluído: ${error.message}`,
+          }).catch(() => null);
+          return Response.json({ error: error.message || 'Falha ao contabilizar a retenção.' }, { status: 500 });
         }
         return Response.json({ received: true, status: 'completed' });
       }
 
       if (status === 'failed') {
-        if (['completed', 'failed', 'rejected'].includes(withdrawal.status)) {
+        // Saque concluído não volta atrás. Para os demais, devolve o valor ao
+        // saldo e estorna o efeito no saldo retido — tudo idempotente, então
+        // uma reentrega (ou um estorno que falhou no meio) apenas completa o
+        // que faltar, sem duplicar nada.
+        if (withdrawal.status === 'completed') {
           return Response.json({ received: true, idempotent: true });
         }
-        await refundWithdrawal(service, withdrawal, {
-          status: 'failed',
-          note: `Transferência não concluída pelo Payshark (${payload.message || payload.status}). Valor devolvido ao saldo.`,
-        });
-        // Estorna na base o efeito do saque falho sobre o saldo retido
-        // (retenção acumulada devolvida ao caixa, pagamento restaurado).
-        await reverseFailedRetention(service, { ...withdrawal, status: 'failed' }).catch(() => null);
+        try {
+          await refundWithdrawal(service, withdrawal, {
+            status: 'failed',
+            note: `Transferência não concluída pelo Payshark (${payload.message || payload.status}). Valor devolvido ao saldo.`,
+          });
+          await reverseFailedRetention(service, { ...withdrawal, status: 'failed' });
+        } catch (error) {
+          // Estorno falhou: fica visível na auditoria, o Payshark reentrega o
+          // evento e a reconciliação manual pode retomar — nada é aplicado
+          // duas vezes.
+          await service.AdminAuditLog.create({
+            actor_id: 'system',
+            actor_email: 'payshark-webhook',
+            action: 'payshark_webhook.refund_failure',
+            target_type: 'Withdrawal',
+            target_id: withdrawal.id,
+            severity: 'error',
+            details: `Falha ao estornar o saque: ${error.message}`,
+          }).catch(() => null);
+          return Response.json({ error: error.message || 'Falha ao estornar o saque.' }, { status: 500 });
+        }
         return Response.json({ received: true, status: 'failed' });
       }
 

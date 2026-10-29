@@ -211,10 +211,15 @@ export async function creditPaidDeposit(service, deposit, remote) {
 }
 
 /**
- * Devolve ao saldo um saque que não foi enviado (recusado pela administração ou
- * recusado pelo gateway). O valor sai do reservado e volta para o disponível.
+ * Devolve ao saldo um saque que não foi concluído (recusado pela administração
+ * ou falhou no gateway). O valor sai do reservado e volta para o disponível.
+ *
+ * Idempotente: só a primeira execução que reservar a marca `refund_applied`
+ * credita a carteira — reentregas do webhook e reconciliações nunca devolvem
+ * duas vezes. Se o crédito falhar, a marca é liberada e a falha sobe para o
+ * chamador tratar (visível e passível de nova tentativa).
  */
-export async function refundWithdrawal(service, withdrawal, { status = "rejected", note } = {}) {
+export async function refundWithdrawal(service, withdrawal, { status = "rejected", note, actor } = {}) {
   const amount = round2(withdrawal.amount);
   await service.Withdrawal.update(withdrawal.id, {
     status,
@@ -224,13 +229,37 @@ export async function refundWithdrawal(service, withdrawal, { status = "rejected
 
   if (withdrawal.kind !== "player") return status;
 
-  const page = await service.Wallet.filter({ user_id: withdrawal.user_id }, { limit: 1 });
-  const wallet = page.items?.[0];
-  if (wallet) {
-    await service.Wallet.update(wallet.id, {
-      balance: round2(Number(wallet.balance || 0) + amount),
-      locked_balance: round2(Math.max(0, Number(wallet.locked_balance || 0) - amount)),
+  // Reserva a devolução: apenas uma execução credita a carteira.
+  const claim = await service.Withdrawal.updateMany(
+    { id: withdrawal.id, refund_applied: { $ne: true } },
+    { $set: { refund_applied: true } },
+  );
+  if (!claim?.updated) return status;
+
+  try {
+    const page = await service.Wallet.filter({ user_id: withdrawal.user_id }, { limit: 1 });
+    const wallet = page.items?.[0];
+    if (wallet) {
+      await service.Wallet.update(wallet.id, {
+        balance: round2(Number(wallet.balance || 0) + amount),
+        locked_balance: round2(Math.max(0, Number(wallet.locked_balance || 0) - amount)),
+      });
+    }
+    await service.AdminAuditLog.create({
+      actor_id: actor?.id || "system",
+      actor_email: actor?.email || "payshark-webhook",
+      action: "wallet.withdrawal_refund",
+      target_type: "Withdrawal",
+      target_id: withdrawal.id,
+      details: `Saque de R$ ${amount.toFixed(2)} devolvido ao saldo do jogador.`,
     });
+  } catch (error) {
+    // Libera a marca para a próxima tentativa completar a devolução.
+    await service.Withdrawal.updateMany(
+      { id: withdrawal.id },
+      { $set: { refund_applied: false } },
+    ).catch(() => null);
+    throw error;
   }
   return status;
 }

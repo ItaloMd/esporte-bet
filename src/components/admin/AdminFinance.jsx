@@ -162,10 +162,17 @@ export default function AdminFinance() {
   const reconcileFailures = async () => {
     const data = await run("reconcile", { action: "reconcile_failures" });
     if (data && !data.error) {
+      if (data.failures?.length) {
+        setError(
+          `${data.failures.length} saque(s) não puderam ser estornados agora — tente novamente ou veja a auditoria.`,
+        );
+      }
       toast({
         title: "Reconciliação concluída",
-        description: data.corrections?.length
-          ? `${data.corrections.length} ajuste(s) estornado(s) no saldo retido — detalhes na auditoria.`
+        description: data.processed?.length
+          ? `${data.processed.length} estorno(s) aplicado(s) — ${data.processed
+              .map((item) => `${item.detail} ${formatCurrency(item.value)}`)
+              .join(" · ")}.`
           : "Nenhum ajuste pendente encontrado.",
       });
     }

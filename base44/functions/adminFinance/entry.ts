@@ -13,7 +13,7 @@ import { pickGateway, withdrawalGatewayFee } from '../../shared/gateways.ts';
 import {
   accrueWithdrawalRetention,
   getRetentionRecord,
-  reconcileFailedRetention,
+  reconcileFailedWithdrawals,
 } from '../../shared/retention.ts';
 
 const FIELDS = [
@@ -228,6 +228,7 @@ export default async function (req) {
         await refundWithdrawal(service, withdrawal, {
           status: 'rejected',
           note: String(body.note || 'Saque recusado pelo administrador. Valor devolvido ao saldo.'),
+          actor: { id: user.id, email: user.email },
         });
         return Response.json({ status: 'rejected' });
       }
@@ -395,6 +396,7 @@ export default async function (req) {
         status: sent.status,
         correlation_id: correlationId,
         gateway_id: sent.id,
+        retention_booked: true,
         note: 'Saque Italo — valor retido de 20% acumulado dos saques de caixa.',
         processed_at: new Date().toISOString(),
       });
@@ -423,12 +425,14 @@ export default async function (req) {
     }
 
     if (action === 'reconcile_failures') {
-      // Varredura idempotente: estorna na base todo efeito de saques falhos
-      // sobre o saldo retido, deixando a correção registrada na auditoria.
-      const corrections = await reconcileFailedRetention(service, { id: user.id, email: user.email });
+      // Varredura idempotente de recuperação: devolve saldos pendentes e
+      // estorna efeitos contabilizados de saques falhos, reportando o que foi
+      // processado e o que falhou (retry manual).
+      const result = await reconcileFailedWithdrawals(service, { id: user.id, email: user.email });
       const retention = await getRetentionRecord(service);
       return Response.json({
-        corrections,
+        processed: result.processed,
+        failures: result.failures,
         retention: {
           retained_balance: round2(retention.retained_balance || 0),
           total_retained: round2(retention.total_retained || 0),
