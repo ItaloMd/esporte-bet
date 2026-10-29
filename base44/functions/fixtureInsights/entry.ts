@@ -1,16 +1,9 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.54';
 import { secrets } from 'base44:runtime';
-import {
-  FOOTBALL_TIMEZONE,
-  apiFootballFetch,
-  fetchFixtureEvents,
-  fetchFixtureStatistics,
-  footballApiBase,
-} from '../../shared/apiFootball.ts';
+import { FOOTBALL_TIMEZONE, footballApiBase } from '../../shared/apiFootball.ts';
+import { isThrottleError, openFootballClient } from '../../shared/footballClient.ts';
 import {
   DEFAULT_DAILY_LIMIT,
-  canSpend,
-  chargeQuota,
   effectiveDailyLimit,
   loadQuota,
   quotaDayKey,
@@ -26,8 +19,15 @@ import {
  * os usuários: cada seção tem um registro de cache próprio cuja validade é
  * também a resposta armazenada (payload normalizado e compacto). Enquanto o
  * cache é válido, nenhum crédito é gasto e todos os visitantes recebem os
- * mesmos dados. O orçamento diário compartilhado é respeitado com reserva e a
- * coleta para em contingência (consumo acima de 95% do orçamento).
+ * mesmos dados — nenhum card ou usuário gera chamada própria.
+ *
+ * Camadas de proteção (todas compartilhadas com as demais rotinas):
+ * - deduplicação de execuções simultâneas: se outra requisição já está buscando
+ *   a mesma seção, esta espera o cache dela em vez de repetir a chamada;
+ * - limite por minuto e pausa pós-429 da camada central: quando a fonte está
+ *   limitada, serve o último dado válido em cache com o horário dele marcado
+ *   como desatualizado — nunca como atualização ao vivo;
+ * - orçamento diário com reserva e parada em contingência (95%+).
  */
 
 const RESERVE_CALLS = 10;
@@ -40,6 +40,8 @@ const MAX_H2H = 10;
 const MAX_RECENT = 5;
 /** Teto do payload armazenado por seção, protegendo o tamanho do registro. */
 const MAX_PAYLOAD_CHARS = 15000;
+/** Janela em que outra execução buscando a mesma seção é considerada ativa. */
+const INFLIGHT_TTL_SECONDS = 25;
 
 const FINISHED_SHORTS = ['FT', 'AET', 'PEN'];
 
@@ -121,6 +123,31 @@ async function writeSection(db, { key, endpoint, params, ttlSeconds, payload, no
   });
 }
 
+/* ------- deduplicação de buscas simultâneas da mesma seção ------- */
+
+const inflightKey = (key) => `inflight:${key}`;
+
+async function inflightFresh(db, key) {
+  const page = await db.ApiCache.filter({ provider: 'api_football', key: inflightKey(key) }, { limit: 1 });
+  const row = page.items?.[0];
+  return Boolean(row?.fetched_at && Date.parse(row.fetched_at) > Date.now() - INFLIGHT_TTL_SECONDS * 1000);
+}
+
+async function markInflight(db, key) {
+  await writeCache(db, {
+    key: inflightKey(key),
+    endpoint: 'inflight',
+    params: key,
+    ttlSeconds: INFLIGHT_TTL_SECONDS,
+    records: 0,
+    note: 'busca em andamento por outra execução',
+  });
+}
+
+async function clearInflight(db, key) {
+  await db.ApiCache.deleteMany({ provider: 'api_football', key: inflightKey(key) });
+}
+
 export default async function (req) {
   let base44;
   try {
@@ -150,7 +177,7 @@ export default async function (req) {
     const day = quotaDayKey(now, FOOTBALL_TIMEZONE);
     const quotaRecord = await loadQuota(db, day);
     const limit = effectiveDailyLimit(Number(settings.football_daily_limit) || DEFAULT_DAILY_LIMIT, quotaRecord?.provider_limit);
-    let used = Number(quotaRecord?.used || 0);
+    const used = Number(quotaRecord?.used || 0);
     const level = quotaLevel(used, limit);
     if (level >= 3) {
       return Response.json({
@@ -160,6 +187,18 @@ export default async function (req) {
         quota: { used, limit, percent: quotaPercent(used, limit), level },
       });
     }
+
+    // Camada central de requisições: pausa pós-429, limite por minuto e
+    // orçamento diário compartilhados com todas as demais rotinas.
+    const client = await openFootballClient(db, {
+      apiKey,
+      base,
+      settings,
+      day,
+      limit,
+      reserve: RESERVE_CALLS,
+      label: 'insights',
+    });
 
     const started = Date.parse(event.start_time || '') <= nowMs;
     const finished = event.status === 'finished';
@@ -171,11 +210,16 @@ export default async function (req) {
 
     const sections = { statistics: null, events: null, h2h: null, home_recent: null, away_recent: null };
     const fetched = {};
+    const staleSections = {};
     const failures = [];
     let calls = 0;
 
-    /** Coleta uma seção: serve o cache válido, consulta a fonte apenas quando
-     *  o cache venceu e ainda há orçamento acima da reserva. */
+    /**
+     * Coleta uma seção: cache válido é servido a todos; cache vencido gera
+     * uma única chamada (deduplicada entre execuções simultâneas); quando a
+     * fonte está pausada/limitada, serve o último dado válido com o horário
+     * dele — identificado como desatualizado, nunca como tempo real.
+     */
     const collect = async ({ key, endpoint, params, ttlSeconds, normalize, condition = true }) => {
       const hit = await readSection(db, key);
       if (hit.fresh && hit.payload) {
@@ -183,26 +227,18 @@ export default async function (req) {
         return hit.payload;
       }
       if (!condition) return null;
-      if (!canSpend(used, limit, RESERVE_CALLS, 1)) {
-        failures.push(`orçamento reservado: ${used}/${limit}`);
+      // Outra execução já está buscando esta mesma seção: ela grava o cache
+      // em segundos; aqui não se repete a chamada externa.
+      if (await inflightFresh(db, key)) {
+        if (hit.payload) {
+          staleSections[key] = hit.fetched_at;
+          return hit.payload;
+        }
         return null;
       }
+      await markInflight(db, key);
       try {
-        const result = await apiFootballFetch(apiKey, endpoint, params, { base });
-        const charged = await chargeQuota(db, {
-          record: quotaRecord,
-          day,
-          limit,
-          cost: 1,
-          purpose: 'insights',
-          endpoint,
-          reserve: RESERVE_CALLS,
-        });
-        if (!charged.allowed) {
-          failures.push(`orçamento esgotado: ${used}/${limit}`);
-          return null;
-        }
-        used = charged.used;
+        const result = await client.call(endpoint, params, { purpose: 'insights' });
         calls += 1;
         if (result.errors.length) {
           failures.push(`${endpoint}: ${result.errors.join(' | ')}`);
@@ -210,9 +246,22 @@ export default async function (req) {
         }
         const data = normalize(result.data);
         await writeSection(db, { key, endpoint, params: JSON.stringify(params), ttlSeconds, payload: data });
+        await clearInflight(db, key);
         fetched[key] = new Date().toISOString();
         return data;
       } catch (error) {
+        await clearInflight(db, key).catch(() => null);
+        if (isThrottleError(error)) {
+          // Fonte pausada (429) ou limite por minuto: o último dado válido em
+          // cache é servido com o horário da coleta — dado antigo nunca se
+          // apresenta como atualização em tempo real.
+          if (hit.payload) {
+            staleSections[key] = hit.fetched_at;
+            return hit.payload;
+          }
+          failures.push(`${endpoint}: ${String(error?.message || error)}`);
+          return null;
+        }
         failures.push(`${endpoint}: ${String(error?.message || error)}`);
         return null;
       }
@@ -269,8 +318,9 @@ export default async function (req) {
       started,
       sections,
       fetched,
+      stale: staleSections,
       calls,
-      quota: { used, limit, percent: quotaPercent(used, limit), level: quotaLevel(used, limit) },
+      quota: { used: client.used, limit, percent: quotaPercent(client.used, limit), level: quotaLevel(client.used, limit) },
       failures: failures.slice(0, 5),
       updated_at: new Date().toISOString(),
     });

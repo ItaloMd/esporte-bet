@@ -91,6 +91,11 @@ export default function FixtureInsights({ event }) {
           <p className="px-1 text-[11px] text-muted-foreground">
             Dados oficiais da API-Football · atualizados em {new Date(data.updated_at).toLocaleString("pt-BR")}
           </p>
+          {data?.stale && Object.keys(data.stale).length > 0 ? (
+            <p className="px-1 text-[11px] text-muted-foreground">
+              Fonte de dados temporariamente limitada · exibindo o último dado válido em cache
+            </p>
+          ) : null}
         </>
       )}
     </div>

@@ -2,20 +2,16 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.54';
 import { secrets } from 'base44:runtime';
 import {
   FOOTBALL_TIMEZONE,
-  apiFootballFetch,
   footballApiBase,
-  fetchFixtureEvents,
-  fetchFixtureStatistics,
   parseFixtureEvents,
   parseFixtureStatistics,
 } from '../../shared/apiFootball.ts';
-import { fetchOddsByDate } from '../../shared/apiFootballOdds.ts';
+import { isThrottleError, openFootballClient } from '../../shared/footballClient.ts';
 import { MARKET_CATALOG, upsertMarketCapability } from '../../shared/footballMarkets.ts';
 import {
   DEFAULT_DAILY_LIMIT,
   acquireLock,
   canSpend,
-  chargeQuota,
   effectiveDailyLimit,
   loadQuota,
   lockHeld,
@@ -162,24 +158,36 @@ export default async function (req) {
     let used = numberOr(quotaRecord?.used, 0);
     const policy = quotaPolicy(quotaLevel(used, limit));
     const failures = [];
-    const charge = async (cost, purpose, endpoint) => {
-      const charged = await chargeQuota(db, { record: quotaRecord, day, limit, cost, purpose, endpoint, reserve: policy.reserve });
-      quotaRecord = charged.record || quotaRecord;
-      used = charged.used;
-    };
+    let throttled = false;
+    // Camada central de requisições: pausa pós-429, limite por minuto e
+    // orçamento diário compartilhados com todas as outras rotinas.
+    const client = await openFootballClient(db, {
+      apiKey,
+      base,
+      settings,
+      day,
+      limit,
+      reserve: policy.reserve,
+      label: 'painel de mercados',
+    });
 
     let summary = '';
     if (action === 'validate') {
       // 1) Bets registrados na conta (o que o plano atual libera).
       const registeredSet = new Set();
       if (canSpend(used, limit, policy.reserve, 1)) {
-        const betsResult = await apiFootballFetch(apiKey, '/odds/bets', {}, { base, timeoutMs: 15000 });
-        await charge(1, 'validate', '/odds/bets');
-        const registeredList = Array.isArray(betsResult.data?.response) ? betsResult.data.response : [];
-        registeredList.forEach((row) => {
-          registeredSet.add(String(row?.name || '').trim().toLowerCase());
-        });
-        if (betsResult.errors.length) failures.push(betsResult.errors.join(' | '));
+        try {
+          const betsResult = await client.call('/odds/bets', {}, { timeoutMs: 15000, purpose: 'validate' });
+          used = client.used;
+          const registeredList = Array.isArray(betsResult.data?.response) ? betsResult.data.response : [];
+          registeredList.forEach((row) => {
+            registeredSet.add(String(row?.name || '').trim().toLowerCase());
+          });
+          if (betsResult.errors.length) failures.push(betsResult.errors.join(' | '));
+        } catch (error) {
+          failures.push(String(error?.message || error));
+          if (isThrottleError(error)) throttled = true;
+        }
       }
 
       // 2) Observação real: cotações de hoje e amanhã revelam o que a fonte entrega.
@@ -190,19 +198,24 @@ export default async function (req) {
         localDateString(new Date(nowMs + 86400000), FOOTBALL_TIMEZONE),
       ];
       for (const date of dates) {
-        if (!canSpend(used, limit, policy.reserve, 1)) break;
-        const oddsResult = await fetchOddsByDate(apiKey, base, date, 1);
-        await charge(1, 'validate', '/odds');
-        const list = Array.isArray(oddsResult.data?.response) ? oddsResult.data.response : [];
-        observedFixtures += list.length;
-        list.forEach((entry) => {
-          (entry.bookmakers || []).forEach((book) => {
-            (book.bets || []).forEach((bet) => {
-              observedSet.add(String(bet?.name || '').trim().toLowerCase());
+        if (throttled || !canSpend(used, limit, policy.reserve, 1)) break;
+        try {
+          const oddsResult = await client.call('/odds', { date, page: 1 }, { purpose: 'validate' });
+          used = client.used;
+          const list = Array.isArray(oddsResult.data?.response) ? oddsResult.data.response : [];
+          observedFixtures += list.length;
+          list.forEach((entry) => {
+            (entry.bookmakers || []).forEach((book) => {
+              (book.bets || []).forEach((bet) => {
+                observedSet.add(String(bet?.name || '').trim().toLowerCase());
+              });
             });
           });
-        });
-        if (oddsResult.errors.length) failures.push(oddsResult.errors.join(' | '));
+          if (oddsResult.errors.length) failures.push(oddsResult.errors.join(' | '));
+        } catch (error) {
+          failures.push(String(error?.message || error));
+          if (isThrottleError(error)) throttled = true;
+        }
       }
 
       // 3) Status por mercado: observado > registrado > exige upgrade.
@@ -242,6 +255,7 @@ export default async function (req) {
       const leagueNames = (leaguePage.items || []).filter(Boolean).slice(0, MAX_DISCOVER_LEAGUES);
       const discovered = [];
       for (const leagueName of leagueNames) {
+        if (throttled) break;
         const page = await db.Event.filter(
           { source: 'provider', status: 'finished', competition_name: leagueName },
           { sort: '-start_time', limit: 1 },
@@ -250,25 +264,27 @@ export default async function (req) {
         if (!event?.fixture_id) continue;
         let statistics = null;
         let events = null;
-        if (canSpend(used, limit, policy.reserve, 1)) {
+        if (!throttled && canSpend(used, limit, policy.reserve, 1)) {
           try {
-            const statsResult = await fetchFixtureStatistics(apiKey, base, event.fixture_id);
-            await charge(1, 'discover', '/fixtures/statistics');
+            const statsResult = await client.call('/fixtures/statistics', { fixture: event.fixture_id }, { purpose: 'discover' });
+            used = client.used;
             statistics = parseFixtureStatistics(statsResult.data);
           } catch (error) {
             failures.push(`${leagueName}: ${String(error?.message || error)}`);
+            if (isThrottleError(error)) throttled = true;
           }
         }
-        if (canSpend(used, limit, policy.reserve, 1)) {
+        if (!throttled && canSpend(used, limit, policy.reserve, 1)) {
           try {
-            const eventsResult = await fetchFixtureEvents(apiKey, base, event.fixture_id);
-            await charge(1, 'discover', '/fixtures/events');
+            const eventsResult = await client.call('/fixtures/events', { fixture: event.fixture_id }, { purpose: 'discover' });
+            used = client.used;
             events = parseFixtureEvents(eventsResult.data, {
               homeName: event.home_team_name,
               awayName: event.away_team_name,
             });
           } catch (error) {
             failures.push(`${leagueName}: ${String(error?.message || error)}`);
+            if (isThrottleError(error)) throttled = true;
           }
         }
         if (!statistics && !events) continue;

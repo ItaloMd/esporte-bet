@@ -4,21 +4,17 @@ import {
   FOOTBALL_TIMEZONE,
   footballApiBase,
   fetchAccountStatus,
-  fetchFixtureEvents,
-  fetchFixtureStatistics,
-  fetchFixturesByDate,
-  fetchFixturesByIds,
   mapFixture,
   parseAccountStatus,
   parseFixtureEvents,
   parseFixtureStatistics,
 } from '../../shared/apiFootball.ts';
+import { isThrottleError, openFootballClient } from '../../shared/footballClient.ts';
 import { upsertMarketCapability } from '../../shared/footballMarkets.ts';
 import {
   DEFAULT_DAILY_LIMIT,
   acquireLock,
   canSpend,
-  chargeQuota,
   effectiveDailyLimit,
   loadQuota,
   lockHeld,
@@ -369,6 +365,17 @@ export default async function (req) {
     const level = quotaLevel(used, limit);
     const policy = quotaPolicy(level);
     const planName = account?.plan || settings.football_plan || '';
+    // Camada central de requisições: pausa pós-429, limite por minuto e
+    // orçamento diário compartilhados com todas as outras rotinas.
+    const client = await openFootballClient(db, {
+      apiKey,
+      base,
+      settings,
+      day,
+      limit,
+      reserve: policy.reserve,
+      label: `syncFootball ${mode}`,
+    });
 
     /* ---------------- relevância: recálculo sem consumo de API ---------------- */
     // Repontua todas as partidas da fonte a partir dos dados já armazenados:
@@ -463,11 +470,8 @@ export default async function (req) {
         // O plano tem limite por minuto: as consultas de calendário são espaçadas.
         if (syncedDays.length) await wait(2500);
         try {
-          const result = await fetchFixturesByDate(apiKey, base, date);
-          const charged = await chargeQuota(db, { record: quotaRecord, day, limit, cost: 1, purpose: 'calendar', reserve: policy.reserve });
-          quotaRecord = charged.record || quotaRecord;
-          used = charged.used;
-          applyQuota(result.quota);
+          const result = await client.call('/fixtures', { date, timezone: FOOTBALL_TIMEZONE }, { purpose: 'calendar' });
+          used = client.used;
           calls.push({ endpoint: `/fixtures?date=${date}`, records: result.results, errors: result.errors });
           if (result.errors.length) {
             failures.push(`importação ${date}: ${result.errors.join(' | ')}`);
@@ -502,6 +506,9 @@ export default async function (req) {
           });
         } catch (error) {
           failures.push(`importação ${date}: ${String(error?.message || error)}`);
+          // Pausa pós-429 ou limite por minuto: as demais datas ficam para a
+          // próxima execução — nenhum ciclo de retentativa.
+          if (isThrottleError(error)) rateLimited = true;
         }
       }
 
@@ -666,11 +673,8 @@ export default async function (req) {
       if (rateLimited || !canSpend(used, limit, policy.reserve, 1)) break;
       try {
         const ids = batch.map((event) => event.fixture_id);
-        const result = await fetchFixturesByIds(apiKey, base, ids);
-        const charged = await chargeQuota(db, { record: quotaRecord, day, limit, cost: 1, purpose: 'audit', reserve: policy.reserve });
-        quotaRecord = charged.record || quotaRecord;
-        used = charged.used;
-        applyQuota(result.quota);
+        const result = await client.call('/fixtures', { ids: ids.join('-') }, { purpose: 'audit' });
+        used = client.used;
         calls.push({ endpoint: `/fixtures?ids=${ids.length}`, records: result.results, errors: result.errors });
         if (result.errors.length) {
           failures.push(`auditoria: ${result.errors.join(' | ')}`);
@@ -749,23 +753,25 @@ export default async function (req) {
     const capabilitySamples = [];
     let statisticsCalls = 0;
     let eventsCalls = 0;
+    let throttled = false;
     for (const { event, fixture } of finishedAudits) {
+      // Fonte pausada/limitada no meio da auditoria: o resto fica para depois.
+      if (throttled) break;
       const hasBets = openEventIds.has(event.id);
       const marketKeys = openMarketKeys.get(event.id) || new Set();
       let statistics = null;
       let statisticsSource = '';
       if (hasBets && statisticsCalls < MAX_STATS_PER_RUN && canSpend(used, limit, policy.reserve, 1)) {
         try {
-          const statsResult = await fetchFixtureStatistics(apiKey, base, fixture.fixture_id);
-          const charged = await chargeQuota(db, { record: quotaRecord, day, limit, cost: 1, purpose: 'statistics', reserve: policy.reserve });
-          quotaRecord = charged.record || quotaRecord;
-          used = charged.used;
+          const statsResult = await client.call('/fixtures/statistics', { fixture: fixture.fixture_id }, { purpose: 'statistics' });
+          used = client.used;
           statisticsCalls += 1;
           statistics = parseFixtureStatistics(statsResult.data);
           statisticsSource = 'api_football';
           calls.push({ endpoint: `/fixtures/statistics?fixture=${fixture.fixture_id}`, records: Number(statsResult.results) || 0, errors: statsResult.errors });
         } catch (error) {
           failures.push(`estatísticas ${fixture.fixture_id}: ${String(error?.message || error)}`);
+          if (isThrottleError(error)) throttled = true;
         }
       }
 
@@ -774,10 +780,8 @@ export default async function (req) {
       let eventsSource = '';
       if (hasBets && marketKeys.has('first_goal') && eventsCalls < MAX_EVENTS_PER_RUN && canSpend(used, limit, policy.reserve, 1)) {
         try {
-          const eventsResult = await fetchFixtureEvents(apiKey, base, fixture.fixture_id);
-          const charged = await chargeQuota(db, { record: quotaRecord, day, limit, cost: 1, purpose: 'events', reserve: policy.reserve });
-          quotaRecord = charged.record || quotaRecord;
-          used = charged.used;
+          const eventsResult = await client.call('/fixtures/events', { fixture: fixture.fixture_id }, { purpose: 'events' });
+          used = client.used;
           eventsCalls += 1;
           events = parseFixtureEvents(eventsResult.data, {
             homeName: event.home_team_name,
@@ -787,6 +791,7 @@ export default async function (req) {
           calls.push({ endpoint: `/fixtures/events?fixture=${fixture.fixture_id}`, records: Number(eventsResult.results) || 0, errors: eventsResult.errors });
         } catch (error) {
           failures.push(`eventos ${fixture.fixture_id}: ${String(error?.message || error)}`);
+          if (isThrottleError(error)) throttled = true;
         }
       }
 

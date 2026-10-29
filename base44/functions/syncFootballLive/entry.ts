@@ -2,16 +2,14 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.54';
 import { secrets } from 'base44:runtime';
 import {
   FOOTBALL_TIMEZONE,
-  fetchFixturesByIds,
-  fetchFixturesLiveAll,
   footballApiBase,
   mapFixture,
 } from '../../shared/apiFootball.ts';
+import { isThrottleError, openFootballClient } from '../../shared/footballClient.ts';
 import {
   DEFAULT_DAILY_LIMIT,
   acquireLock,
   canSpend,
-  chargeQuota,
   effectiveDailyLimit,
   loadQuota,
   lockHeld,
@@ -106,6 +104,17 @@ export default async function (req) {
     }
     quotaRecord = await acquireLock(db, quotaRecord, day, 'syncFootballLive', LOCK_MS);
     let used = usedBefore;
+    // Camada central de requisições: pausa pós-429, limite por minuto e
+    // orçamento diário compartilhados com todas as outras rotinas.
+    const client = await openFootballClient(db, {
+      apiKey,
+      base,
+      settings,
+      day,
+      limit,
+      reserve: policy.reserve,
+      label: 'detector ao vivo',
+    });
 
     // Contingência: o detector só roda se houver apostas pendentes de resultado.
     if (policy.criticalOnly) {
@@ -146,32 +155,40 @@ export default async function (req) {
     });
 
     const failures = [];
-    const quotaPatch = {};
-    const applyQuota = (quota) => {
-      if (!quota) return;
-      if (quota.limit !== null && quota.limit !== undefined) quotaPatch.provider_limit = quota.limit;
-      if (quota.remaining !== null && quota.remaining !== undefined) quotaPatch.provider_remaining = quota.remaining;
-      if (quota.used !== null && quota.used !== undefined) quotaPatch.provider_used = quota.used;
-    };
 
     const callStartedAt = Date.now();
     let responseRows = 0;
     let fixtures = [];
 
     try {
-      const result = await fetchFixturesLiveAll(apiKey, base);
-      const charged = await chargeQuota(db, {
-        record: quotaRecord,
-        day,
-        limit,
-        cost: 1,
-        purpose: 'live',
-        endpoint: '/fixtures?live=all',
-        reserve: policy.reserve,
-      });
-      quotaRecord = charged.record || quotaRecord;
-      used = charged.used;
-      applyQuota(result.quota);
+      // Falha da fonte não é ausência de jogos: em pausa pós-429 ou limite por
+      // minuto a execução para SEM tocar na aba ao vivo — os dados confirmados
+      // permanecem e a próxima execução revalida quando a fonte voltar.
+      let result;
+      try {
+        result = await client.call('/fixtures', { live: 'all' }, { timeoutMs: 25000, purpose: 'live' });
+      } catch (error) {
+        if (isThrottleError(error)) {
+          const reason = String(error.message);
+          await releaseLock(db, quotaRecord);
+          await db.SyncJob.update(job.id, {
+            status: 'partial',
+            finished_at: new Date().toISOString(),
+            error_message: reason.slice(0, 400),
+          }).catch(() => null);
+          await db.ProviderSettings.update(settings.id, {
+            football_last_status: 'partial',
+            football_last_error: reason.slice(0, 400),
+          }).catch(() => null);
+          return Response.json({
+            skipped: true,
+            reason,
+            quota: { used, limit, percent: quotaPercent(used, limit), level: quotaLevel(used, limit) },
+          });
+        }
+        throw error;
+      }
+      used = client.used;
       const durationMs = Date.now() - callStartedAt;
 
       if (result.errors.length) {
@@ -436,19 +453,8 @@ export default async function (req) {
           if (!canSpend(used, limit, policy.reserve, 1)) break;
           const confirmStartedAt = Date.now();
           try {
-            const confirmResult = await fetchFixturesByIds(apiKey, base, batch);
-            const charged = await chargeQuota(db, {
-              record: quotaRecord,
-              day,
-              limit,
-              cost: 1,
-              purpose: 'live_confirm',
-              endpoint: `/fixtures?ids=${batch.length}`,
-              reserve: policy.reserve,
-            });
-            quotaRecord = charged.record || quotaRecord;
-            used = charged.used;
-            applyQuota(confirmResult.quota);
+            const confirmResult = await client.call('/fixtures', { ids: batch.join('-') }, { purpose: 'live_confirm' });
+            used = client.used;
             if (confirmResult.errors.length) {
               failures.push(`confirmação: ${confirmResult.errors.join(' | ')}`);
               break;
@@ -519,7 +525,6 @@ export default async function (req) {
         used,
         limit,
         level: quotaLevel(used, limit),
-        ...quotaPatch,
         last_status_at: nowIso,
         last_status_code: 200,
         last_error: failures.join(' | ').slice(0, 400),

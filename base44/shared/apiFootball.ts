@@ -171,10 +171,58 @@ function readErrors(payload) {
   return [String(raw)];
 }
 
+/* ----------------------- erros e política de tentativas ----------------------- */
+
+/** Erro de limite por minuto/dia da API (HTTP 429 ou corpo equivalente). */
+export class FootballRateLimitError extends Error {
+  constructor(message, options = {}) {
+    super(message);
+    this.name = "FootballRateLimitError";
+    this.status = options.status || 429;
+    // Retry-After do provedor, em milissegundos, quando presente.
+    this.retryAfterMs = Number.isFinite(options.retryAfterMs) ? options.retryAfterMs : null;
+  }
+}
+
+/** Erro de autenticação/configuração: nunca é retentado, exige correção. */
+export class FootballAuthError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "FootballAuthError";
+  }
+}
+
+/** Mensagem do provedor que indica limite de requisições excedido. */
+export function isRateLimitErrorText(text) {
+  return /too many requests|limit of requests|rate limit/i.test(String(text || ""));
+}
+
+/** Retry-After em ms, aceitando segundos ou data HTTP. */
+function retryAfterMsFrom(response) {
+  const raw = response.headers.get("retry-after");
+  if (!raw) return null;
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+  const dateMs = Date.parse(raw);
+  return Number.isFinite(dateMs) ? Math.max(0, dateMs - Date.now()) : null;
+}
+
+/** Backoff exponencial com variação aleatória: evita que todas as tarefas
+ * retentem no mesmo instante. */
+function backoffDelayMs(attempt) {
+  const baseMs = 750 * 2 ** Math.min(attempt, 4);
+  return Math.round(baseMs * (0.7 + Math.random() * 0.6));
+}
+
 /**
- * Executa uma chamada autenticada, com backoff exponencial e número máximo de
- * tentativas. Devolve também a quota informada pelo provedor nos cabeçalhos.
- * Erros devolvidos no corpo da resposta são tratados como falha da chamada.
+ * Executa uma chamada autenticada. Política de tentativas:
+ * - 429/limite: NÃO retenta (esperar 3 segundos não limpa um limite por
+ *   minuto) — a camada central registra pausa progressiva para todas as
+ *   rotinas, respeitando Retry-After quando fornecido;
+ * - 401: erro de configuração, nunca retentado;
+ * - 5xx/timeout/rede: até 2 tentativas com backoff exponencial e jitter.
+ * Devolve também a quota informada pelo provedor nos cabeçalhos
+ * (x-ratelimit-requests-limit/remaining/used).
  */
 export async function apiFootballFetch(apiKey, path, params = {}, options = {}) {
   const { timeoutMs = 15000, retries = 2, base } = options;
@@ -186,7 +234,7 @@ export async function apiFootballFetch(apiKey, path, params = {}, options = {}) 
 
   let attempt = 0;
   let lastError = null;
-  while (attempt <= retries) {
+  while (true) {
     try {
       const response = await fetch(url.toString(), {
         headers: { "x-apisports-key": apiKey },
@@ -194,11 +242,22 @@ export async function apiFootballFetch(apiKey, path, params = {}, options = {}) 
       });
       const quota = parseQuota(response.headers);
 
-      if (response.status === 429 || response.status >= 500) {
+      // Limite por minuto/dia excedido: sem retentativa imediata — a pausa
+      // progressiva fica registrada na camada central.
+      if (response.status === 429) {
+        throw new FootballRateLimitError("API-Football: limite de requisições excedido (HTTP 429)", {
+          retryAfterMs: retryAfterMsFrom(response),
+        });
+      }
+      if (response.status === 401) {
+        const body = await response.text();
+        throw new FootballAuthError(`API-Football 401: ${body.slice(0, 180)}`);
+      }
+      if (response.status >= 500) {
         lastError = new Error(`API-Football indisponível (HTTP ${response.status})`);
         attempt += 1;
         if (attempt > retries) break;
-        await new Promise((resolve) => setTimeout(resolve, 1500 * attempt));
+        await new Promise((resolve) => setTimeout(resolve, backoffDelayMs(attempt)));
         continue;
       }
       if (!response.ok) {
@@ -208,29 +267,22 @@ export async function apiFootballFetch(apiKey, path, params = {}, options = {}) 
 
       const payload = await response.json();
       const errors = readErrors(payload);
-      if (errors.length) {
-        const message = errors.join(" | ");
-        const transient = /limit|rate|too many/i.test(message);
-        if (transient && attempt < retries) {
-          lastError = new Error(message);
-          attempt += 1;
-          await new Promise((resolve) => setTimeout(resolve, 1500 * attempt));
-          continue;
-        }
-        return { data: payload, quota, status: response.status, errors, results: Number(payload?.results) || 0 };
+      // Limite reportado no corpo (HTTP 200): mesmo tratamento do 429.
+      if (errors.some(isRateLimitErrorText)) {
+        throw new FootballRateLimitError(errors.filter(isRateLimitErrorText).join(" | "));
       }
-
-      return { data: payload, quota, status: response.status, errors: [], results: Number(payload?.results) || 0 };
+      return { data: payload, quota, status: response.status, errors, results: Number(payload?.results) || 0 };
     } catch (error) {
-      const message = String(error?.message || "");
-      if (message.startsWith("API-Football ")) throw error;
+      if (error instanceof FootballRateLimitError) throw error;
+      if (error instanceof FootballAuthError) throw error;
+      if (String(error?.message || "").startsWith("API-Football ")) throw error;
       lastError =
         error?.name === "TimeoutError" || error?.name === "AbortError"
           ? new Error("Tempo esgotado ao consultar a API-Football")
           : error;
       attempt += 1;
       if (attempt > retries) break;
-      await new Promise((resolve) => setTimeout(resolve, 1500 * attempt));
+      await new Promise((resolve) => setTimeout(resolve, backoffDelayMs(attempt)));
     }
   }
   throw lastError || new Error("Falha ao consultar a API-Football");

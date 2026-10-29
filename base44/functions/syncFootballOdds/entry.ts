@@ -1,13 +1,13 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.54';
 import { secrets } from 'base44:runtime';
 import { FOOTBALL_TIMEZONE, footballApiBase } from '../../shared/apiFootball.ts';
-import { MAX_ODDS_PAGES, fetchOddsByDate, mapOddsEntry, pageLimitReached, pickBookmaker } from '../../shared/apiFootballOdds.ts';
+import { MAX_ODDS_PAGES, mapOddsEntry, pageLimitReached, pickBookmaker } from '../../shared/apiFootballOdds.ts';
+import { isThrottleError, openFootballClient } from '../../shared/footballClient.ts';
 import { writeQuotes } from '../../shared/oddsWriter.ts';
 import {
   DEFAULT_DAILY_LIMIT,
   acquireLock,
   canSpend,
-  chargeQuota,
   effectiveDailyLimit,
   loadQuota,
   lockHeld,
@@ -98,6 +98,18 @@ export default async function (req) {
       });
     }
 
+    // Camada central de requisições: pausa pós-429, limite por minuto e
+    // orçamento diário compartilhados com todas as outras rotinas.
+    const client = await openFootballClient(db, {
+      apiKey,
+      base,
+      settings,
+      day,
+      limit,
+      reserve: RESERVE_CALLS,
+      label: 'cotações api-football',
+    });
+
     const days = mode === 'today' ? 1 : MAX_ODDS_DAYS;
     // Cotações cobrem hoje e amanhã: os jogos do dia precisam de odds atuais.
     const window = mode === 'today'
@@ -127,10 +139,11 @@ export default async function (req) {
     const failures = [];
     const calls = [];
     const entries = [];
-    const quotaPatch = {};
     let pagesLimited = false;
+    let rateLimited = false;
 
     for (const date of due) {
+      if (rateLimited) break;
       const dateEntries = [];
       const pages = [];
       let exhausted = false;
@@ -142,23 +155,8 @@ export default async function (req) {
           break;
         }
         try {
-          const result = await fetchOddsByDate(apiKey, base, date, page);
-          const charged = await chargeQuota(db, {
-            record: quotaRecord,
-            day,
-            limit,
-            cost: 1,
-            purpose: 'odds',
-            endpoint: '/odds',
-            reserve: policy.reserve,
-          });
-          quotaRecord = charged.record || quotaRecord;
-          used = charged.used;
-          if (result.quota?.limit !== null && result.quota?.limit !== undefined) quotaPatch.provider_limit = result.quota.limit;
-          if (result.quota?.remaining !== null && result.quota?.remaining !== undefined) {
-            quotaPatch.provider_remaining = result.quota.remaining;
-          }
-          if (result.quota?.used !== null && result.quota?.used !== undefined) quotaPatch.provider_used = result.quota.used;
+          const result = await client.call('/odds', { date, page }, { timeoutMs: 25000, purpose: 'odds' });
+          used = client.used;
 
           const list = Array.isArray(result.data?.response) ? result.data.response : [];
           dateEntries.push(...list);
@@ -174,6 +172,9 @@ export default async function (req) {
           if (Number.isFinite(totalPages) && totalPages > 0 && page >= totalPages) break;
         } catch (error) {
           failures.push(`odds ${date} p${page}: ${String(error?.message || error)}`);
+          // Pausa pós-429 ou limite por minuto: as demais datas e páginas
+          // ficam para a próxima execução — nenhum ciclo de retentativa.
+          if (isThrottleError(error)) rateLimited = true;
           break;
         }
       }
@@ -251,7 +252,6 @@ export default async function (req) {
       used,
       limit,
       level: quotaLevel(used, limit),
-      ...quotaPatch,
       last_status_at: nowIso,
       last_status_code: 200,
       last_error: failures.join(' | ').slice(0, 400),

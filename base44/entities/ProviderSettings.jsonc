@@ -195,6 +195,11 @@
       "type": "number",
       "default": 100
     },
+    "football_minute_limit": {
+      "type": "number",
+      "default": 10,
+      "description": "Teto interno de requisi\u00e7\u00f5es \u00e0 API-Football por minuto, compartilhado por todas as rotinas."
+    },
     "football_window_days": {
       "type": "number",
       "default": 5
