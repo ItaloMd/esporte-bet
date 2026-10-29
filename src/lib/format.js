@@ -5,19 +5,33 @@ const timeFmt = new Intl.DateTimeFormat("pt-BR", { timeZone: TZ, hour: "2-digit"
 const dateTimeFmt = new Intl.DateTimeFormat("pt-BR", { timeZone: TZ, day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
 const keyFmt = new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" });
 
+/**
+ * Datas gravadas pela plataforma chegam em UTC sem marcador de fuso
+ * ("2026-10-29T04:05:12.463000"): sem o "Z", o navegador interpretaria como
+ * hora local e deslocaria a exibição em 3 horas. Toda conversão de data da
+ * interface passa por aqui, preservando valores que já trazem fuso.
+ */
+function toDate(value) {
+  if (value instanceof Date) return value;
+  const raw = String(value);
+  const hasOffset = /(Z|[+-]\d{2}:?\d{2})\s*$/.test(raw);
+  const hasTime = /\d{2}:\d{2}:\d{2}/.test(raw);
+  return new Date(!hasOffset && hasTime ? `${raw}Z` : raw);
+}
+
 export function formatTime(value) {
   if (!value) return "--:--";
-  return timeFmt.format(new Date(value));
+  return timeFmt.format(toDate(value));
 }
 
 export function formatDateTime(value) {
   if (!value) return "—";
-  return dateTimeFmt.format(new Date(value));
+  return dateTimeFmt.format(toDate(value));
 }
 
 export function brasiliaDayKey(value) {
   if (!value) return "";
-  return keyFmt.format(new Date(value));
+  return keyFmt.format(toDate(value));
 }
 
 export function formatDay(value) {
@@ -25,7 +39,7 @@ export function formatDay(value) {
   const key = brasiliaDayKey(value);
   if (key === brasiliaDayKey(new Date())) return "Hoje";
   if (key === brasiliaDayKey(new Date(Date.now() + 86400000))) return "Amanhã";
-  const label = dayFmt.format(new Date(value)).replace(".", "");
+  const label = dayFmt.format(toDate(value)).replace(".", "");
   return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
@@ -33,12 +47,12 @@ const shortFmt = new Intl.DateTimeFormat("pt-BR", { timeZone: TZ, day: "2-digit"
 
 export function formatDateShort(value) {
   if (!value) return "";
-  return shortFmt.format(new Date(value));
+  return shortFmt.format(toDate(value));
 }
 
 export function timeAgo(value) {
   if (!value) return "sem atualização";
-  const diff = Date.now() - new Date(value).getTime();
+  const diff = Date.now() - toDate(value).getTime();
   if (diff < 0) return "agora";
   const mins = Math.floor(diff / 60000);
   if (mins < 1) return "agora";
