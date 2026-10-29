@@ -322,6 +322,9 @@ export default async function (req) {
     return Response.json({
       ok: true,
       available: hasAny,
+      // Sem dados não se afirma "não existe": falha da fonte e ausência de
+      // cobertura são situações diferentes para o visitante.
+      reason: hasAny ? '' : failures.length ? 'Fonte de dados temporariamente indisponível · nenhuma informação confirmada para esta partida ainda' : '',
       event_status: event.status,
       started,
       history_available: Boolean(homeId && awayId) && !includeHistory && !sections.h2h,
