@@ -10,6 +10,11 @@ import {
 } from '../../shared/payments.ts';
 import { createPixTransfer, getBalance, pixKeyType, toCents, transferStatus } from '../../shared/payshark.ts';
 import { pickGateway, withdrawalGatewayFee } from '../../shared/gateways.ts';
+import {
+  accrueWithdrawalRetention,
+  getRetentionRecord,
+  reconcileFailedRetention,
+} from '../../shared/retention.ts';
 
 const FIELDS = [
   'min_deposit',
@@ -77,31 +82,6 @@ async function sendWithdrawal(amount, pixKey, keyType, idempotencyKey) {
     fee,
     net_amount: round2(amount - fee),
   };
-}
-
-/** Registro único da retenção de 20% do caixa; criado na primeira consulta. */
-async function getRetentionRecord(service) {
-  const page = await service.AdminRetention.filter({}, { limit: 1 });
-  const existing = page.items?.[0];
-  if (existing) return existing;
-  return service.AdminRetention.create({
-    retained_balance: 0,
-    total_retained: 0,
-    total_paid_out: 0,
-    payout_pix_key: '10734215541',
-    payout_pix_key_type: 'cpf',
-  });
-}
-
-/** Acumula a retenção de 20% no registro único do dono. */
-async function accumulateRetention(service, retained) {
-  if (retained <= 0) return getRetentionRecord(service);
-  const record = await getRetentionRecord(service);
-  return service.AdminRetention.update(record.id, {
-    retained_balance: round2(Number(record.retained_balance || 0) + retained),
-    total_retained: round2(Number(record.total_retained || 0) + retained),
-    last_retention_at: new Date().toISOString(),
-  });
 }
 
 export default async function (req) {
@@ -288,7 +268,15 @@ export default async function (req) {
         failure_reason: null,
       });
 
-      if (retained > 0) await accumulateRetention(service, retained);
+      // A retenção de 20% só entra no saldo retido com o saque confirmado como
+      // concluído; um envio em processamento é contabilizado pelo webhook na conclusão.
+      if (retained > 0 && finalStatus === 'completed') {
+        await accrueWithdrawalRetention(
+          service,
+          { ...withdrawal, retained_amount: retained, retention_applies: retentionApplies },
+          { id: user.id, email: user.email },
+        );
+      }
 
       if (withdrawal.kind === 'player') {
         const walletPage = await service.Wallet.filter({ user_id: withdrawal.user_id }, { limit: 1 });
@@ -351,11 +339,15 @@ export default async function (req) {
         status: sent.status,
         correlation_id: correlationId,
         gateway_id: sent.id,
-        note: `Retenção de ${WITHDRAWAL_RETENTION_PERCENT}% (R$ ${retained.toFixed(2)}) acumulada no saldo retido. Recebedor recebe R$ ${sent.net_amount.toFixed(2)} (taxa de 2% + R$ 1,00 debitada do valor enviado).`,
+        note: `Retenção de ${WITHDRAWAL_RETENTION_PERCENT}% (R$ ${retained.toFixed(2)}) do dono, contabilizada no saldo retido na confirmação do saque. Recebedor recebe R$ ${sent.net_amount.toFixed(2)} (taxa de 2% + R$ 1,00 debitada do valor enviado).`,
         processed_at: new Date().toISOString(),
       });
 
-      const retentionUpdated = await accumulateRetention(service, retained);
+      // Retenção contabilizada somente na confirmação; envio em processamento
+      // é contabilizado pelo webhook quando concluir.
+      const retentionUpdated = sent.status === 'completed'
+        ? await accrueWithdrawalRetention(service, created, { id: user.id, email: user.email })
+        : await getRetentionRecord(service);
 
       return Response.json({
         status: created.status,
@@ -427,6 +419,21 @@ export default async function (req) {
         sent_amount: sent.sent_amount,
         fee: sent.fee,
         net_amount: sent.net_amount,
+      });
+    }
+
+    if (action === 'reconcile_failures') {
+      // Varredura idempotente: estorna na base todo efeito de saques falhos
+      // sobre o saldo retido, deixando a correção registrada na auditoria.
+      const corrections = await reconcileFailedRetention(service, { id: user.id, email: user.email });
+      const retention = await getRetentionRecord(service);
+      return Response.json({
+        corrections,
+        retention: {
+          retained_balance: round2(retention.retained_balance || 0),
+          total_retained: round2(retention.total_retained || 0),
+          total_paid_out: round2(retention.total_paid_out || 0),
+        },
       });
     }
 

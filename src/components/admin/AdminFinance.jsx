@@ -159,6 +159,18 @@ export default function AdminFinance() {
     }
   };
 
+  const reconcileFailures = async () => {
+    const data = await run("reconcile", { action: "reconcile_failures" });
+    if (data && !data.error) {
+      toast({
+        title: "Reconciliação concluída",
+        description: data.corrections?.length
+          ? `${data.corrections.length} ajuste(s) estornado(s) no saldo retido — detalhes na auditoria.`
+          : "Nenhum ajuste pendente encontrado.",
+      });
+    }
+  };
+
   const processWithdrawal = (id, approve) => run(`wd-${id}`, { action: "process_withdrawal", id, approve });
 
   const simulateWithdrawal = async () => {
@@ -258,10 +270,16 @@ export default function AdminFinance() {
             {error}
           </p>
         )}
-        <Button onClick={withdrawRetention} disabled={busy === "retention" || !retention.retained_balance}>
-          {busy === "retention" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
-          Saque Italo — sacar {formatCurrency(retention.retained_balance)}
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button onClick={withdrawRetention} disabled={busy === "retention" || !retention.retained_balance}>
+            {busy === "retention" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
+            Saque Italo — sacar {formatCurrency(retention.retained_balance)}
+          </Button>
+          <Button variant="outline" onClick={reconcileFailures} disabled={busy === "reconcile"}>
+            {busy === "reconcile" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+            Reconciliar falhas
+          </Button>
+        </div>
       </section>
 
       {paysharkMetric && (

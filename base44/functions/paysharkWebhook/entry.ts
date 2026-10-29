@@ -3,6 +3,7 @@ import { secrets } from 'base44:runtime';
 import { creditPaidDeposit, isValidCpf, linkCpfToProfile, refundWithdrawal } from '../../shared/payments.ts';
 import { parseTracking, sendDepositOrder } from '../../shared/utmify.ts';
 import { fromCents, paymentStatus, transferStatus, verifyWebhookSignature } from '../../shared/payshark.ts';
+import { accrueWithdrawalRetention, reverseFailedRetention } from '../../shared/retention.ts';
 
 /**
  * Webhook do Payshark: confirmação de pagamentos (depósitos) e andamento das
@@ -64,6 +65,8 @@ export default async function (req) {
             processed_at: new Date().toISOString(),
             failure_reason: null,
           });
+          // Retenção de 20% contabilizada somente na confirmação do saque.
+          await accrueWithdrawalRetention(service, withdrawal).catch(() => null);
         }
         return Response.json({ received: true, status: 'completed' });
       }
@@ -76,6 +79,9 @@ export default async function (req) {
           status: 'failed',
           note: `Transferência não concluída pelo Payshark (${payload.message || payload.status}). Valor devolvido ao saldo.`,
         });
+        // Estorna na base o efeito do saque falho sobre o saldo retido
+        // (retenção acumulada devolvida ao caixa, pagamento restaurado).
+        await reverseFailedRetention(service, { ...withdrawal, status: 'failed' }).catch(() => null);
         return Response.json({ received: true, status: 'failed' });
       }
 
