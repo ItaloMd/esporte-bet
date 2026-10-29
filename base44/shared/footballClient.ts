@@ -18,10 +18,13 @@
  * e a revalidação é idempotente quando a fonte volta a responder.
  */
 import { FootballRateLimitError, apiFootballFetch, isRateLimitErrorText } from './apiFootball.ts';
+import { FOOTBALL_LIMITS } from './footballConfig.ts';
 import { alertMessages, canSpend, loadQuota, quotaLevel, saveQuota } from './footballQuota.ts';
 
-/** Limite interno de requisições por minuto (conservador). */
-export const DEFAULT_MINUTE_LIMIT = 10;
+/** Limite interno de requisições por minuto (definido em footballConfig). */
+export const DEFAULT_MINUTE_LIMIT = FOOTBALL_LIMITS.minuteRequests;
+/** Marca das linhas de registro de cada requisição real enviada ao provedor. */
+const LEDGER_NOTE = 'ledger';
 /** Pausa inicial após 429: 60s dobrando a cada ocorrência, teto de 15 minutos. */
 const PAUSE_BASE_MS = 60 * 1000;
 const PAUSE_CAP_MS = 15 * 60 * 1000;
@@ -151,15 +154,19 @@ export async function openFootballClient(db, { apiKey, base, settings, day, limi
         throw new FootballPausedError(record.rate_pause_until);
       }
 
-      // 2) Limite por minuto: conta cada chamada de cada rotina no mesmo balde.
+      // 2) Limite por minuto: janela deslizante de 60s sobre o registro real de
+      // chamadas enviadas. O balde por minuto perdia contagem quando execuções
+      // concorrentes liam o mesmo valor e gravavam por cima (o teto efetivo
+      // ficava indefinido, e era isso que produzia pausas fora de hora).
       const bucket = minuteBucketKey(nowMs);
-      const minuteUsed = record?.minute_key === bucket ? Number(record.minute_used || 0) : 0;
       const minuteLimit = effectiveMinuteLimit(settings);
-      if (minuteUsed >= minuteLimit) {
+      const windowStartIso = new Date(nowMs - 60000).toISOString();
+      const recentCalls = await db.ApiUsageLog.count({ note: LEDGER_NOTE, created_date: { $gte: windowStartIso } });
+      if (recentCalls >= minuteLimit) {
         // Pausa até o próximo minuto (+1-5s de jitter): todas as rotinas
         // param juntas em vez de continuarem batendo no mesmo limite.
         const untilIso = new Date(nowMs - (nowMs % 60000) + 60000 + 1000 + Math.floor(Math.random() * 4000)).toISOString();
-        await persist({ rate_pause_until: untilIso });
+        await persist({ rate_pause_until: untilIso, minute_key: bucket, minute_used: recentCalls });
         throw new FootballMinuteLimitError(minuteLimit);
       }
 
@@ -197,7 +204,7 @@ export async function openFootballClient(db, { apiKey, base, settings, day, limi
         level: quotaLevel(used, limit),
         ...(messages.length ? { alerts, notes: messages.join(' · ').slice(0, 400) } : {}),
         minute_key: bucket,
-        minute_used: minuteUsed + cost,
+        minute_used: recentCalls + cost,
         rate_limit_strikes: 0,
         ...(result.quota?.limit !== null && result.quota?.limit !== undefined ? { provider_limit: result.quota.limit } : {}),
         ...(result.quota?.remaining !== null && result.quota?.remaining !== undefined ? { provider_remaining: result.quota.remaining } : {}),
@@ -205,6 +212,20 @@ export async function openFootballClient(db, { apiKey, base, settings, day, limi
         last_status_at: nowIso,
         last_status_code: 200,
       });
+
+      // 6) Registro da requisição real: base da janela deslizante por minuto e
+      // do inventário de consumo por endpoint, rotina e período.
+      await db.ApiUsageLog.create({
+        provider: 'api_football',
+        endpoint: String(endpoint || ''),
+        status_code: 200,
+        cache_hit: false,
+        credits_used: cost,
+        params: purpose || label || '',
+        note: LEDGER_NOTE,
+        error_message: '',
+      }).catch(() => null);
+
       return result;
     },
   };

@@ -5,6 +5,7 @@ import {
   footballApiBase,
   mapFixture,
 } from '../../shared/apiFootball.ts';
+import { CADENCE_TOLERANCE_MS, FOOTBALL_CADENCE, FOOTBALL_TTL } from '../../shared/footballConfig.ts';
 import { isThrottleError, openFootballClient } from '../../shared/footballClient.ts';
 import {
   DEFAULT_DAILY_LIMIT,
@@ -58,7 +59,10 @@ export default async function (req) {
     base44 = createClientFromRequest(req);
     const user = await base44.auth.me().catch((e) => (e.status === 401 ? null : Promise.reject(e)));
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-    if (user.role !== 'admin') return Response.json({ error: 'Forbidden' }, { status: 403 });
+    // Qualquer usuário autenticado pode acionar o detector: a execução é
+    // compartilhada e gated (intervalo, trava e orçamento), então milhares de
+    // visitantes simultâneos continuam gerando no máximo uma chamada por
+    // intervalo — nunca uma por pessoa.
 
     const db = base44.asServiceRole.entities;
     const payload = await req.json().catch(() => ({}));
@@ -87,7 +91,13 @@ export default async function (req) {
     const usedBefore = numberOr(quotaRecord?.used, 0);
     const level = quotaLevel(usedBefore, limit);
     const policy = quotaPolicy(level);
-    const intervalMinutes = liveIntervalMinutes(settings);
+    // Cadência adaptativa: com partida em andamento vale o intervalo configurado
+    // (padrão 60s); sem nada acontecendo o detector desacelera, porque consultar
+    // a fonte a cada minuto sem jogos só consome cota.
+    const intervalMinutesBase = liveIntervalMinutes(settings);
+    const liveSignalIso = new Date(nowMs - FOOTBALL_TTL.liveSignal * 1000).toISOString();
+    const liveNow = await db.Event.count({ status: 'live', live_updated_at: { $gte: liveSignalIso } });
+    const intervalMinutes = liveNow > 0 ? intervalMinutesBase : FOOTBALL_CADENCE.liveIdleSeconds / 60;
 
     if (dryRun) {
       return Response.json({
@@ -131,7 +141,7 @@ export default async function (req) {
 
     // Respeita o intervalo configurado mesmo com o workflow disparando antes.
     const lastLiveMs = Date.parse(settings.football_last_live_at || '');
-    if (Number.isFinite(lastLiveMs) && nowMs - lastLiveMs < intervalMinutes * 60000 - 5000) {
+    if (Number.isFinite(lastLiveMs) && nowMs - lastLiveMs < intervalMinutes * 60000 - CADENCE_TOLERANCE_MS) {
       await releaseLock(db, quotaRecord);
       return Response.json({
         skipped: true,

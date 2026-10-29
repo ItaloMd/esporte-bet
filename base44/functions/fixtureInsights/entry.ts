@@ -1,6 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.54';
 import { secrets } from 'base44:runtime';
 import { FOOTBALL_TIMEZONE, footballApiBase } from '../../shared/apiFootball.ts';
+import { FOOTBALL_LIMITS, FOOTBALL_TTL } from '../../shared/footballConfig.ts';
 import { isThrottleError, openFootballClient } from '../../shared/footballClient.ts';
 import {
   DEFAULT_DAILY_LIMIT,
@@ -30,18 +31,18 @@ import {
  * - orçamento diário com reserva e parada em contingência (95%+).
  */
 
-const RESERVE_CALLS = 10;
+const RESERVE_CALLS = FOOTBALL_LIMITS.reservePlacares;
 /** Estatísticas e eventos mudam durante o jogo; após o fim, são estáveis. */
-const LIVE_STATS_TTL = 300;
-const FINAL_STATS_TTL = 86400;
+const LIVE_STATS_TTL = FOOTBALL_TTL.liveStats;
+const FINAL_STATS_TTL = FOOTBALL_TTL.finalStats;
 /** Histórico de confrontos e últimos jogos muda no máximo uma vez por dia. */
-const HISTORY_TTL = 86400;
+const HISTORY_TTL = FOOTBALL_TTL.history;
 const MAX_H2H = 10;
 const MAX_RECENT = 5;
 /** Teto do payload armazenado por seção, protegendo o tamanho do registro. */
 const MAX_PAYLOAD_CHARS = 15000;
 /** Janela em que outra execução buscando a mesma seção é considerada ativa. */
-const INFLIGHT_TTL_SECONDS = 25;
+const INFLIGHT_TTL_SECONDS = FOOTBALL_TTL.inflight;
 
 const FINISHED_SHORTS = ['FT', 'AET', 'PEN'];
 
@@ -285,7 +286,11 @@ export default async function (req) {
       });
     }
 
-    // Histórico: confrontos diretos e últimos jogos de cada equipe.
+    // Histórico: confrontos diretos e últimos jogos de cada equipe. Cache válido
+    // é sempre servido (custo zero); a coleta externa acontece antes do apito
+    // inicial ou quando o visitante pede — durante o jogo a prioridade são
+    // estatísticas e eventos, e o histórico não consome cota.
+    const includeHistory = !started || Boolean(payload?.include_history);
     if (homeId && awayId) {
       sections.h2h = await collect({
         key: `insights:h2h:${homeId}-${awayId}`,
@@ -293,6 +298,7 @@ export default async function (req) {
         params: { h2h: `${homeId}-${awayId}`, timezone: FOOTBALL_TIMEZONE },
         ttlSeconds: HISTORY_TTL,
         normalize: (data) => normalizeFixtures(data, MAX_H2H),
+        condition: includeHistory,
       });
       sections.home_recent = await collect({
         key: `insights:recent:${homeId}`,
@@ -300,6 +306,7 @@ export default async function (req) {
         params: { team: homeId, last: 10, timezone: FOOTBALL_TIMEZONE },
         ttlSeconds: HISTORY_TTL,
         normalize: (data) => normalizeFixtures(data, MAX_RECENT),
+        condition: includeHistory,
       });
       sections.away_recent = await collect({
         key: `insights:recent:${awayId}`,
@@ -307,6 +314,7 @@ export default async function (req) {
         params: { team: awayId, last: 10, timezone: FOOTBALL_TIMEZONE },
         ttlSeconds: HISTORY_TTL,
         normalize: (data) => normalizeFixtures(data, MAX_RECENT),
+        condition: includeHistory,
       });
     }
 
@@ -316,6 +324,7 @@ export default async function (req) {
       available: hasAny,
       event_status: event.status,
       started,
+      history_available: Boolean(homeId && awayId) && !includeHistory && !sections.h2h,
       sections,
       fetched,
       stale: staleSections,

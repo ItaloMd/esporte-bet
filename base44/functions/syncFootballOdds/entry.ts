@@ -2,6 +2,7 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.54';
 import { secrets } from 'base44:runtime';
 import { FOOTBALL_TIMEZONE, footballApiBase } from '../../shared/apiFootball.ts';
 import { MAX_ODDS_PAGES, mapOddsEntry, pageLimitReached, pickBookmaker } from '../../shared/apiFootballOdds.ts';
+import { FOOTBALL_CADENCE, FOOTBALL_LIMITS } from '../../shared/footballConfig.ts';
 import { isThrottleError, openFootballClient } from '../../shared/footballClient.ts';
 import { writeQuotes } from '../../shared/oddsWriter.ts';
 import {
@@ -26,12 +27,10 @@ import { chunkArray } from '../../shared/matchLifecycle.ts';
 import { applyRelevancePatch, loadRelevanceConfig } from '../../shared/relevance.ts';
 
 const LOCK_MS = 4 * 60 * 1000;
-/** Uma coleta por hora para cada dia: cotações pré-jogo mudam devagar. */
-const ODDS_REFRESH_SECONDS = 3600;
-/** Chamadas preservadas para placares ao vivo, que têm prioridade sobre odds. */
-const RESERVE_CALLS = 10;
-/** Cotações cobrem hoje e os próximos 6 dias (janela de 7 dias da agenda). */
-const MAX_ODDS_DAYS = 7;
+/** Cadências e tetos centralizados (ver shared/footballConfig.ts). */
+const ODDS_REFRESH_SECONDS = FOOTBALL_CADENCE.oddsRefreshSeconds;
+const RESERVE_CALLS = FOOTBALL_LIMITS.reservePlacares;
+const MAX_ODDS_DAYS = FOOTBALL_CADENCE.oddsWindowDays;
 
 /**
  * Coleta de cotações pré-jogo pela API-Football.

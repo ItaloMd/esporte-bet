@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { History, Loader2, RefreshCw } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import StatsTable from "@/components/odds/insights/StatsTable";
 import EventsTimeline from "@/components/odds/insights/EventsTimeline";
@@ -20,6 +20,33 @@ export default function FixtureInsights({ event }) {
       setState({ loading: false, data: res, error: "" });
     } catch (error) {
       setState({ loading: false, data: null, error: error?.message || "Falha ao carregar o acompanhamento." });
+    }
+  };
+
+  // Histórico sob demanda: durante o jogo a coleta externa fica reservada para
+  // estatísticas e eventos; o histórico é buscado só quando o visitante pede.
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const loadHistory = async () => {
+    setHistoryLoading(true);
+    try {
+      const res = await base44.functions.invoke("fixtureInsights", { event_id: event.id, include_history: true });
+      setState((current) => ({
+        ...current,
+        data: current.data
+          ? {
+              ...current.data,
+              history_available: false,
+              sections: {
+                ...current.data.sections,
+                h2h: res?.sections?.h2h || [],
+                home_recent: res?.sections?.home_recent || [],
+                away_recent: res?.sections?.away_recent || [],
+              },
+            }
+          : current.data,
+      }));
+    } finally {
+      setHistoryLoading(false);
     }
   };
 
@@ -88,6 +115,21 @@ export default function FixtureInsights({ event }) {
             homeName={event.home_team_name}
             awayName={event.away_team_name}
           />
+          {data?.history_available ? (
+            <button
+              type="button"
+              onClick={loadHistory}
+              disabled={historyLoading}
+              className="card-surface flex w-full items-center justify-center gap-2 px-4 py-3 text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-60"
+            >
+              {historyLoading ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+              ) : (
+                <History className="h-3.5 w-3.5" aria-hidden="true" />
+              )}
+              Ver histórico de confrontos e últimos jogos
+            </button>
+          ) : null}
           <p className="px-1 text-[11px] text-muted-foreground">
             Dados oficiais da API-Football · atualizados em {new Date(data.updated_at).toLocaleString("pt-BR")}
           </p>

@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { base44 } from "@/api/base44Client";
 import { PauseCircle, Radio, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import EventFilters from "@/components/odds/EventFilters";
@@ -59,9 +60,19 @@ export default function Live() {
   const feed = useEventFeed(liveFilter, { limit: 30 });
   const [lastRefresh, setLastRefresh] = useState(new Date().toISOString());
   const dataAt = latestSourceUpdate(feed.events || []);
+  const dataAtRef = useRef(null);
+  dataAtRef.current = dataAt;
 
   useEffect(() => {
-    const timer = setInterval(() => {
+    // Sincronização compartilhada: a tela só pede a atualização quando o placar
+    // está defasado. O backend decide se executa (intervalo + trava + orçamento),
+    // então todos os visitantes juntos geram no máximo uma chamada por minuto —
+    // nunca uma chamada por pessoa.
+    const timer = setInterval(async () => {
+      const stamp = dataAtRef.current ? Date.parse(dataAtRef.current) : 0;
+      if (stamp && Date.now() - stamp > 75000) {
+        await base44.functions.invoke("syncFootballLive", { trigger: "page" }).catch(() => null);
+      }
       feed.reload();
       setReloadKey((key) => key + 1);
       setLastRefresh(new Date().toISOString());

@@ -6,9 +6,11 @@
  * e quando ela merece atenção especial, para o painel e para checagens extras
  * de partidas em minutos finais.
  */
+import { FOOTBALL_CADENCE } from './footballConfig.ts';
 import { numberOr } from './footballSync.ts';
 
-export const DEFAULT_LIVE_INTERVAL_MINUTES = 2;
+/** Detector ao vivo: 60 segundos com jogos em andamento (recomendação da documentação). */
+export const DEFAULT_LIVE_INTERVAL_MINUTES = FOOTBALL_CADENCE.liveSeconds / 60;
 export const DEFAULT_MONITOR_DEFAULT_MINUTES = 5;
 export const DEFAULT_MONITOR_BETS_MINUTES = 1;
 export const DEFAULT_MONITOR_FAVORITES_MINUTES = 1;
