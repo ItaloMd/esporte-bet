@@ -56,6 +56,7 @@ export default function AdminFinance() {
     paysharkBalance: null,
     paysharkError: "",
     availableToWithdraw: null,
+    cashInflight: 0,
     retention: null,
     retentionPercent: 20,
     gatewayMetrics: [],
@@ -86,6 +87,7 @@ export default function AdminFinance() {
       paysharkBalance: data.payshark_balance ?? null,
       paysharkError: data.payshark_error || "",
       availableToWithdraw: data.available_to_withdraw ?? null,
+      cashInflight: data.cash_inflight || 0,
       retention: data.retention || null,
       retentionPercent: data.retention_percent || 20,
       gatewayMetrics: data.gateway_metrics || [],
@@ -206,6 +208,10 @@ export default function AdminFinance() {
 
   const pendingWithdrawals = overview.withdrawals.filter((item) => item.status === "pending");
   const visibleWithdrawals = overview.withdrawals.filter((item) => item.kind !== "dev_split");
+  const cashLimit = overview.availableToWithdraw;
+  const cashAmountValue = Number(cashAmount);
+  const cashExceedsLimit =
+    cashLimit !== null && Number.isFinite(cashAmountValue) && cashAmountValue > cashLimit;
   const retention = overview.retention || { retained_balance: 0, total_retained: 0, total_paid_out: 0, payout_pix_key: "" };
   const paysharkMetric = overview.gatewayMetrics[0];
 
@@ -228,7 +234,7 @@ export default function AdminFinance() {
               hint={
                 overview.paysharkBalance === null
                   ? overview.paysharkError || "Saldo da loja Payshark indisponível."
-                  : `loja Payshark ${formatCurrency(overview.paysharkBalance)} · retidos ${formatCurrency(retention.retained_balance)} fora do caixa livre`
+                  : `loja Payshark ${formatCurrency(overview.paysharkBalance)} · retidos ${formatCurrency(retention.retained_balance)} fora do caixa livre${overview.cashInflight > 0 ? ` · ${formatCurrency(overview.cashInflight)} em saques em andamento` : ""}`
               }
               highlight
             />
@@ -354,6 +360,18 @@ export default function AdminFinance() {
             value={cashAmount}
             onChange={(event) => setCashAmount(event.target.value)}
           />
+          <p className="text-xs text-muted-foreground">
+            Limite livre para saque agora:{" "}
+            <span className="score-num font-semibold text-foreground">
+              {cashLimit === null ? "indisponível" : formatCurrency(Math.max(0, cashLimit))}
+            </span>{" "}
+            — saldo da loja menos os retidos e saques em andamento.
+          </p>
+          {cashExceedsLimit && (
+            <p className="text-xs text-destructive">
+              O valor solicitado passa o limite livre. Máximo: {formatCurrency(Math.max(0, cashLimit))}.
+            </p>
+          )}
         </div>
         {error && (
           <p className="flex items-start gap-2 text-xs text-destructive">
@@ -361,7 +379,7 @@ export default function AdminFinance() {
             {error}
           </p>
         )}
-        <Button onClick={withdrawCash} disabled={busy === "cash" || !cashAmount}>
+        <Button onClick={withdrawCash} disabled={busy === "cash" || !cashAmount || cashExceedsLimit}>
           {busy === "cash" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
           Sacar do caixa
         </Button>

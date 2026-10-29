@@ -84,6 +84,36 @@ async function sendWithdrawal(amount, pixKey, keyType, idempotencyKey) {
   };
 }
 
+/**
+ * Saldo livre da loja Payshark para o saque do caixa: disponível menos o
+ * saldo retido acumulado e menos os saques de caixa em andamento (ainda não
+ * refletidos no saldo do gateway). Autoritativo no ponto de solicitação —
+ * nenhum saque de caixa pode passar deste limite, ou a carteira negativa.
+ */
+async function freeCashBalance(service) {
+  const [balanceRes, retention, inflight] = await Promise.all([
+    getBalance(),
+    getRetentionRecord(service),
+    service.Withdrawal.aggregate({
+      query: { kind: 'admin', status: { $in: ['pending', 'processing'] }, correlation_id: { $regex: '^cash_' } },
+      sum: ['amount'],
+    }),
+  ]);
+  if (!balanceRes.ok) {
+    return { ok: false, error: publicMessage(balanceRes.data, 'Não foi possível consultar o saldo no Payshark.') };
+  }
+  const available = round2(Number(balanceRes.data?.available ?? 0) / 100);
+  const retained = round2(retention.retained_balance || 0);
+  const inflightAmount = sumOf(inflight);
+  return {
+    ok: true,
+    available,
+    retained,
+    inflight: inflightAmount,
+    free: round2(available - retained - inflightAmount),
+  };
+}
+
 export default async function (req) {
   try {
     const base44 = createClientFromRequest(req);
@@ -104,7 +134,7 @@ export default async function (req) {
       const monthStart = startOfMonthIso();
       const [
         paidByGateway, sentWithdrawals, pendingWithdrawals, pendingByGateway,
-        deposits, withdrawals, wallets, users, paysharkBalanceRes, retention,
+        deposits, withdrawals, wallets, users, paysharkBalanceRes, retention, cashInflightAgg,
       ] = await Promise.all([
         service.Deposit.aggregate({
           query: { status: 'paid', paid_at: { $gte: monthStart } },
@@ -123,6 +153,10 @@ export default async function (req) {
         service.User.list(),
         getBalance(),
         getRetentionRecord(service),
+        service.Withdrawal.aggregate({
+          query: { kind: 'admin', status: { $in: ['pending', 'processing'] }, correlation_id: { $regex: '^cash_' } },
+          sum: ['amount'],
+        }),
       ]);
 
       // Volume pago no mês por gateway (Payshark).
@@ -151,7 +185,10 @@ export default async function (req) {
       // Disponível para sacar: saldo da loja menos a retenção acumulada — os
       // 20% retidos nunca se misturam com o caixa livre do gateway.
       const retainedBalance = round2(retention.retained_balance || 0);
-      const availableToWithdraw = paysharkAvailable === null ? null : round2(paysharkAvailable - retainedBalance);
+      const cashInflight = sumOf(cashInflightAgg);
+      const availableToWithdraw = paysharkAvailable === null
+        ? null
+        : round2(paysharkAvailable - retainedBalance - cashInflight);
 
       const paid = paidRows.find((row) => row.gateway === 'payshark') || {};
       const pending = (pendingByGateway?.rows || []).find((row) => row.gateway === 'payshark') || {};
@@ -176,6 +213,7 @@ export default async function (req) {
           ? ''
           : publicMessage(paysharkBalanceRes.data, 'Não foi possível consultar o saldo no Payshark.'),
         available_to_withdraw: availableToWithdraw,
+        cash_inflight: cashInflight,
         retention: {
           retained_balance: retainedBalance,
           total_retained: round2(retention.total_retained || 0),
@@ -312,6 +350,29 @@ export default async function (req) {
         return Response.json(
           { error: 'O Payshark está desativado para saques. Ative na aba Gateways do painel.' },
           { status: 503 },
+        );
+      }
+
+      // Limite líquido autoritativo: o saque de caixa só pode usar o saldo
+      // livre da loja (disponível menos retidos e saques em andamento),
+      // incluindo o valor efetivamente enviado com a taxa.
+      const freeCheck = await freeCashBalance(service);
+      if (!freeCheck.ok) {
+        return Response.json({ error: freeCheck.error }, { status: 502 });
+      }
+      if (amount > freeCheck.free) {
+        const limit = round2(Math.max(0, freeCheck.free));
+        const parts = [
+          `saldo da loja R$ ${freeCheck.available.toFixed(2)}`,
+          `retidos R$ ${freeCheck.retained.toFixed(2)}`,
+        ];
+        if (freeCheck.inflight > 0) parts.push(`saques em andamento R$ ${freeCheck.inflight.toFixed(2)}`);
+        return Response.json(
+          {
+            error: `Saque acima do limite livre. Disponível para sacar: R$ ${limit.toFixed(2)} (${parts.join(' menos ')}).`,
+            available_to_withdraw: limit,
+          },
+          { status: 400 },
         );
       }
 

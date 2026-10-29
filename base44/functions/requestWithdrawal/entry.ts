@@ -26,6 +26,18 @@ export default async function (req) {
     const pixKeyType = String(body.pix_key_type || '').trim().toLowerCase();
     const kind = body.kind === 'affiliate' ? 'affiliate' : 'player';
 
+    // Contas de administrador não sacam pela carteira de jogador: o saque
+    // administrativo sai exclusivamente pelo painel (Sacar caixa), sujeito ao
+    // limite líquido da loja Payshark.
+    if (user.role === 'admin' && kind === 'player') {
+      return Response.json(
+        {
+          error: 'Contas de administrador não sacam pela carteira de jogador. Solicite o saque pelo painel administrativo.',
+        },
+        { status: 403 },
+      );
+    }
+
     if (!Number.isFinite(amount) || amount < minWithdrawal) {
       return Response.json({ error: `O saque mínimo é R$ ${minWithdrawal.toFixed(2)}.` }, { status: 400 });
     }
