@@ -199,8 +199,12 @@ export function settleSelection(selection, event) {
 }
 
 /**
- * Marca como "ao vivo" toda partida já iniciada e retira as cotações do ar.
- * O status é definido pelo horário previsto, sem consultar odds durante o jogo.
+ * Fecha as apostas das partidas cujo horário previsto passou e reconcilia o
+ * status "ao vivo" com a fase oficial gravada pela fonte.
+ *
+ * O relógio apenas encerra a aposta: o status de jogo ativo vem somente da
+ * API-Football (detector ao vivo e auditoria), nunca do horário programado,
+ * da existência de odds ou do minuto armazenado.
  */
 export async function markStartedEventsLive(db, nowIso) {
   const nowMs = Date.parse(nowIso);
@@ -214,8 +218,34 @@ export async function markStartedEventsLive(db, nowIso) {
   };
   const startedIds = [];
 
+  // 0) Higiene da aba ao vivo (reconciliação, sem chamadas à API): o status
+  // "ao vivo" só a fonte confirma. Partida "ao vivo" com fase gravada de
+  // encerramento sai da lista preservando o placar; com fase de jogo não
+  // iniciado (NS/TBD) volta a agendada — a fonte diz que ela não começou.
+  for (const [phases, mode] of [
+    [['FT', 'AET', 'PEN'], 'finished'],
+    [['AWD', 'WO', 'ABD'], 'review'],
+    [['NS', 'TBD'], 'scheduled'],
+  ]) {
+    for (let round = 0; round < 4; round += 1) {
+      const page = await db.Event.filter(
+        { source: 'provider', status: 'live', phase: { $in: phases } },
+        { limit: 500 },
+      );
+      const items = page.items || [];
+      if (!items.length) break;
+      const patch =
+        mode === 'scheduled'
+          ? { status: 'scheduled', published: false, odds_status: 'unavailable' }
+          : { ...staleUpdate, ...(mode === 'review' ? { settlement_state: 'review' } : {}) };
+      await db.Event.updateMany({ id: { $in: items.map((row) => row.id) } }, { $set: patch });
+    }
+  }
+
   // 1) Partidas antigas ainda marcadas como "ao vivo" já terminaram: saem da
-  // listagem de ao vivo e deixam de consumir consultas de placar.
+  // listagem de ao vivo e deixam de consumir consultas de placar. Sem
+  // confirmação do provedor o encerramento não é "resultado confirmado":
+  // nada é liquidado a partir de um placar ao vivo congelado.
   for (let round = 0; round < 8; round += 1) {
     const page = await db.Event.filter(
       { source: 'provider', status: 'live', start_time: { $lt: staleIso } },
@@ -223,14 +253,24 @@ export async function markStartedEventsLive(db, nowIso) {
     );
     const items = page.items || [];
     if (!items.length) break;
-    await db.Event.updateMany({ id: { $in: items.map((row) => row.id) } }, { $set: staleUpdate });
+    await db.Event.updateMany(
+      { id: { $in: items.map((row) => row.id) } },
+      { $set: { ...staleUpdate, settlement_state: 'review' } },
+    );
   }
 
-  // 2) Partidas cujo horário previsto já passou viram "ao vivo". As que
-  // começaram antes da janela são encerradas direto, sem passar por "ao vivo".
+  // 2) Partidas cujo horário previsto passou não aceitam mais apostas: saem da
+  // publicação e têm as cotações encerradas. O status "ao vivo", porém, nunca
+  // vem do relógio: só a fonte (API-Football) confirma que o jogo está ativo —
+  // o horário programado não é prova de jogo em andamento.
   for (let round = 0; round < 8; round += 1) {
     const page = await db.Event.filter(
-      { source: 'provider', status: 'scheduled', start_time: { $lte: nowIso } },
+      {
+        source: 'provider',
+        status: 'scheduled',
+        start_time: { $lte: nowIso },
+        $or: [{ published: true }, { odds_status: { $ne: 'unavailable' } }],
+      },
       { limit: 500 },
     );
     const items = page.items || [];
@@ -238,16 +278,17 @@ export async function markStartedEventsLive(db, nowIso) {
     const recent = items.filter((row) => Date.parse(row.start_time) >= nowMs - LIVE_WINDOW_MS);
     const stale = items.filter((row) => Date.parse(row.start_time) < nowMs - LIVE_WINDOW_MS);
     if (recent.length) {
-      // O status oficial (fase, minuto e placar) chega pelo detector ao vivo; o
-      // rótulo provisório evita exibir "Não iniciada" numa partida já rolando.
       await db.Event.updateMany(
         { id: { $in: recent.map((row) => row.id) } },
-        { $set: { status: 'live', published: false, odds_status: 'unavailable', phase: 'LIVE', phase_label: 'Em andamento' } },
+        { $set: { published: false, odds_status: 'unavailable' } },
       );
       startedIds.push(...recent.map((row) => row.id));
     }
     if (stale.length) {
-      await db.Event.updateMany({ id: { $in: stale.map((row) => row.id) } }, { $set: staleUpdate });
+      await db.Event.updateMany(
+        { id: { $in: stale.map((row) => row.id) } },
+        { $set: { ...staleUpdate, settlement_state: 'review' } },
+      );
     }
   }
 

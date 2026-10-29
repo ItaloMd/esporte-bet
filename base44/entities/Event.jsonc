@@ -17,6 +17,10 @@
     "season": {
       "type": "string"
     },
+    "league_id": {
+      "type": "string",
+      "description": "ID oficial da competi\u00e7\u00e3o na API-Football (league.id), usado pela pontua\u00e7\u00e3o de relev\u00e2ncia."
+    },
     "home_team_id": {
       "type": "string"
     },
@@ -151,6 +155,19 @@
     },
     "popularity": {
       "type": "number"
+    },
+    "relevance_score": {
+      "type": "number",
+      "default": 0,
+      "description": "Pontua\u00e7\u00e3o de relev\u00e2ncia de 0 a 100, calculada no backend."
+    },
+    "relevance_breakdown": {
+      "type": "string",
+      "description": "Componentes da pontua\u00e7\u00e3o de relev\u00e2ncia em JSON."
+    },
+    "relevance_updated_at": {
+      "type": "string",
+      "format": "date-time"
     },
     "source": {
       "type": "string",

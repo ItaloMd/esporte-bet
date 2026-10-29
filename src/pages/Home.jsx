@@ -15,7 +15,7 @@ import { CardListSkeleton } from "@/components/state/LoadingBlocks";
 import useEventFeed from "@/lib/useEventFeed";
 import useCompetitions from "@/lib/useCompetitions";
 import { useAppSettings } from "@/lib/appSettings";
-import { buildEventFilter } from "@/lib/eventQueries";
+import { buildEventFilter, sortEventsByRelevance } from "@/lib/eventQueries";
 import { SPORTS } from "@/lib/sports";
 import { dayRangeFromInput } from "@/lib/format";
 
@@ -79,7 +79,9 @@ export default function Home() {
   const feed = useEventFeed(feedFilter, { limit: 10 });
 
   const featured = featuredFeed.events;
-  const live = liveFeed.events;
+  // Ao vivo e próximos jogos ordenados pela relevância calculada no backend.
+  const live = useMemo(() => sortEventsByRelevance(liveFeed.events), [liveFeed.events]);
+  const upcoming = useMemo(() => sortEventsByRelevance(feed.events), [feed.events]);
 
   return (
     <div className="space-y-7">
@@ -167,7 +169,7 @@ export default function Home() {
           <DateStrip value={filters.date} onChange={(date) => setFilters((current) => ({ ...current, date }))} />
         </div>
         <EventGrid
-          events={feed.events}
+          events={upcoming}
           oddsByEvent={feed.oddsByEvent}
           loading={feed.loading}
           error={feed.error}

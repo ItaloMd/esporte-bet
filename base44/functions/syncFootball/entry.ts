@@ -35,6 +35,7 @@ import { localDateString, slugify } from '../../shared/oddsApi.ts';
 import { chunkArray } from '../../shared/matchLifecycle.ts';
 import { indexByFixtureId, numberOr, upcomingDates } from '../../shared/footballSync.ts';
 import { buildBetAudit } from '../../shared/footballAudit.ts';
+import { applyRelevancePatch, loadRelevanceConfig } from '../../shared/relevance.ts';
 
 const LOCK_MS = 4 * 60 * 1000;
 const CREATE_AHEAD_MS = 8 * 24 * 60 * 60 * 1000;
@@ -141,6 +142,8 @@ function fixtureFields(fixture, nowIso) {
     fields.ht_away_score = fixture.ht_away_score;
   }
   if (fixture.season) fields.season = fixture.season;
+  // ID oficial da competição (league.id): base da pontuação de relevância.
+  if (fixture.competition_id) fields.league_id = fixture.competition_id;
   if (fixture.reg_home_score !== null && fixture.reg_away_score !== null) {
     fields.reg_home_score = fixture.reg_home_score;
     fields.reg_away_score = fixture.reg_away_score;
@@ -285,7 +288,7 @@ export default async function (req) {
     const db = base44.asServiceRole.entities;
     const payload = await req.json().catch(() => ({}));
     const requested = String(payload?.mode || 'audit');
-    const mode = ['calendar', 'audit', 'auto'].includes(requested) ? requested : 'audit';
+    const mode = ['calendar', 'audit', 'auto', 'relevance'].includes(requested) ? requested : 'audit';
 
     const now = new Date();
     const nowMs = now.getTime();
@@ -367,6 +370,79 @@ export default async function (req) {
     const policy = quotaPolicy(level);
     const planName = account?.plan || settings.football_plan || '';
 
+    /* ---------------- relevância: recálculo sem consumo de API ---------------- */
+    // Repontua todas as partidas da fonte a partir dos dados já armazenados:
+    // custo zero de chamadas, usado como backfill e depois de mudanças de
+    // configuração nos pesos e na tabela de competições prioritárias.
+    if (mode === 'relevance') {
+      const relevanceConfig = await loadRelevanceConfig(db);
+      const relevanceUpdates = [];
+      let checked = 0;
+      let cursor = null;
+      for (let round = 0; round < 60; round += 1) {
+        const page = await db.Event.filter(
+          { source: 'provider' },
+          { limit: 500, sort: 'start_time', ...(cursor ? { cursor } : {}) },
+        );
+        const items = page.items || [];
+        if (!items.length) break;
+        items.forEach((event) => {
+          const patch = {};
+          applyRelevancePatch(patch, event, relevanceConfig);
+          if (Object.keys(patch).length) relevanceUpdates.push({ id: event.id, ...patch });
+        });
+        checked += items.length;
+        cursor = page.next_cursor;
+        if (!page.has_more) break;
+      }
+      for (const batch of chunkArray(relevanceUpdates, 200)) {
+        if (batch.length) await db.Event.bulkUpdate(batch);
+      }
+
+      const summary = [
+        'relevância',
+        `${checked} partida(s) verificada(s)`,
+        `${relevanceUpdates.length} repontuada(s)`,
+        'custo 0 chamada(s)',
+        `orçamento ${used}/${limit}`,
+      ].join(' · ');
+
+      await db.ProviderSettings.update(settings.id, {
+        football_last_sync_at: nowIso,
+        football_last_status: 'success',
+        football_last_summary: summary,
+      });
+
+      const savedQuota = await saveQuota(db, quotaRecord, {
+        ...(quotaRecord?.id ? {} : { day }),
+        used,
+        limit,
+        level: quotaLevel(used, limit),
+        ...quotaPatch,
+        last_status_at: nowIso,
+        last_status_code: 200,
+        last_error: statusError,
+      });
+      await releaseLock(db, savedQuota || quotaRecord);
+
+      await db.SyncJob.update(job.id, {
+        status: 'success',
+        finished_at: new Date().toISOString(),
+        requests_used: 0,
+        records_upserted: relevanceUpdates.length,
+        error_message: '',
+      });
+
+      return Response.json({
+        ok: true,
+        mode,
+        events_checked: checked,
+        events_rescored: relevanceUpdates.length,
+        quota: { used, limit, percent: quotaPercent(used, limit), level: quotaLevel(used, limit) },
+        summary,
+      });
+    }
+
     /* ------------------------- importação diária ------------------------- */
     if (mode === 'calendar') {
       const windowDays = Math.min(Math.max(numberOr(settings.football_window_days, 2), 1), MAX_CALENDAR_DAYS);
@@ -444,10 +520,23 @@ export default async function (req) {
 
       const updates = [];
       const creations = [];
+      const relevanceConfig = await loadRelevanceConfig(db);
       mapped.forEach((fixture) => {
         const linked = known.get(fixture.fixture_id) || pickCandidate(byName.get(eventKey(fixture.home_team_name, fixture.away_team_name)), fixture);
         if (linked) {
           const patch = buildPatch(fixture, linked, nowIso, settings);
+          // Relevância: recalculada na importação, quando a rodada é conhecida.
+          applyRelevancePatch(
+            patch,
+            {
+              ...linked,
+              league_id: linked.league_id || fixture.competition_id,
+              competition_name: linked.competition_name || fixture.competition_name,
+              country: linked.country || fixture.country,
+            },
+            relevanceConfig,
+            { round: fixture.round },
+          );
           if (Object.keys(patch).length) updates.push({ id: linked.id, ...patch });
           return;
         }
@@ -458,7 +547,9 @@ export default async function (req) {
         // A curadoria do que aparece na grade é feita pela cotação: a partida é
         // criada sem publicação e só vira visível quando o provedor cota o jogo.
         // A competição ativa é vinculada quando o nome casa com o catálogo.
-        creations.push(buildCreate(fixture, nowIso, competition?.id || '', settings));
+        const creation = buildCreate(fixture, nowIso, competition?.id || '', settings);
+        applyRelevancePatch(creation, fixture, relevanceConfig, { round: fixture.round });
+        creations.push(creation);
       });
 
       for (const batch of chunkArray(updates, 200)) await db.Event.bulkUpdate(batch);

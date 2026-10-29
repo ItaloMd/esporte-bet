@@ -1,0 +1,68 @@
+{
+  "name": "RelevanceSettings",
+  "type": "object",
+  "properties": {
+    "weight_competition": {
+      "type": "number",
+      "default": 50,
+      "description": "Peso m\u00e1ximo do componente de relev\u00e2ncia da competi\u00e7\u00e3o."
+    },
+    "weight_regional": {
+      "type": "number",
+      "default": 20,
+      "description": "Peso m\u00e1ximo do componente de interesse regional (destaque para o Brasil)."
+    },
+    "weight_importance": {
+      "type": "number",
+      "default": 15,
+      "description": "Peso m\u00e1ximo do componente de fase decisiva ou partida ao vivo."
+    },
+    "weight_data": {
+      "type": "number",
+      "default": 10,
+      "description": "Peso m\u00e1ximo do componente de disponibilidade de odds (crit\u00e9rio de confiabilidade)."
+    },
+    "weight_other": {
+      "type": "number",
+      "default": 5,
+      "description": "Peso m\u00e1ximo dos demais crit\u00e9rios configur\u00e1veis (hoje, destaque editorial)."
+    },
+    "priority_competitions": {
+      "type": "string",
+      "description": "Tabela de competi\u00e7\u00f5es priorit\u00e1rias em JSON: league_id oficial da API-Football, nome, pa\u00eds, grupo (br/intl), pontua\u00e7\u00e3o e tokens de fallback."
+    },
+    "country_weights": {
+      "type": "string",
+      "description": "Pesos de interesse regional por pa\u00eds em JSON (ex.: {\"Brazil\": 20})."
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "required": [
+    "weight_competition"
+  ],
+  "rls": {
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

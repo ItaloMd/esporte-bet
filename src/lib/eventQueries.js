@@ -62,6 +62,36 @@ export function eventLabel(event) {
   return `${event.home_team_name} x ${event.away_team_name}`;
 }
 
+/** Fases oficiais (fixture.status.short) de partida normalmente em andamento. */
+export const ACTIVE_LIVE_PHASES = ["1H", "HT", "2H", "ET", "BT", "P", "LIVE"];
+/** Fases de partida parada: suspensão ou interrupção, exibidas em seção própria. */
+export const INTERRUPTED_PHASES = ["SUSP", "INT"];
+/** Fases de encerramento, não disputa ou não início: nunca aparecem na aba ao vivo. */
+export const OFF_LIVE_PHASES = ["FT", "AET", "PEN", "AWD", "WO", "ABD", "NS", "TBD", "PST", "CANC"];
+/** Pontuação mínima (0-100) para o grupo de alta relevância. */
+export const HIGH_RELEVANCE_SCORE = 55;
+
+/**
+ * Classificação de uma partida com status "ao vivo" pela fase oficial gravada
+ * pela fonte — a fonte de verdade é o status da partida na API, nunca o
+ * horário programado, a existência de odds ou o minuto armazenado.
+ */
+export function liveSectionOf(event) {
+  const phase = String(event?.phase || "").toUpperCase();
+  if (!phase || ACTIVE_LIVE_PHASES.includes(phase)) return "active";
+  if (INTERRUPTED_PHASES.includes(phase)) return "interrupted";
+  return "off";
+}
+
+/** Ordem determinística: relevância calculada no backend e, dentro dela, horário. */
+export function sortEventsByRelevance(events = []) {
+  return [...events].sort((a, b) => {
+    const scoreDiff = (Number(b.relevance_score) || 0) - (Number(a.relevance_score) || 0);
+    if (scoreDiff) return scoreDiff;
+    return Date.parse(a.start_time || "") - Date.parse(b.start_time || "");
+  });
+}
+
 export function decorateOdd(odd, event) {
   if (!event) return odd;
   return {

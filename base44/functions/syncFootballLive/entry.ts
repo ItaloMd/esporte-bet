@@ -24,6 +24,7 @@ import {
 } from '../../shared/footballQuota.ts';
 import { LIVE_WINDOW_MS, chunkArray } from '../../shared/matchLifecycle.ts';
 import { indexByFixtureId, numberOr } from '../../shared/footballSync.ts';
+import { applyRelevancePatch, loadRelevanceConfig } from '../../shared/relevance.ts';
 import {
   isCriticalMinute,
   liveIntervalMinutes,
@@ -202,6 +203,7 @@ export default async function (req) {
       }
 
       const known = await indexByFixtureId(db, fixtures.map((fixture) => fixture.fixture_id));
+      const relevanceConfig = await loadRelevanceConfig(db);
 
       /**
        * Patch comum de uma partida da fonte aplicada ao evento conhecido. Fase
@@ -288,6 +290,19 @@ export default async function (req) {
         if (!event) return;
 
         const patch = patchFromFixture(fixture, event);
+        // Relevância: partida ao vivo sobe no componente de importância —
+        // recálculo puro a partir dos dados já gravados, sem novas chamadas.
+        applyRelevancePatch(
+          patch,
+          {
+            ...event,
+            league_id: event.league_id || fixture.competition_id,
+            competition_name: event.competition_name || fixture.competition_name,
+            country: event.country || fixture.country,
+          },
+          relevanceConfig,
+          { isLive: !fixture.finished },
+        );
         if (fixture.finished) finishedCount += 1;
         else if (fixture.live) liveCount += 1;
 

@@ -22,6 +22,8 @@ import {
 } from '../../shared/footballQuota.ts';
 import { DEFAULT_HOUSE_MARGIN_PERCENT, localDateString } from '../../shared/oddsApi.ts';
 import { indexByFixtureId, numberOr, upcomingDates } from '../../shared/footballSync.ts';
+import { chunkArray } from '../../shared/matchLifecycle.ts';
+import { applyRelevancePatch, loadRelevanceConfig } from '../../shared/relevance.ts';
 
 const LOCK_MS = 4 * 60 * 1000;
 /** Uma coleta por hora para cada dia: cotações pré-jogo mudam devagar. */
@@ -218,6 +220,21 @@ export default async function (req) {
     const written = quotesByEvent.size
       ? await writeQuotes(db, { quotesByEvent, houseMargin, now })
       : { markets: 0, odds: 0, events: 0, available: 0, unavailable: 0, published: 0, suspendedMarkets: 0, removedOdds: 0 };
+
+    // Relevância: partida cotada e publicada sobe no critério de
+    // confiabilidade (até 10 pontos) — recálculo puro, sem novas chamadas.
+    if (quotesByEvent.size) {
+      const relevanceConfig = await loadRelevanceConfig(db);
+      const relevanceUpdates = [];
+      quotesByEvent.forEach((quote) => {
+        const patch = {};
+        applyRelevancePatch(patch, quote.event, relevanceConfig, { oddsAvailable: true, published: true });
+        if (Object.keys(patch).length) relevanceUpdates.push({ id: quote.event.id, ...patch });
+      });
+      for (const batch of chunkArray(relevanceUpdates, 200)) {
+        if (batch.length) await db.Event.bulkUpdate(batch);
+      }
+    }
 
     const summary = [
       'odds api-football',
