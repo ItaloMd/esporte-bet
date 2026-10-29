@@ -7,13 +7,13 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "@/components/ui/use-toast";
-import { logAdminAction } from "@/lib/adminAudit";
 import { formatDateTime, timeAgo } from "@/lib/format";
 
 const FOOTBALL_DEFAULTS = {
   football_enabled: false,
   football_base_url: "https://v3.football.api-sports.io",
   football_daily_limit: 100,
+  football_minute_limit: 60,
   football_window_days: 2,
   football_calendar_refresh_seconds: 21600,
   football_create_events: true,
@@ -105,20 +105,19 @@ export default function AdminFootball({ actor }) {
       Object.keys(FOOTBALL_DEFAULTS).forEach((key) => {
         patch[key] = settings[key];
       });
-      if (recordId) await base44.entities.ProviderSettings.update(recordId, patch);
-      else {
-        const created = await base44.entities.ProviderSettings.create({ provider: "api_football", ...patch });
+      if (!recordId) {
+        const created = await base44.entities.ProviderSettings.create({ provider: "api_football" });
         setRecordId(created.id);
       }
-      await logAdminAction({
-        actor,
-        action: "provider.football_settings_updated",
-        targetType: "ProviderSettings",
-        targetId: recordId || "novo",
-        details: `API-Football ${patch.football_enabled ? "habilitada" : "desabilitada"} · limite diário ${patch.football_daily_limit} · janela ${patch.football_window_days} dia(s) · auditoria ${patch.football_audit_offset_hours}h + ${patch.football_audit_recheck_minutes}/${patch.football_audit_fast_minutes} min`,
-        severity: "warning",
+      const response = await base44.functions.invoke("apiFootballCentral", { action: "update_settings", patch });
+      const payload = response.data || {};
+      if (payload.error) throw new Error(payload.error);
+      toast({
+        title: "Configurações salvas",
+        description: payload.rejected?.length
+          ? `Fora da faixa e ignorados: ${payload.rejected.map((row) => row.field).join(", ")}`
+          : "Validadas e aplicadas em todas as rotinas.",
       });
-      toast({ title: "Configurações salvas" });
       await load();
     } catch (error) {
       toast({ title: "Não foi possível salvar", description: error.message, variant: "destructive" });
@@ -264,6 +263,15 @@ export default function AdminFootball({ actor }) {
             <p className="text-[11px] text-muted-foreground">
               Teto de créditos que as rotinas podem gastar por dia. Alertas em 60%, 80% e 95%. Não é o limite real do
               provedor — o valor oficial aparece no cartão "Quota do provedor".
+            </p>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="fb_minute">Limite por minuto</Label>
+            <Input id="fb_minute" type="number" min="3" max="300" value={settings.football_minute_limit} onChange={(event) => update({ football_minute_limit: Number(event.target.value) })} />
+            <p className="text-[11px] text-muted-foreground">
+              Teto compartilhado de requisições por minuto entre todas as rotinas — sempre abaixo do limite do plano
+              (300/min). Ao atingir, as rotinas esperam o próximo minuto em vez de receber 429 do provedor; o dado
+              confirmado permanece e a revalidação retoma sozinha.
             </p>
           </div>
           <div className="space-y-2">

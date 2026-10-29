@@ -25,6 +25,7 @@ function Stat({ label, value, hint }) {
 /** Módulo 1: status da conexão, plano, consumo e alertas da API-Football. */
 export default function CentralStatus({ data }) {
   const { connection, plan, consumption, alerts } = data;
+  const pause = data.pause || {};
   const percent = Number(consumption.percent || 0);
 
   return (
@@ -80,6 +81,12 @@ export default function CentralStatus({ data }) {
           hint={connection.last_live_at ? formatDateTime(connection.last_live_at) : "—"}
         />
         <Stat label="Monitoramento" value={data.monitor.enabled ? "Ativo" : "Desligado"} hint={`detector a cada ${data.monitor.live_interval_minutes} min`} />
+        <Stat label="Partidas em revisão" value={data.widgets?.review_events ?? 0} hint="aguardando decisão administrativa" />
+        <Stat
+          label="Limite por minuto"
+          value={pause.minute_limit ?? "—"}
+          hint={`teto compartilhado · ${pause.strikes ?? 0} bloqueio(s) de limite hoje`}
+        />
       </div>
 
       <div>
@@ -108,6 +115,18 @@ export default function CentralStatus({ data }) {
         <p className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           {connection.status_error}
+        </p>
+      ) : null}
+
+      {pause.active ? (
+        <p className="flex items-start gap-2 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          Pausa de segurança ativa até {formatDateTime(pause.until)} · {pause.strikes} ocorrência(s) de limite ·
+          nenhuma chamada é feita à API até lá; os dados confirmados permanecem e a revalidação retoma sozinha.
+        </p>
+      ) : pause.last_rate_limited_at ? (
+        <p className="text-[11px] text-muted-foreground">
+          Último bloqueio de limite: {timeAgo(pause.last_rate_limited_at)} · pausa cumprida, rotinas operando normalmente.
         </p>
       ) : null}
 

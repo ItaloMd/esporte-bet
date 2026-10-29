@@ -72,8 +72,13 @@ export default function ConsumptionSimulator({ monitor, planLimit, settingsId, o
       INTERVAL_KEYS.forEach(([field, key]) => {
         patch[field] = form[key];
       });
-      await onSaved(patch);
-      toast({ title: "Intervalos salvos", description: "O detector e a fila já usam a nova configuração." });
+      const result = await onSaved(patch);
+      toast({
+        title: "Intervalos salvos",
+        description: result?.rejected?.length
+          ? `Fora da faixa e ignorados: ${result.rejected.map((row) => row.field).join(", ")}`
+          : "Validados e aplicados em todas as rotinas.",
+      });
     } catch (error) {
       toast({ title: "Não foi possível salvar", description: error.message, variant: "destructive" });
     } finally {

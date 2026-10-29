@@ -8,6 +8,7 @@ import ConsumptionSimulator from "@/components/admin/football/ConsumptionSimulat
 import OpsWidgets from "@/components/admin/football/OpsWidgets";
 import ForecastPanel from "@/components/admin/football/ForecastPanel";
 import CentralLogs from "@/components/admin/football/CentralLogs";
+import ReviewQueue from "@/components/admin/football/ReviewQueue";
 
 /**
  * Central API-Football: status da conta e do plano, simulador de consumo,
@@ -46,8 +47,10 @@ export default function FootballCentral() {
   }, [load]);
 
   const saveIntervals = async (patch) => {
-    if (!settingsId) throw new Error("Configuração do provedor não encontrada.");
-    await base44.entities.ProviderSettings.update(settingsId, patch);
+    const response = await base44.functions.invoke("apiFootballCentral", { action: "update_settings", patch });
+    const payload = response.data || {};
+    if (payload.error) throw new Error(payload.error);
+    return payload;
   };
 
   const invokeStep = async (name, args, label) => {
@@ -122,6 +125,7 @@ export default function FootballCentral() {
         <>
           <CentralStatus data={data} />
           <OpsWidgets widgets={data.widgets} />
+          <ReviewQueue />
           <ConsumptionSimulator
             monitor={data.monitor}
             planLimit={data.plan?.limit}

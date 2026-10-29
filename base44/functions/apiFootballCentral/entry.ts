@@ -7,6 +7,7 @@ import {
   parseAccountStatus,
 } from '../../shared/apiFootball.ts';
 import { loadQuota, quotaDayKey, quotaLevel, quotaPercent } from '../../shared/footballQuota.ts';
+import { FOOTBALL_SETTINGS_RULES, validateFootballSettingsPatch } from '../../shared/footballSettings.ts';
 import {
   DEFAULT_LIVE_INTERVAL_MINUTES,
   DEFAULT_MONITOR_BETS_MINUTES,
@@ -146,6 +147,165 @@ export default async function (req) {
       return Response.json({ logs: page.items || [] });
     }
 
+    /* ------------- configurações validadas centralmente (painel admin) ------------- */
+    if (action === 'update_settings') {
+      const { patch, rejected } = validateFootballSettingsPatch(body.patch || {});
+      if (!Object.keys(patch).length) {
+        return Response.json(
+          { error: rejected.length ? `${rejected[0].field}: ${rejected[0].reason}` : 'Nenhum campo válido para atualizar.', rejected },
+          { status: 400 },
+        );
+      }
+      await db.ProviderSettings.update(settings.id, patch);
+      await db.AdminAuditLog.create({
+        actor_id: user.id,
+        actor_email: user.email,
+        action: 'provider.football_settings_updated',
+        target_type: 'ProviderSettings',
+        target_id: settings.id,
+        details: Object.entries(patch)
+          .map(([field, value]) => `${field}=${value}`)
+          .join(' · ')
+          .slice(0, 400),
+        severity: 'warning',
+      }).catch(() => null);
+
+      const updated = await db.ProviderSettings.get(settings.id);
+      const effective = {};
+      Object.keys(FOOTBALL_SETTINGS_RULES).forEach((field) => {
+        effective[field] = updated?.[field] ?? null;
+      });
+      return Response.json({ ok: true, applied: patch, rejected, effective });
+    }
+
+    /* ---------------- fila de revisão administrativa de resultados ---------------- */
+    if (action === 'review_queue') {
+      const page = await db.Event.filter({ settlement_state: 'review' }, { limit: 60, sort: '-updated_date' });
+      const events = page.items || [];
+      const ids = events.map((event) => event.id);
+
+      const auditsByEvent = new Map();
+      const betsByEvent = new Map();
+      if (ids.length) {
+        const [auditPage, betsPage] = await Promise.all([
+          db.BetAudit.filter({ event_id: { $in: ids } }, { sort: '-created_date', limit: 300 }),
+          db.SimulationSelection.filter({ event_id: { $in: ids }, status: 'open' }, { limit: 500 }),
+        ]);
+        (auditPage.items || []).forEach((row) => {
+          if (!auditsByEvent.has(row.event_id)) auditsByEvent.set(row.event_id, row);
+        });
+        (betsPage.items || []).forEach((row) => {
+          betsByEvent.set(row.event_id, (betsByEvent.get(row.event_id) || 0) + 1);
+        });
+      }
+
+      const rows = events.map((event) => {
+        const audit = auditsByEvent.get(event.id) || null;
+        return {
+          id: event.id,
+          fixture_id: event.fixture_id || '',
+          sport_slug: event.sport_slug,
+          competition_name: event.competition_name || '',
+          home_team_name: event.home_team_name,
+          away_team_name: event.away_team_name,
+          start_time: event.start_time,
+          status: event.status,
+          phase: event.phase || '',
+          phase_label: event.phase_label || '',
+          home_score: event.home_score ?? null,
+          away_score: event.away_score ?? null,
+          ht_home_score: event.ht_home_score ?? null,
+          ht_away_score: event.ht_away_score ?? null,
+          result_source: event.result_source || '',
+          last_sync_at: event.last_sync_at || null,
+          audit_checks: numberOr(event.audit_checks, 0),
+          open_selections: betsByEvent.get(event.id) || 0,
+          evidence: audit
+            ? {
+                audited_at: audit.audited_at,
+                total_goals: audit.total_goals,
+                corners_home: audit.corners_home,
+                corners_away: audit.corners_away,
+                cards_home: audit.cards_home,
+                cards_away: audit.cards_away,
+                audit_report: audit.audit_report || '',
+              }
+            : null,
+        };
+      });
+      return Response.json({ events: rows, count: rows.length });
+    }
+
+    /* ---------------- decisão de revisão: confirmar ou anular ---------------- */
+    // Idempotente: só age sobre partidas efetivamente em revisão. A decisão
+    // nunca liquida apostas diretamente — a liquidação acontece no próximo
+    // ciclo, a partir do resultado confirmado, e fica na trilha de auditoria.
+    if (action === 'resolve_review') {
+      const eventId = String(body.event_id || '');
+      const decision = String(body.decision || '');
+      if (!eventId || !['confirm', 'void'].includes(decision)) {
+        return Response.json({ error: 'Decisão inválida: use confirm ou void com o id da partida.' }, { status: 400 });
+      }
+      const eventPage = await db.Event.filter({ id: eventId }, { limit: 1 });
+      const event = eventPage.items?.[0];
+      if (!event) return Response.json({ error: 'Partida não encontrada.' }, { status: 404 });
+      if (event.settlement_state !== 'review') {
+        return Response.json({ error: 'A partida não está em revisão administrativa.' }, { status: 400 });
+      }
+
+      const nowIso = new Date().toISOString();
+      const patch = {
+        tracking: 'finished',
+        published: false,
+        odds_status: 'unavailable',
+        next_check_at: null,
+        result_source: 'admin_review',
+        result_confirmed_at: nowIso,
+        settlement_state: 'waiting',
+      };
+      let scoreLabel = '';
+
+      if (decision === 'confirm') {
+        const home = body.home_score === undefined || body.home_score === null || body.home_score === ''
+          ? event.home_score
+          : Number(body.home_score);
+        const away = body.away_score === undefined || body.away_score === null || body.away_score === ''
+          ? event.away_score
+          : Number(body.away_score);
+        if (!Number.isFinite(home) || !Number.isFinite(away) || home < 0 || away < 0) {
+          return Response.json({ error: 'Placar final necessário para confirmar o resultado.' }, { status: 400 });
+        }
+        patch.status = 'finished';
+        patch.home_score = home;
+        patch.away_score = away;
+        const htHome = Number(body.ht_home_score);
+        const htAway = Number(body.ht_away_score);
+        if (Number.isFinite(htHome) && Number.isFinite(htAway)) {
+          patch.ht_home_score = htHome;
+          patch.ht_away_score = htAway;
+        }
+        scoreLabel = `${home} x ${away}`;
+      } else {
+        patch.status = 'cancelled';
+        scoreLabel = 'partida anulada';
+      }
+
+      await db.Event.update(event.id, patch);
+      await db.AdminAuditLog.create({
+        actor_id: user.id,
+        actor_email: user.email,
+        action: 'match.review_resolved',
+        target_type: 'Event',
+        target_id: event.id,
+        details: `Revisão resolvida (${decision === 'confirm' ? 'resultado confirmado' : 'partida anulada'}) · ${
+          event.home_team_name
+        } x ${event.away_team_name} · ${scoreLabel}`.slice(0, 400),
+        severity: 'warning',
+      }).catch(() => null);
+
+      return Response.json({ ok: true, event_id: event.id, decision, score: scoreLabel });
+    }
+
     if (action !== 'overview') return Response.json({ error: 'Ação inválida.' }, { status: 400 });
 
     /* ------------------------------- overview ------------------------------- */
@@ -165,6 +325,18 @@ export default async function (req) {
     }
 
     const quotaRecord = await loadQuota(db, day);
+    // Pausa de segurança pós-429 compartilhada por todas as rotinas: visível no painel.
+    const pauseMs = Date.parse(quotaRecord?.rate_pause_until || '');
+    const configuredMinuteLimit = numberOr(settings.football_minute_limit, 0);
+    const pause = {
+      active: Number.isFinite(pauseMs) && pauseMs > Date.now(),
+      until: quotaRecord?.rate_pause_until || null,
+      strikes: numberOr(quotaRecord?.rate_limit_strikes, 0),
+      last_rate_limited_at: quotaRecord?.last_rate_limited_at || null,
+      last_status_code: quotaRecord?.last_status_code ?? null,
+      last_error: quotaRecord?.last_error || '',
+      minute_limit: configuredMinuteLimit > 0 ? configuredMinuteLimit : 60,
+    };
     const internalLimit = numberOr(settings.football_daily_limit, 100);
     const planLimit = account?.limit_day ?? settings.football_account_limit ?? internalLimit;
     const used = account?.current !== null && account?.current !== undefined ? account.current : numberOr(quotaRecord?.used, 0);
@@ -210,7 +382,7 @@ export default async function (req) {
 
     const todayKey = localDateString(now, FOOTBALL_TIMEZONE);
     const startIso = dayStartIso();
-    const [gamesToday, liveGames, finishedToday, monitored, pendingBets, auditedToday, auditQueue, criticalQueue] =
+    const [gamesToday, liveGames, finishedToday, monitored, pendingBets, auditedToday, auditQueue, criticalQueue, reviewEvents] =
       await Promise.all([
         db.Event.count({ local_date: todayKey, source: 'provider' }),
         db.Event.count({ status: 'live', source: 'provider' }),
@@ -220,6 +392,7 @@ export default async function (req) {
         db.BetAudit.count({ created_date: { $gte: startIso } }),
         db.Event.count({ next_check_at: { $ne: null }, status: { $in: ['scheduled', 'live'] } }),
         db.MatchMonitorQueue.count({ status: 'queued', priority: 4 }),
+        db.Event.count({ settlement_state: 'review' }),
       ]);
 
     const widgets = {
@@ -231,6 +404,7 @@ export default async function (req) {
       audited_today: auditedToday,
       audit_queue: auditQueue,
       critical_queue: criticalQueue,
+      review_events: reviewEvents,
       consumption: used,
       remaining,
     };
@@ -279,6 +453,7 @@ export default async function (req) {
       },
       alerts,
       widgets,
+      pause,
       forecast,
       history,
       monitor: {
@@ -290,6 +465,8 @@ export default async function (req) {
         monitor_critical_minutes: numberOr(settings.football_monitor_critical_minutes, DEFAULT_MONITOR_CRITICAL_MINUTES),
         critical_from_minute: numberOr(settings.football_critical_from_minute, 80),
         window_days: numberOr(settings.football_window_days, 5),
+        minute_limit: numberOr(settings.football_minute_limit, 0) || 60,
+        daily_limit: numberOr(settings.football_daily_limit, 100),
       },
       quota_percent: quotaPercent(used, internalLimit),
     });

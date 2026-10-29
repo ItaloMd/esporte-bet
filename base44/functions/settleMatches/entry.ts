@@ -145,6 +145,14 @@ export default async function (req) {
       const event = finishedById.get(selection.event_id) || voidById.get(selection.event_id);
       if (!event) return;
 
+      // Auditoria primeiro: o resultado só liquida com confirmação registrada —
+      // pela fonte oficial ou por decisão de revisão. Sem confirmação, a
+      // partida vai para revisão em vez de ser decidida por um placar solto.
+      if (event.status === 'finished' && !event.result_confirmed_at && event.result_source !== 'api_football') {
+        reviewEventIds.add(event.id);
+        return;
+      }
+
       if (voidById.has(event.id)) {
         touchedTickets.add(selection.ticket_id);
         settledEventIds.add(event.id);
