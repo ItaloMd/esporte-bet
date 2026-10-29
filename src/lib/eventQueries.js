@@ -102,6 +102,27 @@ export function bestBySelection(odds) {
   return [...byCode.values()].sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
 }
 
+const OVER_UNDER_CODE = /^(over|under)_(-?\d+(?:\.\d+)?)$/;
+
+/**
+ * Grade padronizada dos mercados de linha (Mais/Menos): Mais sempre à esquerda,
+ * Menos sempre à direita, linhas em ordem crescente — independente da ordem de
+ * retorno da API. Cotações suspensas saem da grade; o mercado inteiro some
+ * quando nenhuma seleção aberta resta.
+ */
+export function orderMarketOdds(market, odds = []) {
+  const open = odds.filter((odd) => odd.status === "open");
+  const isLineMarket = open.length >= 2 && open.every((odd) => OVER_UNDER_CODE.test(String(odd.code || "")));
+  if (!isLineMarket) return open;
+  return open.slice().sort((a, b) => {
+    const pa = OVER_UNDER_CODE.exec(String(a.code || ""));
+    const pb = OVER_UNDER_CODE.exec(String(b.code || ""));
+    const lineDiff = Number(pa?.[2]) - Number(pb?.[2]);
+    if (lineDiff) return lineDiff;
+    return (pa?.[1] === "over" ? 0 : 1) - (pb?.[1] === "over" ? 0 : 1);
+  });
+}
+
 export async function fetchMainOddsForEvents(events) {
   const ids = events.filter(Boolean).map((event) => event.id);
   if (!ids.length) return {};
@@ -120,9 +141,9 @@ export async function fetchMainOddsForEvents(events) {
 
   const byEvent = {};
   Object.entries(mainByEvent).forEach(([eventId, list]) => {
-    const open = list.filter((odd) => odd.status === "open");
-    const suspended = list.filter((odd) => odd.status === "suspended");
-    const chosen = bestBySelection(open.length ? open : suspended);
+    // Somente cotações abertas aparecem no cartão: suspensas não são exibidas
+    // nem selecionáveis, sem poluir a interface com avisos repetidos.
+    const chosen = bestBySelection(list.filter((odd) => odd.status === "open"));
     if (chosen.length) byEvent[eventId] = chosen.slice(0, MAX_CARD_ODDS);
   });
   return byEvent;

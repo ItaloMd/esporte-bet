@@ -5,8 +5,9 @@ import EventHeader from "@/components/odds/EventHeader";
 import MarketSection from "@/components/odds/MarketSection";
 import SportIcon from "@/components/sports/SportIcon";
 import { ErrorState } from "@/components/state/States";
+import FixtureInsights from "@/components/odds/insights/FixtureInsights";
 import { marketGroupLabel, sportName } from "@/lib/sports";
-import { bestBySelection, decorateOdds } from "@/lib/eventQueries";
+import { bestBySelection, decorateOdds, orderMarketOdds } from "@/lib/eventQueries";
 
 export default function EventDetail() {
   const { id } = useParams();
@@ -28,13 +29,17 @@ export default function EventDetail() {
         // Sem cotação publicada ou com a partida já iniciada, nenhuma seleção
         // pode ser adicionada ao bilhete.
         const bettable = Boolean(event.published) && Date.parse(event.start_time) > Date.now();
-        const markets = (marketsPage.items || []).map((market) => ({
-          ...market,
-          status: bettable ? market.status : "suspended",
-          odds: bestBySelection(decorated.filter((odd) => odd.market_id === market.id)).map((odd) =>
-            bettable ? odd : { ...odd, status: "suspended" },
-          ),
-        }));
+        // Somente cotações abertas são exibidas: suspensas saem da grade sem
+        // aviso repetido, e o mercado inteiro desaparece quando nada resta aberto.
+        const markets = (marketsPage.items || [])
+          .map((market) => ({
+            ...market,
+            odds: orderMarketOdds(
+              market,
+              bestBySelection(decorated.filter((odd) => odd.market_id === market.id)),
+            ),
+          }))
+          .filter((market) => market.odds.length > 0);
         setState({ loading: false, error: "", event, markets, bettable });
       } catch (error) {
         if (!active) return;
@@ -107,13 +112,7 @@ export default function EventDetail() {
         </section>
       ))}
 
-      <section className="card-surface px-4 py-4">
-        <h2 className="text-sm font-semibold">Estatísticas e resultados anteriores</h2>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Não há fonte confiável de estatísticas configurada nesta fase, por isso nenhum dado histórico é exibido.
-          Ao conectar um provedor, estas informações passam a aparecer aqui.
-        </p>
-      </section>
+      <FixtureInsights event={state.event} />
     </div>
   );
 }

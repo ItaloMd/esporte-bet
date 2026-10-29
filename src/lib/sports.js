@@ -42,7 +42,6 @@ export function statusLabel(status) {
 export function marketGroupLabel(group) {
   return {
     principal: "Resultado da partida",
-    dupla_chance: "Dupla possibilidade",
     gols: "Total de pontos/gols",
     ambas_marcam: "Ambas marcam",
     handicap: "Handicap",

@@ -107,12 +107,6 @@ export function buildBetAudit(event, fixture, {
     else lost.push('visitante vence');
     if (audit.btts) won.push('ambas marcam');
     else lost.push('ambas marcam');
-    if (regHome >= regAway) won.push('dupla chance 1x');
-    else lost.push('dupla chance 1x');
-    if (regHome !== regAway) won.push('dupla chance 12');
-    else lost.push('dupla chance 12');
-    if (regAway >= regHome) won.push('dupla chance x2');
-    else lost.push('dupla chance x2');
     TOTAL_LINES.forEach((line) => {
       if (audit[`over_${LINE_SUFFIX[line]}`]) won.push(`mais de ${line} gols`);
       else lost.push(`mais de ${line} gols`);
@@ -121,8 +115,6 @@ export function buildBetAudit(event, fixture, {
   if (htAvailable) {
     const htWinner = htHome > htAway ? 'casa' : htHome < htAway ? 'visitante' : 'empate';
     won.push(`resultado 1º tempo: ${htWinner}`);
-    if (htHome >= htAway) won.push('dupla chance 1x 1º tempo');
-    else lost.push('dupla chance 1x 1º tempo');
     if (htHome > 0 && htAway > 0) won.push('ambas marcam 1º tempo');
     else lost.push('ambas marcam 1º tempo');
     if (secondHalfTotal !== null) {

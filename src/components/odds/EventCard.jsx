@@ -68,18 +68,11 @@ export default function EventCard({ event, odds = [], showCompetition = true }) 
             Apostas encerradas — partida em andamento.
           </p>
         ) : odds.length ? (
-          <>
-            {odds.every((odd) => odd.status !== "open") && (
-              <p className="text-[10px] font-medium uppercase tracking-wide text-amber-400">
-                Odds suspensas — indisponíveis para novas simulações
-              </p>
-            )}
-            <div className={`grid gap-1.5 ${odds.length >= 3 ? "grid-cols-3" : "grid-cols-2"}`}>
-              {odds.map((odd) => (
-                <OddsButton key={odd.id} odd={odd} />
-              ))}
-            </div>
-          </>
+          <div className={`grid gap-1.5 ${odds.length >= 3 ? "grid-cols-3" : "grid-cols-2"}`}>
+            {odds.map((odd) => (
+              <OddsButton key={odd.id} odd={odd} />
+            ))}
+          </div>
         ) : (
           <p className="py-1 text-xs text-muted-foreground">
             Mercados não disponíveis na fonte de dados para este evento.

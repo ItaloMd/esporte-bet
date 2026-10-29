@@ -132,13 +132,6 @@ export function settleSelection(selection, event) {
   const htTotal = htAvailable ? htHome + htAway : null;
   const secondHalfTotal = htAvailable ? home + away - htTotal : null;
 
-  if (marketKey === 'double_chance') {
-    if (code === '1x') return home >= away ? 'won' : 'lost';
-    if (code === '12') return home !== away ? 'won' : 'lost';
-    if (code === 'x2') return away >= home ? 'won' : 'lost';
-    return null;
-  }
-
   if (marketKey === 'btts') {
     if (code === 'yes') return home > 0 && away > 0 ? 'won' : 'lost';
     if (code === 'no') return home === 0 || away === 0 ? 'won' : 'lost';
@@ -150,14 +143,6 @@ export function settleSelection(selection, event) {
     if (code === 'draw') return htHome === htAway ? 'won' : 'lost';
     if (code === homeSlug) return htHome > htAway ? 'won' : 'lost';
     if (code === awaySlug) return htAway > htHome ? 'won' : 'lost';
-    return null;
-  }
-
-  if (marketKey === 'ht_double_chance') {
-    if (!htAvailable) return null;
-    if (code === '1x') return htHome >= htAway ? 'won' : 'lost';
-    if (code === '12') return htHome !== htAway ? 'won' : 'lost';
-    if (code === 'x2') return htAway >= htHome ? 'won' : 'lost';
     return null;
   }
 
@@ -253,9 +238,11 @@ export async function markStartedEventsLive(db, nowIso) {
     const recent = items.filter((row) => Date.parse(row.start_time) >= nowMs - LIVE_WINDOW_MS);
     const stale = items.filter((row) => Date.parse(row.start_time) < nowMs - LIVE_WINDOW_MS);
     if (recent.length) {
+      // O status oficial (fase, minuto e placar) chega pelo detector ao vivo; o
+      // rótulo provisório evita exibir "Não iniciada" numa partida já rolando.
       await db.Event.updateMany(
         { id: { $in: recent.map((row) => row.id) } },
-        { $set: { status: 'live', published: false, odds_status: 'unavailable' } },
+        { $set: { status: 'live', published: false, odds_status: 'unavailable', phase: 'LIVE', phase_label: 'Em andamento' } },
       );
       startedIds.push(...recent.map((row) => row.id));
     }

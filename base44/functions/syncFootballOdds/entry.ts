@@ -28,7 +28,8 @@ const LOCK_MS = 4 * 60 * 1000;
 const ODDS_REFRESH_SECONDS = 3600;
 /** Chamadas preservadas para placares ao vivo, que têm prioridade sobre odds. */
 const RESERVE_CALLS = 10;
-const MAX_ODDS_DAYS = 2;
+/** Cotações cobrem hoje e os próximos 6 dias (janela de 7 dias da agenda). */
+const MAX_ODDS_DAYS = 7;
 
 /**
  * Coleta de cotações pré-jogo pela API-Football.

@@ -183,7 +183,6 @@ export function marketGroup(marketKey) {
   if (marketKey === "h2h") return "principal";
   if (marketKey === "spreads") return "handicap";
   if (marketKey === "totals") return "gols";
-  if (marketKey === "double_chance" || marketKey === "ht_double_chance") return "dupla_chance";
   if (marketKey === "btts" || marketKey === "ht_btts" || marketKey === "goal_both_halves") return "ambas_marcam";
   if (marketKey === "ht_result" || marketKey === "ht_totals") return "intervalo";
   if (String(marketKey || "").startsWith("corners")) return "escanteios";
@@ -196,8 +195,6 @@ export function marketName(marketKey, sportSlugValue) {
   if (marketKey === "h2h") return "Resultado da partida";
   if (marketKey === "spreads") return "Handicap";
   if (marketKey === "totals") return sportSlugValue === "futebol" ? "Total de gols" : "Total de pontos";
-  if (marketKey === "double_chance") return "Dupla Chance";
-  if (marketKey === "ht_double_chance") return "Dupla Chance 1º Tempo";
   if (marketKey === "btts") return "Ambas Marcam";
   if (marketKey === "ht_btts") return "Ambas Marcam 1º Tempo";
   if (marketKey === "ht_result") return "Resultado do 1º Tempo";

@@ -19,12 +19,10 @@ const WRITE_CHUNK = 400;
 /** Ordem de exibição dos mercados conhecidos (espelha o catálogo). */
 const MARKET_ORDER = {
   h2h: 1,
-  double_chance: 2,
   btts: 3,
   totals: 4,
   spreads: 5,
   ht_result: 6,
-  ht_double_chance: 7,
   ht_totals: 8,
   ht_btts: 9,
   corners: 10,

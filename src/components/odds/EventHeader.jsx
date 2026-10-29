@@ -36,7 +36,12 @@ export default function EventHeader({ event }) {
             </p>
           )}
           <p className="mt-1 text-[11px] text-muted-foreground">{formatDay(event.start_time)} · Brasília</p>
-          {event.status === "live" && <p className="mt-1 inline-flex items-center gap-1 text-[11px] text-destructive"><Radio className="h-3 w-3" aria-hidden="true" /> em andamento</p>}
+          {event.status === "live" && (
+            <p className="mt-1 inline-flex items-center gap-1 text-[11px] font-medium text-destructive">
+              <Radio className="h-3 w-3" aria-hidden="true" />
+              {event.phase_label || "Em andamento"}{event.minute ? ` · ${event.minute}'` : ""}
+            </p>
+          )}
         </div>
         <div className="flex flex-col items-center gap-2 text-center">
           <TeamCrest name={event.away_team_name} crest={event.away_team_crest} className="h-12 w-12" />
@@ -50,7 +55,7 @@ export default function EventHeader({ event }) {
             <MapPin className="h-3 w-3" aria-hidden="true" /> {event.venue}
           </span>
         )}
-        <span>Última atualização dos dados: {timeAgo(event.last_sync_at)}</span>
+        <span>Última atualização dos dados: {timeAgo(event.status === "live" ? event.live_updated_at || event.last_sync_at : event.last_sync_at)}</span>
         {event.external_id && <span className="font-mono">ID externo: {event.external_id}</span>}
       </div>
     </div>

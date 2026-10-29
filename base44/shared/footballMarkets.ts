@@ -9,12 +9,10 @@ import { slugify } from './oddsApi.ts';
 
 export const MARKET_CATALOG = [
   { key: 'h2h', name: 'Resultado', group: 'principal', provider_bet: 'Match Winner', needs: [], priority: 1 },
-  { key: 'double_chance', name: 'Dupla Chance', group: 'dupla_chance', provider_bet: 'Double Chance', needs: [], priority: 2 },
   { key: 'btts', name: 'Ambas Marcam', group: 'ambas_marcam', provider_bet: 'Both Teams Score', needs: [], priority: 3 },
   { key: 'totals', name: 'Gols (Mais/Menos)', group: 'gols', provider_bet: 'Goals Over/Under', needs: [], priority: 4 },
   { key: 'spreads', name: 'Handicap', group: 'handicap', provider_bet: 'Asian Handicap', needs: [], priority: 5 },
   { key: 'ht_result', name: 'Resultado 1º Tempo', group: 'intervalo', provider_bet: 'First Half Winner', needs: ['halftime'], priority: 6 },
-  { key: 'ht_double_chance', name: 'Dupla Chance 1º Tempo', group: 'intervalo', provider_bet: 'Double Chance - First Half', needs: ['halftime'], priority: 7 },
   { key: 'ht_totals', name: 'Gols 1º Tempo (Mais/Menos)', group: 'intervalo', provider_bet: 'Goals Over/Under First Half', needs: ['halftime'], priority: 8 },
   { key: 'ht_btts', name: 'Ambas Marcam 1º Tempo', group: 'intervalo', provider_bet: 'Both Teams Score - First Half', needs: ['halftime'], priority: 9 },
   { key: 'corners', name: 'Escanteios (Mais/Menos)', group: 'escanteios', provider_bet: 'Corners Over Under', needs: ['statistics'], priority: 10 },

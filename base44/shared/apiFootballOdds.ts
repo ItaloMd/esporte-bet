@@ -90,12 +90,6 @@ function outcomeFor(marketKey, value, teams) {
     if (!match) return null;
     return { name: `${match[1]} ${match[2]}`, point: Number(match[2]) };
   }
-  if (marketKey === 'double_chance' || marketKey === 'ht_double_chance') {
-    if (/^home\/draw$/i.test(raw)) return { name: 'Casa ou Empate', code: '1x' };
-    if (/^home\/away$/i.test(raw)) return { name: 'Casa ou Visitante', code: '12' };
-    if (/^draw\/away$/i.test(raw)) return { name: 'Empate ou Visitante', code: 'x2' };
-    return null;
-  }
   if (marketKey === 'btts' || marketKey === 'ht_btts' || marketKey === 'goal_both_halves') {
     if (/^yes$/i.test(raw)) return { name: 'Sim', code: 'yes' };
     if (/^no$/i.test(raw)) return { name: 'Não', code: 'no' };
