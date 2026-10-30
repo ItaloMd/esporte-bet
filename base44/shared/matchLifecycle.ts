@@ -72,6 +72,18 @@ export function regulationScore(event) {
 }
 
 /**
+ * Lê um código de linha em qualquer um dos formatos já gravados pelo sistema:
+ * `over_2.5` (mercados principais), `over-2-5` (mercados secundários) e
+ * variações com sinal. Devolve `null` quando o código não é uma linha.
+ */
+function parseLineSelection(code) {
+  const parsed = /^(over|under)[_-](-?\d+(?:[.-]\d+)?)$/.exec(String(code || ''));
+  if (!parsed) return null;
+  const line = Number(parsed[2].replace('-', '.'));
+  return Number.isFinite(line) ? { side: parsed[1], line } : null;
+}
+
+/**
  * Decide o resultado de uma seleção a partir do placar confirmado da partida.
  * Devolve `null` quando não é possível decidir — a seleção permanece aberta e a
  * partida é marcada para revisão. Nunca decide por ausência de dados.
@@ -82,8 +94,11 @@ export function settleSelection(selection, event) {
 
   // Partida adiada ou cancelada: a seleção é anulada, sem placar inventado.
   if (event?.status === 'postponed' || event?.status === 'cancelled') return 'void';
-  // Situações indefinidas ficam pendentes até decisão humana.
-  if (event?.settlement_state === 'review' || REVIEW_PHASES.has(String(event?.phase || '').toUpperCase())) return null;
+  // Fase oficial indefinida (suspensa, interrompida, W.O., decisão administrativa):
+  // a partida inteira fica pendente até decisão humana. A marca de revisão da
+  // partida, sozinha, não bloqueia tudo: os mercados que o placar confirmado já
+  // decide são liquidados e só o mercado sem evidência continua pendente.
+  if (REVIEW_PHASES.has(String(event?.phase || '').toUpperCase())) return null;
 
   const { home, away } = regulationScore(event);
   if (!code || !Number.isFinite(home) || !Number.isFinite(away)) return null;
@@ -99,13 +114,11 @@ export function settleSelection(selection, event) {
   }
 
   if (marketKey === 'totals') {
-    const parsed = /^(over|under)_(-?\d+(?:\.\d+)?)$/.exec(code);
+    const parsed = parseLineSelection(code);
     if (!parsed) return null;
-    const line = Number(parsed[2]);
     const total = home + away;
-    if (total === line) return 'void';
-    const isOver = total > line;
-    return (parsed[1] === 'over') === isOver ? 'won' : 'lost';
+    if (total === parsed.line) return 'void';
+    return (parsed.side === 'over') === (total > parsed.line) ? 'won' : 'lost';
   }
 
   if (marketKey === 'spreads') {
@@ -155,11 +168,10 @@ export function settleSelection(selection, event) {
 
   if (marketKey === 'ht_totals') {
     if (htTotal === null) return null;
-    const parsed = /^(over|under)_(-?\d+(?:\.\d+)?)$/.exec(code);
+    const parsed = parseLineSelection(code);
     if (!parsed) return null;
-    const line = Number(parsed[2]);
-    if (htTotal === line) return 'void';
-    return (parsed[1] === 'over') === (htTotal > line) ? 'won' : 'lost';
+    if (htTotal === parsed.line) return 'void';
+    return (parsed.side === 'over') === (htTotal > parsed.line) ? 'won' : 'lost';
   }
 
   if (marketKey === 'goal_both_halves') {
@@ -188,11 +200,10 @@ export function settleSelection(selection, event) {
     const [first, second] = statisticTotals[marketKey];
     if (!Number.isFinite(first) || !Number.isFinite(second)) return null;
     const statTotal = first + second;
-    const parsed = /^(over|under)_(-?\d+(?:\.\d+)?)$/.exec(code);
+    const parsed = parseLineSelection(code);
     if (!parsed) return null;
-    const line = Number(parsed[2]);
-    if (statTotal === line) return 'void';
-    return (parsed[1] === 'over') === (statTotal > line) ? 'won' : 'lost';
+    if (statTotal === parsed.line) return 'void';
+    return (parsed.side === 'over') === (statTotal > parsed.line) ? 'won' : 'lost';
   }
 
   return null;

@@ -382,18 +382,29 @@ export default async function (req) {
 
     const todayKey = localDateString(now, FOOTBALL_TIMEZONE);
     const startIso = dayStartIso();
-    const [gamesToday, liveGames, finishedToday, monitored, pendingBets, auditedToday, auditQueue, criticalQueue, reviewEvents] =
-      await Promise.all([
-        db.Event.count({ local_date: todayKey, source: 'provider' }),
-        db.Event.count({ status: 'live', source: 'provider' }),
-        db.Event.count({ local_date: todayKey, status: 'finished' }),
-        db.MatchMonitorQueue.count({ status: 'queued' }),
-        db.SimulationSelection.count({ status: 'open' }),
-        db.BetAudit.count({ created_date: { $gte: startIso } }),
-        db.Event.count({ next_check_at: { $ne: null }, status: { $in: ['scheduled', 'live'] } }),
-        db.MatchMonitorQueue.count({ status: 'queued', priority: 4 }),
-        db.Event.count({ settlement_state: 'review' }),
-      ]);
+    const [
+      gamesToday, liveGames, finishedToday, monitored, pendingBets, auditedToday, auditQueue,
+      criticalQueue, reviewEvents, brazilianLive, resultQueuePending, resultsConfirmed,
+      resultsUnavailable, pendingTickets, nextAttemptPage, lastAuditPage,
+    ] = await Promise.all([
+      db.Event.count({ local_date: todayKey, source: 'provider' }),
+      db.Event.count({ status: 'live', source: 'provider' }),
+      db.Event.count({ local_date: todayKey, status: 'finished' }),
+      db.MatchMonitorQueue.count({ status: 'queued' }),
+      db.SimulationSelection.count({ status: 'open' }),
+      db.BetAudit.count({ created_date: { $gte: startIso } }),
+      db.ResultAuditQueue.count({ status: 'pending' }),
+      db.MatchMonitorQueue.count({ status: 'queued', priority: 4 }),
+      db.Event.count({ settlement_state: 'review' }),
+      db.Event.count({ status: 'live', source: 'provider', country: 'Brazil' }),
+      db.ResultAuditQueue.count({ status: 'pending' }),
+      db.ResultAuditQueue.count({ result_state: 'confirmed' }),
+      db.ResultAuditQueue.count({ result_state: 'unavailable' }),
+      db.SimulationTicket.count({ status: 'open' }),
+      db.ResultAuditQueue.filter({ status: 'pending', next_attempt_at: { $exists: true } }, { sort: 'next_attempt_at', limit: 1 }),
+      db.SyncJob.filter({ job_type: 'results_audit' }, { sort: '-created_date', limit: 1 }),
+    ]);
+    const lastAudit = lastAuditPage?.items?.[0] || null;
 
     const widgets = {
       games_today: gamesToday,
@@ -402,11 +413,32 @@ export default async function (req) {
       monitored: monitored,
       pending_bets: pendingBets,
       audited_today: auditedToday,
-      audit_queue: auditQueue,
+      audit_queue: resultQueuePending,
       critical_queue: criticalQueue,
       review_events: reviewEvents,
       consumption: used,
       remaining,
+      brazilian_live: brazilianLive,
+      pending_tickets: pendingTickets,
+      results_confirmed: resultsConfirmed,
+      results_unavailable: resultsUnavailable,
+    };
+
+    /* ---- monitoramento da auditoria de resultados (só dados internos) ---- */
+    const resultAudit = {
+      queue_pending: resultQueuePending,
+      pending_selections: pendingBets,
+      pending_tickets: pendingTickets,
+      brazilian_live: brazilianLive,
+      results_confirmed: resultsConfirmed,
+      results_unavailable: resultsUnavailable,
+      review_events: reviewEvents,
+      next_attempt_at: nextAttemptPage?.items?.[0]?.next_attempt_at || null,
+      last_run_at: lastAudit?.created_date || null,
+      last_run_status: lastAudit?.status || '',
+      last_run_requests: numberOr(lastAudit?.requests_used, 0),
+      last_run_summary: lastAudit?.note || '',
+      last_run_error: lastAudit?.error_message || '',
     };
 
     // Persiste a previsão do dia para histórico de tendência.
@@ -453,6 +485,7 @@ export default async function (req) {
       },
       alerts,
       widgets,
+      result_audit: resultAudit,
       pause,
       forecast,
       history,

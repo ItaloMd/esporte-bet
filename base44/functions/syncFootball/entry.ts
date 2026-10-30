@@ -32,6 +32,7 @@ import { chunkArray } from '../../shared/matchLifecycle.ts';
 import { indexByFixtureId, numberOr, upcomingDates } from '../../shared/footballSync.ts';
 import { buildBetAudit } from '../../shared/footballAudit.ts';
 import { applyRelevancePatch, loadRelevanceConfig } from '../../shared/relevance.ts';
+import { isBrazilianMatch } from '../../shared/brazilianCompetitions.ts';
 
 const LOCK_MS = 4 * 60 * 1000;
 const CREATE_AHEAD_MS = 8 * 24 * 60 * 60 * 1000;
@@ -90,30 +91,26 @@ function nextAuditAt(nowMs, settings, checks) {
 
 /**
  * Partidas com auditoria vencida: nunca consultadas antes do horário agendado.
- * Somente partidas já exibidas (com cotação) ou com aposta pendente entram —
- * partidas importadas que nunca receberam cotação não são exibidas nem aceitam
- * aposta, então não consomem créditos de auditoria.
+ * Somente partidas com aposta pendente entram — partida sem aposta não gera
+ * consulta de resultado, mesmo publicada com cotação. A seção Ao Vivo é
+ * alimentada pelo detector central, que cobre os jogos em andamento em uma
+ * única chamada.
  */
 async function loadDueEvents(db, nowIso, openEventIds = []) {
-  const orConditions = [{ odds_status: { $ne: 'unavailable' } }];
-  for (let index = 0; index < openEventIds.length; index += 100) {
-    orConditions.push({ id: { $in: openEventIds.slice(index, index + 100) } });
-  }
+  if (!openEventIds.length) return [];
   const due = [];
-  let cursor = null;
-  for (let round = 0; round < 4; round += 1) {
+  for (const ids of chunkArray(openEventIds, 100)) {
     const page = await db.Event.filter(
       {
+        id: { $in: ids },
         fixture_id: { $exists: true },
         next_check_at: { $lte: nowIso },
         status: { $in: ['scheduled', 'live'] },
-        $or: orConditions,
       },
-      { limit: 500, sort: 'next_check_at', ...(cursor ? { cursor } : {}) },
+      { limit: 500, sort: 'next_check_at' },
     );
     due.push(...(page.items || []));
-    cursor = page.next_cursor;
-    if (!page.has_more || due.length >= MAX_AUDIT_EVENTS) break;
+    if (due.length >= MAX_AUDIT_EVENTS) break;
   }
   return due.slice(0, MAX_AUDIT_EVENTS);
 }
@@ -140,6 +137,12 @@ function fixtureFields(fixture, nowIso) {
   if (fixture.season) fields.season = fixture.season;
   // ID oficial da competição (league.id): base da pontuação de relevância.
   if (fixture.competition_id) fields.league_id = fixture.competition_id;
+  // Classificação brasileira pela configuração centralizada: alimenta o Ao Vivo.
+  fields.is_brazilian = isBrazilianMatch({
+    leagueId: fixture.competition_id,
+    country: fixture.country,
+    competitionName: fixture.competition_name,
+  });
   if (fixture.reg_home_score !== null && fixture.reg_away_score !== null) {
     fields.reg_home_score = fixture.reg_home_score;
     fields.reg_away_score = fixture.reg_away_score;

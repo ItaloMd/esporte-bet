@@ -24,6 +24,7 @@ import {
 import { LIVE_WINDOW_MS, chunkArray } from '../../shared/matchLifecycle.ts';
 import { indexByFixtureId, numberOr } from '../../shared/footballSync.ts';
 import { applyRelevancePatch, loadRelevanceConfig } from '../../shared/relevance.ts';
+import { isBrazilianMatch } from '../../shared/brazilianCompetitions.ts';
 import {
   isCriticalMinute,
   liveIntervalMinutes,
@@ -311,12 +312,22 @@ export default async function (req) {
       let liveCount = 0;
       let finishedCount = 0;
       let updatedCount = 0;
+      let brazilianLiveCount = 0;
 
       fixtures.forEach((fixture) => {
         const event = known.get(fixture.fixture_id);
         if (!event) return;
 
         const patch = patchFromFixture(fixture, event);
+        // Configuração centralizada de competições brasileiras: a seção Ao Vivo
+        // lê esta marca, gravada aqui sem nenhuma consulta extra.
+        const brazilian = isBrazilianMatch({
+          leagueId: event.league_id || fixture.competition_id,
+          country: event.country || fixture.country,
+          competitionName: event.competition_name || fixture.competition_name,
+        });
+        if (brazilian !== Boolean(event.is_brazilian)) patch.is_brazilian = brazilian;
+        if (brazilian && !fixture.finished) brazilianLiveCount += 1;
         // Relevância: partida ao vivo sobe no componente de importância —
         // recálculo puro a partir dos dados já gravados, sem novas chamadas.
         applyRelevancePatch(
@@ -524,6 +535,7 @@ export default async function (req) {
         `${responseRows} partida(s) na fonte`,
         `${updatedCount} atualizada(s)`,
         `${liveCount} em andamento`,
+        `${brazilianLiveCount} brasileira(s)`,
         `${finishedCount} encerrada(s)`,
         `fila ${queueRows.length} (críticas ${priorityCounts.p4} · favoritas ${priorityCounts.p3} · com apostas ${priorityCounts.p2} · padrão ${priorityCounts.p1})`,
         `suspeitas ${suspectsQueued} · ${suspectsFinished} encerrada(s) na confirmação`,
@@ -578,6 +590,7 @@ export default async function (req) {
         source_matches: responseRows,
         events_updated: updatedCount,
         live_matches: liveCount,
+        brazilian_live_matches: brazilianLiveCount,
         finished_matches: finishedCount,
         queue: { total: queueRows.length, ...priorityCounts },
         suspects: { queued: suspectsQueued, confirmed: suspectsConfirmed, finished: suspectsFinished },

@@ -6,6 +6,7 @@ import { toast } from "@/components/ui/use-toast";
 import CentralStatus from "@/components/admin/football/CentralStatus";
 import ConsumptionSimulator from "@/components/admin/football/ConsumptionSimulator";
 import OpsWidgets from "@/components/admin/football/OpsWidgets";
+import ResultAuditMonitor from "@/components/admin/football/ResultAuditMonitor";
 import ForecastPanel from "@/components/admin/football/ForecastPanel";
 import CentralLogs from "@/components/admin/football/CentralLogs";
 import ReviewQueue from "@/components/admin/football/ReviewQueue";
@@ -80,7 +81,7 @@ export default function FootballCentral() {
       const steps = [
         ["syncFootball", { mode: "calendar", trigger: "manual" }, "Calendário importado"],
         ["syncFootballLive", { trigger: "manual" }, "Detector ao vivo"],
-        ["syncFootball", { mode: "audit", trigger: "manual" }, "Partidas auditadas"],
+        ["auditarResultadosPendentes", { trigger: "manual" }, "Resultados pendentes"],
         ["syncFootballOdds", { mode: "auto", trigger: "manual" }, "Cotações atualizadas"],
         ["settleMatches", { trigger: "manual" }, "Bilhetes liquidados"],
       ];
@@ -125,6 +126,10 @@ export default function FootballCentral() {
         <>
           <CentralStatus data={data} />
           <OpsWidgets widgets={data.widgets} />
+          <ResultAuditMonitor
+            audit={data.result_audit}
+            consumption={{ ...(data.consumption || {}), limit: data.plan?.internal_limit }}
+          />
           <ReviewQueue />
           <ConsumptionSimulator
             monitor={data.monitor}

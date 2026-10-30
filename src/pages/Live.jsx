@@ -7,12 +7,7 @@ import EventGrid from "@/components/odds/EventGrid";
 import SectionHeading from "@/components/common/SectionHeading";
 import useEventFeed from "@/lib/useEventFeed";
 import useCompetitions from "@/lib/useCompetitions";
-import {
-  HIGH_RELEVANCE_SCORE,
-  buildEventFilter,
-  liveSectionOf,
-  sortEventsByRelevance,
-} from "@/lib/eventQueries";
+import { buildEventFilter, liveSectionOf, sortEventsByRelevance } from "@/lib/eventQueries";
 import { timeAgo } from "@/lib/format";
 import { SPORTS } from "@/lib/sports";
 import { CardListSkeleton } from "@/components/state/LoadingBlocks";
@@ -46,16 +41,18 @@ export default function Live() {
 
   // A janela de horário é recalculada a cada recarga: nunca fica congelada no
   // instante em que a página foi aberta.
+  // Somente partidas brasileiras: a lista é única para todos os visitantes e
+  // vem do cache compartilhado alimentado pelo detector central.
   const liveFilter = useMemo(
     () =>
       buildEventFilter({
         status: "live",
+        brazilian: true,
         search: filters.search,
         sportSlug: filters.sport,
         competitionId: filters.competition,
-        country: filters.country,
       }),
-    [filters.search, filters.sport, filters.competition, filters.country, reloadKey],
+    [filters.search, filters.sport, filters.competition, reloadKey],
   );
   const feed = useEventFeed(liveFilter, { limit: 30 });
   const [lastRefresh, setLastRefresh] = useState(new Date().toISOString());
@@ -91,18 +88,13 @@ export default function Live() {
       if (section === "interrupted") interrupted.push(event);
       else if (section === "active") active.push(event);
     });
-    const sorted = sortEventsByRelevance(active);
-    const isHigh = (event) => (Number(event.relevance_score) || 0) >= HIGH_RELEVANCE_SCORE;
-    const isBrazil = (event) => String(event.country || "").toLowerCase() === "brazil";
     return {
-      br: sorted.filter((event) => isHigh(event) && isBrazil(event)),
-      intl: sorted.filter((event) => isHigh(event) && !isBrazil(event)),
-      others: sorted.filter((event) => !isHigh(event)),
+      active: sortEventsByRelevance(active),
       interrupted: sortEventsByRelevance(interrupted),
     };
   }, [feed.events]);
 
-  const hasAny = groups.br.length + groups.intl.length + groups.others.length + groups.interrupted.length > 0;
+  const hasAny = groups.active.length + groups.interrupted.length > 0;
 
   return (
     <div className="space-y-5">
@@ -146,29 +138,15 @@ export default function Live() {
         <CardListSkeleton count={4} />
       ) : !hasAny ? (
         <EmptyState
-          title="Nenhuma partida ao vivo agora"
-          description="Quando a fonte de dados informar partidas em andamento, elas aparecem nesta página automaticamente — nenhuma partida encerrada permanece listada."
+          title="Nenhuma partida brasileira ao vivo agora"
+          description="Quando a fonte de dados informar partidas brasileiras em andamento, elas aparecem nesta página automaticamente — nenhuma partida encerrada permanece listada."
         />
       ) : (
         <>
           <LiveSection
-            title="Brasil em destaque"
-            subtitle="Competições brasileiras prioritárias em andamento"
-            events={groups.br}
-            oddsByEvent={feed.oddsByEvent}
-            loading={feed.loading}
-          />
-          <LiveSection
-            title="Internacionais em destaque"
-            subtitle="Grandes competições internacionais em andamento"
-            events={groups.intl}
-            oddsByEvent={feed.oddsByEvent}
-            loading={feed.loading}
-          />
-          <LiveSection
-            title="Outras partidas ao vivo"
-            subtitle="Demais jogos em andamento, ordenados por relevância"
-            events={groups.others}
+            title="Partidas brasileiras ao vivo"
+            subtitle="Competições nacionais, estaduais e regionais em andamento"
+            events={groups.active}
             oddsByEvent={feed.oddsByEvent}
             loading={feed.loading}
           />

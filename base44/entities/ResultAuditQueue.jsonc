@@ -1,0 +1,125 @@
+{
+  "name": "ResultAuditQueue",
+  "type": "object",
+  "properties": {
+    "fixture_id": {
+      "type": "string",
+      "description": "ID da partida na API-Football: chave \u00fanica da consulta de resultado."
+    },
+    "event_id": {
+      "type": "string"
+    },
+    "home_team_name": {
+      "type": "string"
+    },
+    "away_team_name": {
+      "type": "string"
+    },
+    "competition_name": {
+      "type": "string"
+    },
+    "match_status": {
+      "type": "string",
+      "enum": [
+        "scheduled",
+        "live",
+        "finished",
+        "postponed",
+        "cancelled"
+      ],
+      "default": "scheduled",
+      "description": "Estado atual da partida segundo a \u00faltima informa\u00e7\u00e3o gravada."
+    },
+    "priority": {
+      "type": "number",
+      "default": 4,
+      "description": "1 encerrada com apostas aguardando \u00b7 2 tentativa anterior falhou \u00b7 3 em andamento com apostas \u00b7 4 futura com apostas."
+    },
+    "pending_selections": {
+      "type": "number",
+      "default": 0,
+      "description": "Apostas (sele\u00e7\u00f5es) abertas desta partida \u2014 todas resolvidas por uma \u00fanica consulta."
+    },
+    "pending_tickets": {
+      "type": "number",
+      "default": 0,
+      "description": "Bilhetes relacionados que ainda dependem desta partida."
+    },
+    "market_keys": {
+      "type": "string",
+      "description": "Mercados apostados nesta partida, em lista separada por v\u00edrgula."
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "confirmed",
+        "removed"
+      ],
+      "default": "pending",
+      "description": "pending na fila \u00b7 confirmed resultado j\u00e1 confirmado e reutilizado \u00b7 removed sem pend\u00eancias."
+    },
+    "result_state": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "confirmed",
+        "unavailable",
+        "review"
+      ],
+      "default": "pending",
+      "description": "confirmed resultado final guardado \u00b7 unavailable sem retorno da fonte \u00b7 review aguardando decis\u00e3o humana."
+    },
+    "attempts": {
+      "type": "number",
+      "default": 0
+    },
+    "last_attempt_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "next_attempt_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "last_error": {
+      "type": "string"
+    },
+    "score": {
+      "type": "string"
+    },
+    "lock_owner": {
+      "type": "string"
+    },
+    "locked_until": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "required": [
+    "fixture_id",
+    "event_id"
+  ],
+  "rls": {
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

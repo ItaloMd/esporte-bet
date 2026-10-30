@@ -10,12 +10,14 @@ export const MAX_CARD_ODDS = 3;
  */
 export const LIVE_WINDOW_MS = 6 * 60 * 60 * 1000;
 
-export function buildEventFilter({ sportSlug, competitionId, dayRange, status, search, featured, country, from } = {}) {
+export function buildEventFilter({ sportSlug, competitionId, dayRange, status, search, featured, country, from, brazilian } = {}) {
   const filter = {};
   if (sportSlug === "outros") filter.sport_slug = { $in: OTHERS_SLUGS };
   else if (sportSlug) filter.sport_slug = sportSlug;
   if (competitionId) filter.competition_id = competitionId;
-  if (country) filter.country = country;
+  // Seção Ao Vivo: somente competições brasileiras, pelo país oficial da fonte.
+  if (brazilian) filter.country = "Brazil";
+  else if (country) filter.country = country;
   if (status) filter.status = status;
   if (featured) filter.is_featured = true;
   if (dayRange) filter.start_time = { $gte: dayRange.start, $lte: dayRange.end };
