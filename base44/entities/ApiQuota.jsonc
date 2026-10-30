@@ -25,10 +25,19 @@
       "type": "number"
     },
     "provider_remaining": {
-      "type": "number"
+      "type": "number",
+      "description": "Tokens restantes informados pelo provedor (x-ratelimit-requests-remaining). Base do token bucket global."
     },
     "provider_used": {
       "type": "number"
+    },
+    "purpose_used": {
+      "type": "string",
+      "description": "Consumo por finalidade em JSON: {\"live\":0,\"odds\":0,\"audit\":0,\"emergency\":0}."
+    },
+    "blocked_endpoints": {
+      "type": "string",
+      "description": "Disjuntores abertos em JSON: {\"/fixtures\":{\"until\":\"...\",\"strikes\":1}}."
     },
     "minute_key": {
       "type": "string",
@@ -42,12 +51,12 @@
     "rate_pause_until": {
       "type": "string",
       "format": "date-time",
-      "description": "Pausa de seguran\u00e7a ap\u00f3s HTTP 429: nenhuma requisi\u00e7\u00e3o \u00e0 API \u00e9 feita at\u00e9 este hor\u00e1rio (backoff progressivo com jitter)."
+      "description": "Pausa de seguran\u00e7a ap\u00f3s HTTP 429: nenhuma requisi\u00e7\u00e3o \u00e0 API \u00e9 feita at\u00e9 este hor\u00e1rio."
     },
     "rate_limit_strikes": {
       "type": "number",
       "default": 0,
-      "description": "Ocorr\u00eancias consecutivas de limite excedido: cada uma dobra a pausa progressiva, teto de 15 minutos."
+      "description": "Ocorr\u00eancias consecutivas de limite excedido: cada uma sobe um degrau no backoff (30/60/120/300s)."
     },
     "last_rate_limited_at": {
       "type": "string",

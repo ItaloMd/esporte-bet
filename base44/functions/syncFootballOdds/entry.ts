@@ -25,6 +25,7 @@ import { DEFAULT_HOUSE_MARGIN_PERCENT, localDateString } from '../../shared/odds
 import { indexByFixtureId, numberOr, upcomingDates } from '../../shared/footballSync.ts';
 import { chunkArray } from '../../shared/matchLifecycle.ts';
 import { applyRelevancePatch, loadRelevanceConfig } from '../../shared/relevance.ts';
+import { dueOddsItems, markOddsItemsDone, refreshOddsQueue } from '../../shared/footballOddsQueue.ts';
 
 const LOCK_MS = 4 * 60 * 1000;
 /** Cadências e tetos centralizados (ver shared/footballConfig.ts). */
@@ -114,15 +115,23 @@ export default async function (req) {
     const window = mode === 'today'
       ? [localDateString(now, FOOTBALL_TIMEZONE)]
       : [localDateString(now, FOOTBALL_TIMEZONE), ...upcomingDates(now, days - 1)];
+    // Fila prioritária: só é coletado o dia que tem partida vencida —
+    // ao vivo (CRITICA 60s), favorita (120s), com aposta aberta (180s) ou da
+    // grade do dia (NORMAL 300s). Partida fora da fila não consome cota.
+    await refreshOddsQueue(db, { now });
+    const { items: queueItems, dates: queueDates } = await dueOddsItems(db, { now });
+    const queuePriority = queueItems[0]?.priority || 'NORMAL';
+
     const due = [];
     for (const date of window) {
+      if (!queueDates.includes(date)) continue;
       const cached = await readCache(db, `odds:date:${date}`);
       if (cached?.fresh && !force) continue;
       due.push(date);
     }
     if (!due.length) {
       await releaseLock(db, quotaRecord);
-      return Response.json({ skipped: true, reason: 'Cotações já coletadas dentro da validade do cache' });
+      return Response.json({ skipped: true, reason: 'Nenhuma cotação vencida na fila prioritária' });
     }
 
     const job = await db.SyncJob.create({
@@ -154,7 +163,11 @@ export default async function (req) {
           break;
         }
         try {
-          const result = await client.call('/odds', { date, page }, { timeoutMs: 25000, purpose: 'odds' });
+          const result = await client.call('/odds', { date, page }, {
+            timeoutMs: 25000,
+            purpose: 'odds',
+            priority: queuePriority,
+          });
           used = client.used;
 
           const list = Array.isArray(result.data?.response) ? result.data.response : [];
@@ -220,6 +233,10 @@ export default async function (req) {
     const written = quotesByEvent.size
       ? await writeQuotes(db, { quotesByEvent, houseMargin, now })
       : { markets: 0, odds: 0, events: 0, available: 0, unavailable: 0, published: 0, suspendedMarkets: 0, removedOdds: 0 };
+
+    // Fila atendida: cada item volta com a cadência da sua prioridade
+    // (CRITICA 60s · FAVORITA 120s · APOSTA_ABERTA 180s · NORMAL 300s).
+    if (queueItems.length) await markOddsItemsDone(db, queueItems, { now }).catch(() => 0);
 
     // Relevância: partida cotada e publicada sobe no critério de
     // confiabilidade (até 10 pontos) — recálculo puro, sem novas chamadas.

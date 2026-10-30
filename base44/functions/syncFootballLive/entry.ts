@@ -5,8 +5,15 @@ import {
   footballApiBase,
   mapFixture,
 } from '../../shared/apiFootball.ts';
-import { CADENCE_TOLERANCE_MS, FOOTBALL_CADENCE, FOOTBALL_TTL } from '../../shared/footballConfig.ts';
+import {
+  CADENCE_TOLERANCE_MS,
+  FOOTBALL_CADENCE,
+  FOOTBALL_CACHE_TTL,
+  FOOTBALL_TTL,
+  LIVE_CACHE_KEY,
+} from '../../shared/footballConfig.ts';
 import { isThrottleError, openFootballClient } from '../../shared/footballClient.ts';
+import { saveLiveSnapshot } from '../../shared/footballLiveStore.ts';
 import {
   DEFAULT_DAILY_LIMIT,
   acquireLock,
@@ -20,6 +27,7 @@ import {
   quotaPolicy,
   releaseLock,
   saveQuota,
+  writeCache,
 } from '../../shared/footballQuota.ts';
 import { LIVE_WINDOW_MS, chunkArray } from '../../shared/matchLifecycle.ts';
 import { indexByFixtureId, numberOr } from '../../shared/footballSync.ts';
@@ -232,6 +240,28 @@ export default async function (req) {
 
       const known = await indexByFixtureId(db, fixtures.map((fixture) => fixture.fixture_id));
       const relevanceConfig = await loadRelevanceConfig(db);
+
+      // FONTE ÚNICA: o coletor grava o retrato em live_fixtures e no cache de
+      // 120 s. Monitoramento, liquidação e telas leem daqui — jamais do provedor.
+      const eventByFixture = new Map();
+      known.forEach((event, fixtureId) => eventByFixture.set(fixtureId, event.id));
+      const betFixtureIds = new Set();
+      eventByFixture.forEach((eventId, fixtureId) => {
+        if (openEventIds.has(eventId)) betFixtureIds.add(fixtureId);
+      });
+      await saveLiveSnapshot(db, fixtures, nowIso, {
+        eventByFixture,
+        betFixtureIds,
+        favoriteFixtureIds,
+      }).catch(() => null);
+      await writeCache(db, {
+        key: LIVE_CACHE_KEY,
+        endpoint: '/fixtures',
+        params: 'live=all',
+        ttlSeconds: FOOTBALL_CACHE_TTL.live,
+        records: fixtures.length,
+        note: `${fixtures.length} partida(s) no retrato ao vivo`,
+      }).catch(() => null);
 
       /**
        * Patch comum de uma partida da fonte aplicada ao evento conhecido. Fase

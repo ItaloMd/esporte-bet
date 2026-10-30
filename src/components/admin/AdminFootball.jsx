@@ -8,11 +8,12 @@ import { Switch } from "@/components/ui/switch";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "@/components/ui/use-toast";
 import { formatDateTime, timeAgo } from "@/lib/format";
+import CollectionArchitecture from "@/components/admin/football/CollectionArchitecture";
 
 const FOOTBALL_DEFAULTS = {
   football_enabled: false,
   football_base_url: "https://v3.football.api-sports.io",
-  football_daily_limit: 100,
+  football_daily_limit: 6000,
   football_minute_limit: 60,
   football_window_days: 7,
   football_calendar_refresh_seconds: 21600,
@@ -240,6 +241,8 @@ export default function AdminFootball({ actor }) {
           </p>
         ) : null}
       </section>
+
+      <CollectionArchitecture />
 
       <section className="card-surface space-y-3 p-4">
         <div>

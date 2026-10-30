@@ -60,7 +60,7 @@ export const ADMIN_SECTIONS = [
     group: "Configurações",
     items: [
       { key: "platform", label: "Plataforma", icon: ShieldCheck },
-      { key: "api-football", label: "API Football", icon: Activity },
+      { key: "api-football", label: "Configuração API", icon: SlidersHorizontal },
       { key: "provider", label: "Margem e Cotações", icon: SlidersHorizontal },
       { key: "catalog", label: "Esportes e Competições", icon: Database },
       { key: "risk", label: "Caixa e Risco", icon: Gauge },

@@ -1,0 +1,75 @@
+{
+  "name": "OddsQueueItem",
+  "type": "object",
+  "properties": {
+    "fixture_id": {
+      "type": "string"
+    },
+    "event_id": {
+      "type": "string"
+    },
+    "priority": {
+      "type": "string",
+      "enum": [
+        "CRITICA",
+        "FAVORITA",
+        "APOSTA_ABERTA",
+        "NORMAL"
+      ],
+      "default": "NORMAL",
+      "description": "CRITICA ao vivo \u00b7 FAVORITA marcada pelo jogador \u00b7 APOSTA_ABERTA com aposta pendente \u00b7 NORMAL demais partidas do dia."
+    },
+    "cadence_seconds": {
+      "type": "number",
+      "default": 300,
+      "description": "Intervalo de atualiza\u00e7\u00e3o herdado da prioridade (60/120/180/300)."
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "queued",
+        "processing",
+        "done",
+        "skipped"
+      ],
+      "default": "queued"
+    },
+    "reason": {
+      "type": "string"
+    },
+    "next_run_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "last_run_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "required": [
+    "fixture_id",
+    "priority"
+  ],
+  "rls": {
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

@@ -6,6 +6,7 @@
  * registrado por endpoint e finalidade, e as respostas ficam em cache para que
  * todas as telas e todos os usuários reutilizem a mesma chamada.
  */
+import { FOOTBALL_BUDGET } from "./footballConfig.ts";
 import { localDateString } from "./oddsApi.ts";
 
 export const QUOTA_PROVIDER = "api_football";
@@ -71,6 +72,51 @@ export function alertMessages(used, limit, previousAlerts = []) {
     messages: raised.map((threshold) => `Consumo da API-Football em ${threshold}% do orçamento diário`),
     alerts: [...new Set([...previousAlerts, ...raised.map(String)])],
   };
+}
+
+/* ----------------------------- orçamento por finalidade ----------------------------- */
+
+/** Finalidades do orçamento diário (reserva de 40/30/20/10%). */
+export const BUDGET_PURPOSES = ['live', 'odds', 'audit', 'emergency'];
+
+/**
+ * Categoria de orçamento de uma finalidade de chamada. Estatísticas, eventos,
+ * apuração e calendário são contabilizados na cota da sua família para que
+ * nenhuma rotina consuma a reserva das outras.
+ */
+export function budgetPurpose(purpose) {
+  const value = String(purpose || '').toLowerCase();
+  if (value === 'live') return 'live';
+  if (value === 'odds' || value === 'calendar' || value === 'insights') return 'odds';
+  if (value === 'audit' || value === 'statistics' || value === 'events' || value === 'predictions') return 'audit';
+  return 'emergency';
+}
+
+/** Teto diário de uma finalidade, a partir da reserva percentual configurada. */
+export function purposeBudget(limit, purpose) {
+  const share = Number(FOOTBALL_BUDGET[purpose]);
+  if (!Number.isFinite(share) || share <= 0) return Number(limit) || 0;
+  return Math.floor((Number(limit) * share) / 100);
+}
+
+/** Consumo por finalidade registrado no dia (JSON tolerante a registros antigos). */
+export function readPurposeUsage(record) {
+  try {
+    const parsed = JSON.parse(record?.purpose_used || '{}');
+    return BUDGET_PURPOSES.reduce((acc, key) => {
+      acc[key] = Number(parsed?.[key]) || 0;
+      return acc;
+    }, {});
+  } catch {
+    return BUDGET_PURPOSES.reduce((acc, key) => ({ ...acc, [key]: 0 }), {});
+  }
+}
+
+/** Verdadeiro quando a finalidade ainda tem orçamento próprio disponível. */
+export function canSpendPurpose(record, limit, purpose, cost = 1) {
+  const usage = readPurposeUsage(record);
+  const cap = purposeBudget(limit, purpose);
+  return usage[purpose] + Number(cost) <= cap;
 }
 
 /* ------------------------------ persistência ------------------------------ */

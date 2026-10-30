@@ -8,6 +8,10 @@
     "endpoint": {
       "type": "string"
     },
+    "purpose": {
+      "type": "string",
+      "description": "Finalidade da chamada (live, odds, audit, calendar, statistics, events, insights)."
+    },
     "status_code": {
       "type": "number"
     },
@@ -22,6 +26,14 @@
       "default": false
     },
     "credits_used": {
+      "type": "number",
+      "default": 0
+    },
+    "rate_limit_remaining": {
+      "type": "number",
+      "description": "x-ratelimit-requests-remaining devolvido pelo provedor na chamada."
+    },
+    "retry_count": {
       "type": "number",
       "default": 0
     },

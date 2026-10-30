@@ -48,6 +48,63 @@ export const FOOTBALL_TTL = {
   liveSignal: 900,
 };
 
+/**
+ * Cache compartilhado por tipo de dado (segundos) — equivalente ao Redis:
+ * a mesma chave devolve o dado sem tocar no provedor enquanto estiver válida.
+ */
+export const FOOTBALL_CACHE_TTL = {
+  /** live_fixtures: o retrato do coletor vale dois ciclos de 60 s. */
+  live: 120,
+  /** Cotações pré-jogo. */
+  odds: 300,
+  /** Prognósticos do provedor: muda no máximo uma vez por dia. */
+  predictions: 86400,
+  /** Classificações: atualizam por rodada. */
+  standings: 43200,
+  /** Estatísticas de equipe e de jogador. */
+  teamStatistics: 86400,
+  playersStatistics: 86400,
+};
+
+/** Chave do cache do retrato ao vivo (equivalente ao Redis live_fixtures). */
+export const LIVE_CACHE_KEY = 'live:fixtures';
+
+/**
+ * Prioridades da fila de cotações e sua cadência de atualização (segundos).
+ * Nenhuma partida fora desta fila recebe cotação.
+ */
+export const ODDS_PRIORITY = {
+  CRITICA: 60,
+  FAVORITA: 120,
+  APOSTA_ABERTA: 180,
+  NORMAL: 300,
+};
+
+/** Ordem de atendimento da fila de cotações (a mais urgente primeiro). */
+export const ODDS_PRIORITY_ORDER = ['CRITICA', 'FAVORITA', 'APOSTA_ABERTA', 'NORMAL'];
+
+/** Reserva do orçamento diário por finalidade, em percentual. */
+export const FOOTBALL_BUDGET = {
+  live: 40,
+  odds: 30,
+  audit: 20,
+  emergency: 10,
+};
+
+/** Faixas de contenção do orçamento diário (percentual consumido). */
+export const FOOTBALL_BUDGET_GUARD = {
+  /** A partir daqui as cotações normais são suspensas. */
+  suspendOdds: 80,
+  /** A partir daqui só jogos críticos e apuração de resultados. */
+  criticalOnly: 90,
+};
+
+/** Degraus do backoff do disjuntor, em segundos (429). */
+export const CIRCUIT_BREAKER_STEPS = [30, 60, 120, 300];
+
+/** Tokens preservados no token bucket global antes de qualquer nova chamada. */
+export const TOKEN_BUCKET_RESERVE = 20;
+
 /** Orçamento e proteção de consumo. */
 export const FOOTBALL_LIMITS = {
   /** Teto interno por minuto: 1/5 do limite do plano, muito acima da demanda. */
