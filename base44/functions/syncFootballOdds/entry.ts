@@ -70,6 +70,9 @@ export default async function (req) {
     if (!settings.football_enabled) {
       return Response.json({ skipped: true, reason: 'Integração API-Football desabilitada' });
     }
+    if (settings.football_paused) {
+      return Response.json({ skipped: true, reason: 'Coleta pausada no Monitoramento da API' });
+    }
 
     const apiKey = secrets.get('API_FOOTBALL_KEY');
     if (!apiKey) return Response.json({ skipped: true, reason: 'Chave da API-Football não configurada' });

@@ -72,6 +72,9 @@ export default async function (req) {
     if (!settings.football_enabled) {
       return Response.json({ skipped: true, reason: 'Integração API-Football desabilitada' });
     }
+    if (settings.football_paused) {
+      return Response.json({ skipped: true, reason: 'Coleta pausada no Monitoramento da API' });
+    }
 
     // 1) Fechamento de apostas e reconciliação de status: somente banco, sem API.
     const startedIds = await markStartedEventsLive(db, nowIso);

@@ -16,7 +16,7 @@ export const ADMIN_SECTIONS = [
       { key: "live", label: "Jogos Ao Vivo", icon: Radio },
       { key: "today", label: "Jogos Hoje", icon: CalendarDays },
       { key: "audit-games", label: "Auditoria de Jogos", icon: FileSearch },
-      { key: "api-monitor", label: "Monitoramento API", icon: Activity },
+      { key: "api-monitor", label: "Monitoramento da API", icon: Activity },
     ],
   },
   {
@@ -60,7 +60,7 @@ export const ADMIN_SECTIONS = [
     group: "Configurações",
     items: [
       { key: "platform", label: "Plataforma", icon: ShieldCheck },
-      { key: "api-football", label: "Configuração API", icon: SlidersHorizontal },
+      { key: "api-football", label: "Configuração da API", icon: SlidersHorizontal },
       { key: "provider", label: "Margem e Cotações", icon: SlidersHorizontal },
       { key: "catalog", label: "Esportes e Competições", icon: Database },
       { key: "risk", label: "Caixa e Risco", icon: Gauge },

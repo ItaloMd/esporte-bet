@@ -187,6 +187,11 @@
       "type": "boolean",
       "default": false
     },
+    "football_paused": {
+      "type": "boolean",
+      "default": false,
+      "description": "Pausa global da coleta: enquanto ativa, nenhuma rotina consulta a API-Football, seja ao vivo, calend\u00e1rio, cota\u00e7\u00f5es ou auditoria."
+    },
     "football_base_url": {
       "type": "string",
       "default": "https://v3.football.api-sports.io"

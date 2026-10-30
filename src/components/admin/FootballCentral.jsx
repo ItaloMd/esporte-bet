@@ -4,6 +4,7 @@ import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/use-toast";
 import CentralStatus from "@/components/admin/football/CentralStatus";
+import CollectionControl from "@/components/admin/football/CollectionControl";
 import ConsumptionSimulator from "@/components/admin/football/ConsumptionSimulator";
 import OpsWidgets from "@/components/admin/football/OpsWidgets";
 import ResultAuditMonitor from "@/components/admin/football/ResultAuditMonitor";
@@ -19,7 +20,7 @@ import ReviewQueue from "@/components/admin/football/ReviewQueue";
  */
 export default function FootballCentral() {
   const [data, setData] = useState(null);
-  const [settingsId, setSettingsId] = useState(null);
+  const [settings, setSettings] = useState(null);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
 
@@ -35,7 +36,7 @@ export default function FootballCentral() {
         setData(payload);
       }
       const page = await base44.entities.ProviderSettings.list({ limit: 1 });
-      setSettingsId(page.items?.[0]?.id || null);
+      setSettings(page.items?.[0] || null);
     } catch (error) {
       toast({ title: "Falha ao carregar a central", description: error.message, variant: "destructive" });
     } finally {
@@ -95,11 +96,56 @@ export default function FootballCentral() {
     }
   };
 
+  /** Pausa/retomada global: gravada nas configurações e respeitada por todas as rotinas. */
+  const togglePause = async () => {
+    if (!settings?.id) return;
+    const next = !settings.football_paused;
+    setRunning(true);
+    try {
+      await base44.entities.ProviderSettings.update(settings.id, { football_paused: next });
+      toast({
+        title: next ? "Coleta pausada" : "Coleta retomada",
+        description: next
+          ? "Nenhuma rotina consulta a API-Football enquanto a pausa estiver ativa."
+          : "As rotinas voltam a coletar no próximo ciclo.",
+      });
+      await load();
+    } catch (error) {
+      toast({ title: "Não foi possível alterar a coleta", description: error.message, variant: "destructive" });
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  /** Ativa a integração e executa a sincronização inicial na sequência. */
+  const activateAndSync = async () => {
+    setRunning(true);
+    try {
+      if (settings?.id) {
+        await base44.entities.ProviderSettings.update(settings.id, { football_enabled: true, football_paused: false });
+      }
+      const steps = [
+        ["syncFootball", { mode: "calendar", trigger: "manual" }, "Calendário importado"],
+        ["syncFootballLive", { trigger: "manual" }, "Detector ao vivo"],
+        ["syncFootballOdds", { mode: "auto", trigger: "manual" }, "Cotações atualizadas"],
+      ];
+      for (const [name, args, label] of steps) {
+        const ok = await invokeStep(name, args, label);
+        if (!ok) break;
+      }
+      await load();
+    } catch (error) {
+      toast({ title: "Falha ao ativar a integração", description: error.message, variant: "destructive" });
+    } finally {
+      setRunning(false);
+    }
+  };
+
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-base font-semibold">Central API-Football</h2>
+          <h2 className="text-base font-semibold">Monitoramento da API-Football</h2>
           <p className="text-xs text-muted-foreground">
             Monitoramento ao vivo, auditoria de apostas, controle de consumo e previsão — dentro do limite do plano.
           </p>
@@ -120,6 +166,13 @@ export default function FootballCentral() {
         </div>
       </div>
 
+      <CollectionControl
+        settings={settings}
+        busy={running}
+        onActivate={activateAndSync}
+        onTogglePause={togglePause}
+      />
+
       {!data ? (
         <div className="card-surface h-64 animate-pulse" />
       ) : (
@@ -134,7 +187,7 @@ export default function FootballCentral() {
           <ConsumptionSimulator
             monitor={data.monitor}
             planLimit={data.plan?.limit}
-            settingsId={settingsId}
+            settingsId={settings?.id || null}
             onSaved={saveIntervals}
           />
           <ForecastPanel forecast={data.forecast} history={data.history} />
