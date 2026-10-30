@@ -455,7 +455,7 @@ export default async function (req) {
 
     /* ------------------------- importação diária ------------------------- */
     if (mode === 'calendar') {
-      const windowDays = Math.min(Math.max(numberOr(settings.football_window_days, 2), 1), MAX_CALENDAR_DAYS);
+      const windowDays = Math.min(Math.max(numberOr(settings.football_window_days, MAX_CALENDAR_DAYS), 1), MAX_CALENDAR_DAYS);
       const calendarRefreshSeconds = numberOr(settings.football_calendar_refresh_seconds, 21600);
       // A rotina das 00:10 e o botão manual buscam as mesmas datas: o dia atual
       // (às 00:10, o dia que acabou de começar) e o(s) seguinte(s).

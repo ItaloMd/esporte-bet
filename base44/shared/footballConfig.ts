@@ -18,8 +18,12 @@ export const FOOTBALL_CADENCE = {
   liveIdleSeconds: 300,
   /** Janela de partidas futuras mantida no sistema. */
   calendarDays: 7,
-  /** Cotações: dias de calendário coletados por execução (hoje + amanhã). */
-  oddsWindowDays: 2,
+  /**
+   * Cotações: dias de calendário coletados por execução. Acompanha a janela de
+   * importação (today + 6) para que todos os jogos do calendário tenham cotação
+   * e apareçam publicados na grade.
+   */
+  oddsWindowDays: 7,
   /** Validade das cotações pré-jogo de um dia. */
   oddsRefreshSeconds: 3600,
   /** Páginas máximas de /odds por dia (10 partidas por página). */

@@ -14,7 +14,7 @@ const FOOTBALL_DEFAULTS = {
   football_base_url: "https://v3.football.api-sports.io",
   football_daily_limit: 100,
   football_minute_limit: 60,
-  football_window_days: 2,
+  football_window_days: 7,
   football_calendar_refresh_seconds: 21600,
   football_create_events: true,
   football_audit_offset_hours: 2,
