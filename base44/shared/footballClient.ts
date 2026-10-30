@@ -25,9 +25,13 @@ import { alertMessages, canSpend, loadQuota, quotaLevel, saveQuota } from './foo
 export const DEFAULT_MINUTE_LIMIT = FOOTBALL_LIMITS.minuteRequests;
 /** Marca das linhas de registro de cada requisição real enviada ao provedor. */
 const LEDGER_NOTE = 'ledger';
-/** Pausa inicial após 429: 60s dobrando a cada ocorrência, teto de 15 minutos. */
-const PAUSE_BASE_MS = 60 * 1000;
-const PAUSE_CAP_MS = 15 * 60 * 1000;
+/**
+ * Pausa após 429: o limite do provedor é por minuto (a conta é Pro, com folga
+ * diária), então a espera é de um a dois minutos. Pausas longas travavam todas
+ * as rotinas por meia hora por causa de um único minuto saturado.
+ */
+const PAUSE_BASE_MS = 45 * 1000;
+const PAUSE_CAP_MS = 90 * 1000;
 
 /** Pausa pós-429 ainda ativa: nenhuma chamada é feita até este horário. */
 export class FootballPausedError extends Error {

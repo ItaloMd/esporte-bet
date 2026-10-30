@@ -470,8 +470,9 @@ export default async function (req) {
         if (rateLimited || !canSpend(used, limit, policy.reserve, 1)) break;
         const cached = await readCache(db, `fixtures:date:${date}`);
         if (cached?.fresh) continue;
-        // O plano tem limite por minuto: as consultas de calendário são espaçadas.
-        if (syncedDays.length) await wait(2500);
+        // Limite por minuto compartilhado: as consultas de calendário são
+        // espaçadas para não disputar o minuto com as demais rotinas.
+        if (syncedDays.length) await wait(10000);
         try {
           const result = await client.call('/fixtures', { date, timezone: FOOTBALL_TIMEZONE }, { purpose: 'calendar' });
           used = client.used;
