@@ -1,17 +1,15 @@
 import React from "react";
-import { Activity, CalendarDays, CheckCircle2, Coins, Database, FileSearch, Flame, Gauge, ListChecks, Ticket } from "lucide-react";
+import { Activity, CalendarDays, CheckCircle2, Coins, Database, FileSearch, Gauge, Ticket } from "lucide-react";
 
 const WIDGETS = [
   { key: "games_today", label: "Jogos hoje", icon: CalendarDays },
   { key: "live_games", label: "Jogos ao vivo", icon: Activity },
   { key: "finished_today", label: "Jogos finalizados", icon: CheckCircle2 },
-  { key: "monitored", label: "Jogos monitorados", icon: ListChecks },
   { key: "pending_bets", label: "Apostas pendentes", icon: Ticket },
   { key: "audited_today", label: "Apostas auditadas", icon: FileSearch },
   { key: "consumption", label: "Consumo da API", icon: Database },
   { key: "remaining", label: "Créditos restantes", icon: Coins },
   { key: "audit_queue", label: "Fila de auditoria", icon: Gauge },
-  { key: "critical_queue", label: "Fila crítica (80'+)", icon: Flame },
 ];
 
 /** Módulo 8: painel operacional com widgets de monitoramento e apostas. */

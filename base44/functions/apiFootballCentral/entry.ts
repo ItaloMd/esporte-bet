@@ -469,19 +469,17 @@ export default async function (req) {
     const todayKey = localDateString(now, FOOTBALL_TIMEZONE);
     const startIso = dayStartIso();
     const [
-      gamesToday, liveGames, finishedToday, monitored, pendingBets, auditedToday, auditQueue,
-      criticalQueue, reviewEvents, brazilianLive, resultQueuePending, resultsConfirmed,
+      gamesToday, liveGames, finishedToday, pendingBets, auditedToday, auditQueue,
+      reviewEvents, brazilianLive, resultQueuePending, resultsConfirmed,
       resultsUnavailable, pendingTickets, nextAttemptPage, lastAuditPage,
       rateLimitedToday, endpointConsumption, ledgerCalls, lastCallPage,
     ] = await Promise.all([
       db.Event.count({ local_date: todayKey, source: 'provider' }),
       db.Event.count({ status: 'live', source: 'provider' }),
       db.Event.count({ local_date: todayKey, status: 'finished' }),
-      db.MatchMonitorQueue.count({ status: 'queued' }),
       db.SimulationSelection.count({ status: 'open' }),
       db.BetAudit.count({ created_date: { $gte: startIso } }),
       db.ResultAuditQueue.count({ status: 'pending' }),
-      db.MatchMonitorQueue.count({ status: 'queued', priority: 4 }),
       db.Event.count({ settlement_state: 'review' }),
       db.Event.count({ status: 'live', source: 'provider', country: 'Brazil' }),
       db.ResultAuditQueue.count({ status: 'pending' }),
@@ -518,11 +516,9 @@ export default async function (req) {
       games_today: gamesToday,
       live_games: liveGames,
       finished_today: finishedToday,
-      monitored: monitored,
       pending_bets: pendingBets,
       audited_today: auditedToday,
       audit_queue: resultQueuePending,
-      critical_queue: criticalQueue,
       review_events: reviewEvents,
       consumption: used,
       remaining,

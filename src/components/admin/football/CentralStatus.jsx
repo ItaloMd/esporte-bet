@@ -76,14 +76,9 @@ export default function CentralStatus({ data }) {
           hint={connection.last_sync_status || "—"}
         />
         <Stat
-          label="Último detector ao vivo"
-          value={connection.last_live_at ? timeAgo(connection.last_live_at) : "nunca"}
-          hint={connection.last_live_at ? formatDateTime(connection.last_live_at) : "—"}
-        />
-        <Stat
-          label="Monitoramento"
+          label="Coleta"
           value={data.monitor.enabled ? "Ativo" : "Desligado"}
-          hint={`placar a cada ${data.monitor.live_interval_minutes} min · calendário ${data.monitor.calendar_refresh_hours ?? 24} h`}
+          hint={`calendário a cada ${data.monitor.calendar_refresh_hours ?? 24} h · janela de ${data.monitor.window_days ?? 7} dias`}
         />
         <Stat label="Partidas em revisão" value={data.widgets?.review_events ?? 0} hint="aguardando decisão administrativa" />
         <Stat

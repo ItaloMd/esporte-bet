@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { BarChart3, Flame, History, Radio, Star, TrendingUp } from "lucide-react";
+import { BarChart3, Flame, History, Star, TrendingUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import EventFilters from "@/components/odds/EventFilters";
@@ -59,8 +59,6 @@ export default function Home() {
     [nowIso],
   );
 
-  const liveFilter = useMemo(() => buildEventFilter({ status: "live" }), []);
-  const liveFeed = useEventFeed(liveFilter, { limit: 6 });
   const featuredFeed = useEventFeed(featuredFilter, { limit: 4, sort: "start_time" });
   const resultsFeed = useEventFeed(PAST, { limit: 4, sort: "-start_time" });
 
@@ -79,8 +77,7 @@ export default function Home() {
   const feed = useEventFeed(feedFilter, { limit: 10 });
 
   const featured = featuredFeed.events;
-  // Ao vivo e próximos jogos ordenados pela relevância calculada no backend.
-  const live = useMemo(() => sortEventsByRelevance(liveFeed.events), [liveFeed.events]);
+  // Próximos jogos ordenados pela relevância calculada no backend.
   const upcoming = useMemo(() => sortEventsByRelevance(feed.events), [feed.events]);
 
   return (
@@ -99,13 +96,13 @@ export default function Home() {
         </p>
         <div className="mt-4 flex flex-wrap gap-2">
           <Button asChild>
-            <Link to="/ao-vivo">
-              <Radio className="mr-2 h-4 w-4" /> Partidas ao vivo
+            <Link to="/esportes">
+              <BarChart3 className="mr-2 h-4 w-4" /> Todos os esportes
             </Link>
           </Button>
           <Button variant="outline" asChild>
-            <Link to="/esportes">
-              <BarChart3 className="mr-2 h-4 w-4" /> Todos os esportes
+            <Link to="/competicoes">
+              <Star className="mr-2 h-4 w-4" /> Competições
             </Link>
           </Button>
         </div>
@@ -124,18 +121,6 @@ export default function Home() {
           onSubmitSearch={(term) => navigate(term ? `/busca?q=${encodeURIComponent(term)}` : "/busca")}
         />
       </section>
-
-      {live.length > 0 && (
-        <section>
-          <SectionHeading
-            icon={Radio}
-            title="Ao vivo agora"
-            subtitle="Placar e status atualizados conforme a fonte de dados"
-            to="/ao-vivo"
-          />
-          <EventGrid events={live} oddsByEvent={liveFeed.oddsByEvent} loading={liveFeed.loading} />
-        </section>
-      )}
 
       <section>
         <SectionHeading

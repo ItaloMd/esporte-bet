@@ -182,7 +182,6 @@ export default function FootballCentral() {
     await runSteps([
       ["syncFootball", { mode: "calendar", trigger: "manual" }, "Calendário importado"],
       ["syncFootballOdds", { mode: "auto", trigger: "manual", force: true }, "Cotações atualizadas"],
-      ["syncFootballLive", { trigger: "manual" }, "Detector ao vivo"],
     ]);
   };
 
@@ -192,7 +191,7 @@ export default function FootballCentral() {
         <div>
           <h2 className="text-base font-semibold">Monitoramento da API-Football</h2>
           <p className="text-xs text-muted-foreground">
-            Monitoramento ao vivo, auditoria de apostas, controle de consumo e previsão — dentro do limite do plano.
+            Coleta pré-jogo, auditoria de apostas, controle de consumo e previsão — dentro do limite do plano.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">

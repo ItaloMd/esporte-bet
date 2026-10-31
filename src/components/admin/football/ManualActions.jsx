@@ -1,5 +1,5 @@
 import React from "react";
-import { Activity, BadgeCheck, CalendarDays, ClipboardCheck, Layers, TrendingUp } from "lucide-react";
+import { BadgeCheck, CalendarDays, ClipboardCheck, Layers, TrendingUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 /**
@@ -14,13 +14,6 @@ export const MANUAL_ACTIONS = [
     hint: "Importa as partidas dos próximos dias que ainda não estão no sistema.",
     icon: CalendarDays,
     steps: [["syncFootball", { mode: "calendar", trigger: "manual" }, "Calendário importado"]],
-  },
-  {
-    key: "live",
-    label: "Atualizar ao vivo",
-    hint: "Lê placar, minuto e situação das partidas em andamento.",
-    icon: Activity,
-    steps: [["syncFootballLive", { trigger: "manual" }, "Detector ao vivo"]],
   },
   {
     key: "odds",
@@ -90,7 +83,7 @@ export default function ManualActions({ busy, onRun }) {
           <div className="min-w-0">
             <p className="text-xs font-medium">Ciclo completo</p>
             <p className="text-[11px] leading-snug text-muted-foreground">
-              Executa as cinco ações acima em sequência, com espera entre as etapas. Se o provedor sinalizar limite, o
+              Executa as quatro ações acima em sequência, com espera entre as etapas. Se o provedor sinalizar limite, o
               ciclo para e as etapas restantes ficam para a próxima execução.
             </p>
           </div>

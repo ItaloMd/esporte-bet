@@ -16,7 +16,6 @@ import ResetPassword from '@/pages/ResetPassword';
 import Home from '@/pages/Home';
 import SportsIndex from '@/pages/SportsIndex';
 import SportPage from '@/pages/SportPage';
-import Live from '@/pages/Live';
 import Competitions from '@/pages/Competitions';
 import EventDetail from '@/pages/EventDetail';
 import SearchPage from '@/pages/SearchPage';
@@ -65,7 +64,6 @@ const AuthenticatedApp = () => {
         <Route path="/" element={<Home />} />
         <Route path="/esportes" element={<SportsIndex />} />
         <Route path="/esporte/:slug" element={<SportPage />} />
-        <Route path="/ao-vivo" element={<Live />} />
         <Route path="/competicoes" element={<Competitions />} />
         <Route path="/partida/:id" element={<EventDetail />} />
         <Route path="/busca" element={<SearchPage />} />
