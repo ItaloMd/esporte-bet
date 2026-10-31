@@ -99,8 +99,8 @@ export default function FootballCentral() {
         if (outcome === "error") break;
         if (shouldHalt(payload)) {
           toast({
-            title: "Ciclo interrompido",
-            description: "O provedor sinalizou limite de consultas. As etapas restantes ficam para o próximo ciclo.",
+            title: "Ação interrompida",
+            description: `Limite de consultas sinalizado em "${label}". As etapas seguintes não foram executadas e nada foi duplicado — retome quando a pausa terminar.`,
             variant: "destructive",
           });
           break;
