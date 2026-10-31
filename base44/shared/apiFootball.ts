@@ -215,6 +215,13 @@ function backoffDelayMs(attempt) {
 }
 
 /**
+ * Espera antes de repetir uma chamada barrada por limite: o provedor bloqueia
+ * por minuto, então alguns segundos costumam bastar. Insistir aqui evita que um
+ * bloqueio momentâneo interrompa o ciclo inteiro de coleta.
+ */
+const THROTTLE_BACKOFF_MS = 5000;
+
+/**
  * Executa uma chamada autenticada. Política de tentativas:
  * - 429/limite: NÃO retenta (esperar 3 segundos não limpa um limite por
  *   minuto) — a camada central registra pausa progressiva para todas as
@@ -225,7 +232,7 @@ function backoffDelayMs(attempt) {
  * (x-ratelimit-requests-limit/remaining/used).
  */
 export async function apiFootballFetch(apiKey, path, params = {}, options = {}) {
-  const { timeoutMs = 15000, retries = 2, base } = options;
+  const { timeoutMs = 15000, retries = 2, base, throttleRetries = 2 } = options;
   const url = new URL(`${base || DEFAULT_BASE_URL}${path}`);
   Object.entries(params).forEach(([key, value]) => {
     if (value === undefined || value === null || value === "") return;
@@ -245,6 +252,11 @@ export async function apiFootballFetch(apiKey, path, params = {}, options = {}) 
       // Limite por minuto/dia excedido: sem retentativa imediata — a pausa
       // progressiva fica registrada na camada central.
       if (response.status === 429) {
+        attempt += 1;
+        if (attempt <= throttleRetries) {
+          await new Promise((resolve) => setTimeout(resolve, THROTTLE_BACKOFF_MS * attempt));
+          continue;
+        }
         throw new FootballRateLimitError("API-Football: limite de requisições excedido (HTTP 429)", {
           retryAfterMs: retryAfterMsFrom(response),
         });
@@ -269,6 +281,11 @@ export async function apiFootballFetch(apiKey, path, params = {}, options = {}) 
       const errors = readErrors(payload);
       // Limite reportado no corpo (HTTP 200): mesmo tratamento do 429.
       if (errors.some(isRateLimitErrorText)) {
+        attempt += 1;
+        if (attempt <= throttleRetries) {
+          await new Promise((resolve) => setTimeout(resolve, THROTTLE_BACKOFF_MS * attempt));
+          continue;
+        }
         throw new FootballRateLimitError(errors.filter(isRateLimitErrorText).join(" | "));
       }
       return { data: payload, quota, status: response.status, errors, results: Number(payload?.results) || 0 };

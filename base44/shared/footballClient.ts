@@ -18,6 +18,7 @@
 import { FootballRateLimitError, apiFootballFetch, isRateLimitErrorText } from './apiFootball.ts';
 import {
   CIRCUIT_BREAKER_STEPS,
+  THROTTLE_PAUSE_STEPS,
   FOOTBALL_BUDGET_GUARD,
   FOOTBALL_LIMITS,
   TOKEN_BUCKET_RESERVE,
@@ -128,7 +129,7 @@ export async function openFootballClient(db, { apiKey, base, settings, day, limi
   async function registerRateLimit({ endpoint, retryAfterMs, message }) {
     const nowMs = Date.now();
     const strikes = Number(record?.rate_limit_strikes || 0) + 1;
-    const stepSeconds = CIRCUIT_BREAKER_STEPS[Math.min(strikes - 1, CIRCUIT_BREAKER_STEPS.length - 1)];
+    const stepSeconds = THROTTLE_PAUSE_STEPS[Math.min(strikes - 1, THROTTLE_PAUSE_STEPS.length - 1)];
     const jitter = 0.9 + Math.random() * 0.2;
     const pauseMs = Math.max(Number(retryAfterMs) || 0, Math.round(stepSeconds * 1000 * jitter));
     const untilIso = new Date(nowMs + pauseMs).toISOString();

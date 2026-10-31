@@ -54,7 +54,8 @@ export async function refreshOddsQueue(db, { now = new Date() } = {}) {
     if (!page.has_more) break;
   }
 
-  // Grade candidata: partidas publicadas ainda não encerradas da janela.
+  // Grade candidata: apenas partidas da fonte que ainda não começaram. Jogo
+  // iniciado não recebe mais aposta, então ocupar a fila só consumiria cota.
   const horizon = new Date(nowMs + 6 * 24 * 60 * 60 * 1000).toISOString();
   const candidates = [];
   let eventCursor = null;
@@ -62,8 +63,8 @@ export async function refreshOddsQueue(db, { now = new Date() } = {}) {
     const page = await db.Event.filter(
       {
         source: 'provider',
-        status: { $in: ['scheduled', 'live'] },
-        start_time: { $lte: horizon },
+        status: 'scheduled',
+        start_time: { $gt: nowIso, $lte: horizon },
       },
       { limit: 500, sort: 'start_time', ...(eventCursor ? { cursor: eventCursor } : {}) },
     );

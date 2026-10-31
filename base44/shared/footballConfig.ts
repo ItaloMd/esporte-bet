@@ -104,6 +104,13 @@ export const FOOTBALL_BUDGET_GUARD = {
 /** Degraus do backoff do disjuntor, em segundos (429). */
 export const CIRCUIT_BREAKER_STEPS = [30, 60, 120, 300];
 
+/**
+ * Pausa global após limite excedido (segundos). É curta de propósito: o
+ * bloqueio do provedor é contado por minuto, então travar a coleta por vários
+ * minutos só atrasa o ciclo seguinte.
+ */
+export const THROTTLE_PAUSE_STEPS = [20, 30, 45, 90];
+
 /** Tokens preservados no token bucket global antes de qualquer nova chamada. */
 export const TOKEN_BUCKET_RESERVE = 20;
 
