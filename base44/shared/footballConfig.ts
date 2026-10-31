@@ -114,9 +114,22 @@ export const THROTTLE_PAUSE_STEPS = [20, 30, 45, 90];
 /** Tokens preservados no token bucket global antes de qualquer nova chamada. */
 export const TOKEN_BUCKET_RESERVE = 20;
 
+/**
+ * Limites do plano no provedor: 300 requisições por minuto (≈5 por segundo).
+ * A margem de segurança mantém a coleta abaixo do teto mesmo com chamadas
+ * simultâneas, e o ritmo por segundo evita rajadas.
+ */
+export const PROVIDER_MINUTE_LIMIT = 300;
+export const PROVIDER_MINUTE_SAFETY = 0.8;
+export const PROVIDER_SECOND_LIMIT = 4;
+
 /** Orçamento e proteção de consumo. */
 export const FOOTBALL_LIMITS = {
-  /** Teto interno por minuto: 1/5 do limite do plano, muito acima da demanda. */
+  /**
+   * Teto interno por minuto: 1/5 do limite do plano (300/min). É também o teto
+   * absoluto — o painel pode reduzir, nunca aumentar. Mantém a coleta longe do
+   * limite do provedor e do próprio registro de consumo.
+   */
   minuteRequests: 60,
   /** Orçamento diário interno (abaixo dos 7.500 do plano, com margem). */
   dailyRequests: 6000,

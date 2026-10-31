@@ -110,10 +110,10 @@ export default function AdminFootball({ actor }) {
           </div>
           <div className="space-y-2">
             <Label htmlFor="fb_minute">Limite por minuto</Label>
-            <Input id="fb_minute" type="number" min="3" max="300" value={settings.football_minute_limit} onChange={(event) => update({ football_minute_limit: Number(event.target.value) })} />
+            <Input id="fb_minute" type="number" min="3" max="60" value={settings.football_minute_limit} onChange={(event) => update({ football_minute_limit: Number(event.target.value) })} />
             <p className="text-[11px] text-muted-foreground">
-              Teto compartilhado de requisições por minuto entre todas as rotinas — sempre abaixo do limite do plano
-              (300/min). Ao atingir, as rotinas esperam o próximo minuto em vez de receber 429 do provedor.
+              Teto compartilhado de requisições por minuto entre todas as rotinas — no máximo 60, bem abaixo dos
+              300/min do plano. Ao atingir, as rotinas esperam o próximo minuto em vez de receber 429 do provedor.
             </p>
           </div>
           <div className="space-y-2">

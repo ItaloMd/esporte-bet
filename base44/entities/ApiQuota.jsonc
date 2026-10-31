@@ -31,6 +31,19 @@
     "provider_used": {
       "type": "number"
     },
+    "provider_minute_limit": {
+      "type": "number",
+      "description": "Limite por minuto informado pelo provedor (X-RateLimit-Limit). Teto aplicado \u00e0 janela de 60 s."
+    },
+    "provider_minute_remaining": {
+      "type": "number",
+      "description": "Requisi\u00e7\u00f5es restantes no minuto corrente segundo o provedor (X-RateLimit-Remaining)."
+    },
+    "provider_minute_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Momento da leitura de X-RateLimit-Remaining: s\u00f3 vale para o minuto registrado."
+    },
     "purpose_used": {
       "type": "string",
       "description": "Consumo por finalidade em JSON: {\"live\":0,\"odds\":0,\"audit\":0,\"emergency\":0}."

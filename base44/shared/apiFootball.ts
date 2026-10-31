@@ -155,6 +155,9 @@ function parseQuota(headers) {
     limit: read("x-ratelimit-requests-limit"),
     remaining: read("x-ratelimit-requests-remaining"),
     used: read("x-ratelimit-requests-used"),
+    // Limite por minuto devolvido pelo provedor (X-RateLimit-*).
+    minuteLimit: read("x-ratelimit-limit"),
+    minuteRemaining: read("x-ratelimit-remaining"),
   };
 }
 
@@ -215,24 +218,17 @@ function backoffDelayMs(attempt) {
 }
 
 /**
- * Espera antes de repetir uma chamada barrada por limite: o provedor bloqueia
- * por minuto, então alguns segundos costumam bastar. Insistir aqui evita que um
- * bloqueio momentâneo interrompa o ciclo inteiro de coleta.
- */
-const THROTTLE_BACKOFF_MS = 5000;
-
-/**
  * Executa uma chamada autenticada. Política de tentativas:
- * - 429/limite: NÃO retenta (esperar 3 segundos não limpa um limite por
- *   minuto) — a camada central registra pausa progressiva para todas as
- *   rotinas, respeitando Retry-After quando fornecido;
+ * - 429/limite: NUNCA retenta — cada repetição é uma requisição a mais no
+ *   minuto do provedor. A camada central registra a pausa progressiva para
+ *   todas as rotinas, respeitando Retry-After quando fornecido;
  * - 401: erro de configuração, nunca retentado;
  * - 5xx/timeout/rede: até 2 tentativas com backoff exponencial e jitter.
  * Devolve também a quota informada pelo provedor nos cabeçalhos
  * (x-ratelimit-requests-limit/remaining/used).
  */
 export async function apiFootballFetch(apiKey, path, params = {}, options = {}) {
-  const { timeoutMs = 15000, retries = 2, base, throttleRetries = 2 } = options;
+  const { timeoutMs = 15000, retries = 2, base } = options;
   const url = new URL(`${base || DEFAULT_BASE_URL}${path}`);
   Object.entries(params).forEach(([key, value]) => {
     if (value === undefined || value === null || value === "") return;
@@ -251,12 +247,10 @@ export async function apiFootballFetch(apiKey, path, params = {}, options = {}) 
 
       // Limite por minuto/dia excedido: sem retentativa imediata — a pausa
       // progressiva fica registrada na camada central.
+      // Sem retentativa: o bloqueio do provedor é por minuto e repetir a
+      // chamada aqui só multiplica requisições. A camada central registra a
+      // pausa progressiva e as rotinas seguem servindo o cache.
       if (response.status === 429) {
-        attempt += 1;
-        if (attempt <= throttleRetries) {
-          await new Promise((resolve) => setTimeout(resolve, THROTTLE_BACKOFF_MS * attempt));
-          continue;
-        }
         throw new FootballRateLimitError("API-Football: limite de requisições excedido (HTTP 429)", {
           retryAfterMs: retryAfterMsFrom(response),
         });
@@ -280,12 +274,8 @@ export async function apiFootballFetch(apiKey, path, params = {}, options = {}) 
       const payload = await response.json();
       const errors = readErrors(payload);
       // Limite reportado no corpo (HTTP 200): mesmo tratamento do 429.
+      // Limite reportado no corpo (HTTP 200): mesmo tratamento do 429.
       if (errors.some(isRateLimitErrorText)) {
-        attempt += 1;
-        if (attempt <= throttleRetries) {
-          await new Promise((resolve) => setTimeout(resolve, THROTTLE_BACKOFF_MS * attempt));
-          continue;
-        }
         throw new FootballRateLimitError(errors.filter(isRateLimitErrorText).join(" | "));
       }
       return { data: payload, quota, status: response.status, errors, results: Number(payload?.results) || 0 };

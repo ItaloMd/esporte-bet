@@ -21,6 +21,9 @@ import {
   THROTTLE_PAUSE_STEPS,
   FOOTBALL_BUDGET_GUARD,
   FOOTBALL_LIMITS,
+  PROVIDER_MINUTE_LIMIT,
+  PROVIDER_MINUTE_SAFETY,
+  PROVIDER_SECOND_LIMIT,
   TOKEN_BUCKET_RESERVE,
 } from './footballConfig.ts';
 import {
@@ -37,6 +40,18 @@ import {
 export const DEFAULT_MINUTE_LIMIT = FOOTBALL_LIMITS.minuteRequests;
 /** Marca das linhas de registro de cada requisição real enviada ao provedor. */
 const LEDGER_NOTE = 'ledger';
+/** Espaçamento mínimo entre chamadas: no máximo PROVIDER_SECOND_LIMIT por segundo. */
+const MIN_CALL_GAP_MS = Math.ceil(1000 / PROVIDER_SECOND_LIMIT);
+
+/** Horário da última chamada desta execução (ritmo por segundo). */
+let lastCallAt = 0;
+
+/** Aguarda o espaçamento mínimo para que nenhuma execução fure os req/s. */
+async function paceCall() {
+  const waitMs = lastCallAt + MIN_CALL_GAP_MS - Date.now();
+  if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
+  lastCallAt = Date.now();
+}
 
 /** Pausa pós-429 ainda ativa: nenhuma chamada é feita até este horário. */
 export class FootballPausedError extends Error {
@@ -89,10 +104,20 @@ export function minuteBucketKey(nowMs) {
   return new Date(nowMs).toISOString().slice(0, 16);
 }
 
-/** Limite por minuto configurado no painel (fallback conservador). */
-export function effectiveMinuteLimit(settings) {
+/**
+ * Limite por minuto efetivo. O painel pode reduzir, nunca aumentar: o valor é
+ * limitado pelo teto interno (60/min), pela margem do plano (300/min) e pelo
+ * limite que o provedor informou em X-RateLimit-Limit.
+ */
+export function effectiveMinuteLimit(settings, providerMinuteLimit = null) {
+  const planCap = Math.floor(PROVIDER_MINUTE_LIMIT * PROVIDER_MINUTE_SAFETY);
+  const provider = Number(providerMinuteLimit);
+  const providerCap = Number.isFinite(provider) && provider > 0
+    ? Math.floor(provider * PROVIDER_MINUTE_SAFETY)
+    : planCap;
   const configured = Number(settings?.football_minute_limit);
-  return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_MINUTE_LIMIT;
+  const base = Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_MINUTE_LIMIT;
+  return Math.max(1, Math.min(base, DEFAULT_MINUTE_LIMIT, planCap, providerCap));
 }
 
 /** Endpoint sem parâmetros: chave do disjuntor. */
@@ -175,7 +200,7 @@ export async function openFootballClient(db, { apiKey, base, settings, day, limi
       return Number.isFinite(value) ? value : null;
     },
     get minuteLimit() {
-      return effectiveMinuteLimit(settings);
+      return effectiveMinuteLimit(settings, record?.provider_minute_limit);
     },
     get pausedUntil() {
       return record?.rate_pause_until || null;
@@ -212,16 +237,34 @@ export async function openFootballClient(db, { apiKey, base, settings, day, limi
         throw new FootballPausedError(record.rate_pause_until);
       }
 
-      // 3) Janela deslizante de 60 s sobre o registro real de chamadas.
+      // 3) Janela por minuto: a reserva do minuto corrente e o registro real de
+      // chamadas contam juntos, e o limite nunca passa do teto interno nem do
+      // que o provedor informou em X-RateLimit-Limit.
       const bucket = minuteBucketKey(nowMs);
-      const minuteLimit = effectiveMinuteLimit(settings);
+      const minuteLimit = effectiveMinuteLimit(settings, record?.provider_minute_limit);
+      const reserved = record?.minute_key === bucket ? Number(record?.minute_used || 0) : 0;
       const windowStartIso = new Date(nowMs - 60000).toISOString();
-      const recentCalls = await db.ApiUsageLog.count({ note: LEDGER_NOTE, created_date: { $gte: windowStartIso } });
-      if (recentCalls >= minuteLimit) {
+      const ledgerCalls =
+        Number(await db.ApiUsageLog.count({ note: LEDGER_NOTE, created_date: { $gte: windowStartIso } })) || 0;
+      const minuteUsed = Math.max(reserved, ledgerCalls);
+
+      // X-RateLimit-Remaining do minuto corrente: se o provedor já sinalizou
+      // pouco saldo, a próxima chamada espera o minuto seguinte.
+      const providerAtMs = Date.parse(record?.provider_minute_at || '');
+      const providerLeft =
+        Number.isFinite(providerAtMs) && minuteBucketKey(providerAtMs) === bucket
+          ? Number(record?.provider_minute_remaining)
+          : null;
+      const providerBlocked = Number.isFinite(providerLeft) && providerLeft - cost < TOKEN_BUCKET_RESERVE;
+
+      if (minuteUsed + cost > minuteLimit || providerBlocked) {
         const untilIso = new Date(nowMs - (nowMs % 60000) + 60000 + 1000 + Math.floor(Math.random() * 4000)).toISOString();
-        await persist({ rate_pause_until: untilIso, minute_key: bucket, minute_used: recentCalls });
+        await persist({ rate_pause_until: untilIso, minute_key: bucket, minute_used: minuteUsed });
         throw new FootballMinuteLimitError(minuteLimit);
       }
+
+      // 4) Ritmo por segundo: espaça as chamadas desta execução (4 req/s).
+      await paceCall();
 
       // 4) Orçamento diário total, com a reserva da faixa.
       if (!canSpend(used, limit, reserve, cost)) {
@@ -309,11 +352,17 @@ export async function openFootballClient(db, { apiKey, base, settings, day, limi
         blocked_endpoints: JSON.stringify(breakers),
         ...(messages.length ? { alerts, notes: messages.join(' · ').slice(0, 400) } : {}),
         minute_key: bucket,
-        minute_used: recentCalls + cost,
+        minute_used: minuteUsed + cost,
         rate_limit_strikes: 0,
         ...(result.quota?.limit !== null && result.quota?.limit !== undefined ? { provider_limit: result.quota.limit } : {}),
         ...(result.quota?.remaining !== null && result.quota?.remaining !== undefined ? { provider_remaining: result.quota.remaining } : {}),
         ...(result.quota?.used !== null && result.quota?.used !== undefined ? { provider_used: result.quota.used } : {}),
+        ...(result.quota?.minuteLimit !== null && result.quota?.minuteLimit !== undefined
+          ? { provider_minute_limit: result.quota.minuteLimit }
+          : {}),
+        ...(result.quota?.minuteRemaining !== null && result.quota?.minuteRemaining !== undefined
+          ? { provider_minute_remaining: result.quota.minuteRemaining, provider_minute_at: nowIso }
+          : {}),
         last_status_at: nowIso,
         last_status_code: 200,
       });
