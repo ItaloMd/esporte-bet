@@ -17,9 +17,10 @@ export const FOOTBALL_SETTINGS_RULES = {
   football_daily_limit: { type: 'number', min: 10, max: 20000 },
   /**
    * Teto compartilhado de requisições por minuto entre todas as rotinas.
-   * Limitado a 60 (1/5 dos 300/min do plano) e nunca acima disso no cliente.
+   * Limitado a 270 (90% dos 300/min do plano Pro) e nunca acima disso no
+   * cliente — a fila global espaça as chamadas em 200 ms cada.
    */
-  football_minute_limit: { type: 'number', min: 3, max: 60 },
+  football_minute_limit: { type: 'number', min: 10, max: 300 },
   football_window_days: { type: 'number', min: 1, max: 7 },
   football_calendar_refresh_seconds: { type: 'number', min: 3600, max: 86400 },
   football_audit_offset_hours: { type: 'number', min: 1, max: 6 },

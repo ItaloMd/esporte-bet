@@ -87,9 +87,14 @@ export default function CentralStatus({ data }) {
         />
         <Stat label="Partidas em revisão" value={data.widgets?.review_events ?? 0} hint="aguardando decisão administrativa" />
         <Stat
-          label="Limite por minuto"
-          value={pause.minute_limit ?? "—"}
+          label="Fila por minuto"
+          value={`${pause.minute_used ?? 0}/${pause.minute_limit ?? "—"}`}
           hint={`teto compartilhado · ${connection.rate_limited_today ?? 0} resposta(s) 429 hoje`}
+        />
+        <Stat
+          label="Saldo no provedor"
+          value={pause.minute_remaining_provider ?? "—"}
+          hint="X-RateLimit-Remaining · abaixo de 50 a fila espera o próximo minuto"
         />
       </div>
 

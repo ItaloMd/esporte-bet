@@ -1,29 +1,30 @@
 /**
- * Collector único da API-Football: toda chamada externa do sistema passa por
- * aqui. Nenhuma rotina fala com o provedor por conta própria, o que garante um
- * único ponto de controle de consumo:
+ * Fila única de requisições da API-Football.
  *
- * - token bucket global alimentado pelos cabeçalhos do provedor
- *   (x-ratelimit-requests-limit / -remaining): sem token, não há chamada;
- * - janela deslizante de 60 s sobre o registro real de chamadas enviadas;
+ * Toda chamada externa do sistema passa por aqui. Nenhuma rotina fala com o
+ * provedor por conta própria, o que garante um único ponto de controle:
+ *
+ * - fila global com 200 ms entre chamadas consecutivas (300/min do plano Pro),
+ *   compartilhada por rotinas agendadas e pelo painel administrativo;
+ * - janela de 60 s com teto de 90% do plano e leitura de X-RateLimit-Remaining:
+ *   abaixo de 50 a janela é fechada e a fila espera o próximo minuto;
+ * - prioridade: placares, auditoria, estatísticas e eventos usam a janela
+ *   inteira; cotações e insights param nos 90%, sem nunca competir com o
+ *   essencial;
  * - orçamento diário dividido por finalidade (40% ao vivo, 30% cotações,
  *   20% apuração, 10% emergência) com contenção em 80% e 90%;
- * - disjuntor por endpoint: ao receber 429 o endpoint fica bloqueado com
- *   backoff de 30/60/120/300 s e as rotinas seguem servindo o cache;
- * - pausa global pós-429, para que nenhuma rotina insista enquanto o minuto
- *   do provedor está saturado;
+ * - 429: pausa até o próximo minuto, disjuntor por endpoint e retentativa com
+ *   backoff exponencial (1s, 2s, 4s);
  * - registro de cada chamada com endpoint, finalidade, tempo de resposta,
- *   créditos, tokens restantes, cache hit e tentativas.
+ *   créditos e saldo informado pelo provedor.
  */
 import { FootballRateLimitError, apiFootballFetch, isRateLimitErrorText } from './apiFootball.ts';
 import {
   CIRCUIT_BREAKER_STEPS,
-  THROTTLE_PAUSE_STEPS,
   FOOTBALL_BUDGET_GUARD,
-  FOOTBALL_LIMITS,
-  PROVIDER_MINUTE_LIMIT,
-  PROVIDER_MINUTE_SAFETY,
-  PROVIDER_SECOND_LIMIT,
+  PROVIDER_REMAINING_FLOOR,
+  RATE_LIMIT_MAX_RETRIES,
+  RATE_LIMIT_PAUSE_MIN_MS,
   TOKEN_BUCKET_RESERVE,
 } from './footballConfig.ts';
 import {
@@ -35,23 +36,22 @@ import {
   quotaLevel,
   saveQuota,
 } from './footballQuota.ts';
+import {
+  DEFAULT_MINUTE_LIMIT,
+  effectiveMinuteLimit,
+  minuteAllowance,
+  minuteBucketKey,
+  nextMinuteStart,
+  planRequestSlot,
+  providerMinuteBlocked,
+  retryDelayMs,
+  sleep,
+} from './footballQueue.ts';
 
-/** Limite interno de requisições por minuto (definido em footballConfig). */
-export const DEFAULT_MINUTE_LIMIT = FOOTBALL_LIMITS.minuteRequests;
+export { DEFAULT_MINUTE_LIMIT, effectiveMinuteLimit, minuteBucketKey };
+
 /** Marca das linhas de registro de cada requisição real enviada ao provedor. */
 const LEDGER_NOTE = 'ledger';
-/** Espaçamento mínimo entre chamadas: no máximo PROVIDER_SECOND_LIMIT por segundo. */
-const MIN_CALL_GAP_MS = Math.ceil(1000 / PROVIDER_SECOND_LIMIT);
-
-/** Horário da última chamada desta execução (ritmo por segundo). */
-let lastCallAt = 0;
-
-/** Aguarda o espaçamento mínimo para que nenhuma execução fure os req/s. */
-async function paceCall() {
-  const waitMs = lastCallAt + MIN_CALL_GAP_MS - Date.now();
-  if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
-  lastCallAt = Date.now();
-}
 
 /** Pausa pós-429 ainda ativa: nenhuma chamada é feita até este horário. */
 export class FootballPausedError extends Error {
@@ -99,27 +99,6 @@ export function isThrottleError(error) {
   );
 }
 
-/** Chave do minuto corrente (UTC): contador por minuto compartilhado. */
-export function minuteBucketKey(nowMs) {
-  return new Date(nowMs).toISOString().slice(0, 16);
-}
-
-/**
- * Limite por minuto efetivo. O painel pode reduzir, nunca aumentar: o valor é
- * limitado pelo teto interno (60/min), pela margem do plano (300/min) e pelo
- * limite que o provedor informou em X-RateLimit-Limit.
- */
-export function effectiveMinuteLimit(settings, providerMinuteLimit = null) {
-  const planCap = Math.floor(PROVIDER_MINUTE_LIMIT * PROVIDER_MINUTE_SAFETY);
-  const provider = Number(providerMinuteLimit);
-  const providerCap = Number.isFinite(provider) && provider > 0
-    ? Math.floor(provider * PROVIDER_MINUTE_SAFETY)
-    : planCap;
-  const configured = Number(settings?.football_minute_limit);
-  const base = Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_MINUTE_LIMIT;
-  return Math.max(1, Math.min(base, DEFAULT_MINUTE_LIMIT, planCap, providerCap));
-}
-
 /** Endpoint sem parâmetros: chave do disjuntor. */
 function endpointKey(endpoint) {
   return String(endpoint || '').split('?')[0] || '/';
@@ -137,8 +116,8 @@ function readBreakers(record) {
 
 /**
  * Abre o cliente central da execução. O estado (registro de cota) é relido a
- * cada chamada: rotinas concorrentes compartilham token bucket, contador por
- * minuto, disjuntores e orçamento por finalidade.
+ * cada chamada: rotinas concorrentes compartilham o mesmo balde por minuto, o
+ * mesmo slot de fila, os disjuntores e o orçamento por finalidade.
  */
 export async function openFootballClient(db, { apiKey, base, settings, day, limit, reserve = 0, label = '' }) {
   let record = await loadQuota(db, day);
@@ -150,13 +129,18 @@ export async function openFootballClient(db, { apiKey, base, settings, day, limi
     return record;
   }
 
-  /** Registra o 429: pausa global progressiva + disjuntor do endpoint. */
+  /**
+   * Registra o 429: pausa até o próximo minuto, disjuntor do endpoint e
+   * contagem de ocorrências para o backoff exponencial.
+   */
   async function registerRateLimit({ endpoint, retryAfterMs, message }) {
     const nowMs = Date.now();
     const strikes = Number(record?.rate_limit_strikes || 0) + 1;
-    const stepSeconds = THROTTLE_PAUSE_STEPS[Math.min(strikes - 1, THROTTLE_PAUSE_STEPS.length - 1)];
-    const jitter = 0.9 + Math.random() * 0.2;
-    const pauseMs = Math.max(Number(retryAfterMs) || 0, Math.round(stepSeconds * 1000 * jitter));
+    const pauseMs = Math.max(
+      Number(retryAfterMs) || 0,
+      nextMinuteStart(nowMs) - nowMs,
+      RATE_LIMIT_PAUSE_MIN_MS,
+    );
     const untilIso = new Date(nowMs + pauseMs).toISOString();
 
     const key = endpointKey(endpoint);
@@ -172,7 +156,7 @@ export async function openFootballClient(db, { apiKey, base, settings, day, limi
       last_rate_limited_at: new Date(nowMs).toISOString(),
       last_status_at: new Date(nowMs).toISOString(),
       last_status_code: 429,
-      last_error: `429 · ${String(message || 'Too many requests').slice(0, 180)} · pausa ${Math.round(pauseMs / 1000)}s`,
+      last_error: `429 · ${String(message || 'Too many requests').slice(0, 160)} · pausa ${Math.round(pauseMs / 1000)}s`,
     });
     await db.ApiUsageLog.create({
       provider: 'api_football',
@@ -182,9 +166,25 @@ export async function openFootballClient(db, { apiKey, base, settings, day, limi
       cache_hit: false,
       credits_used: 0,
       params: label || '',
-      note: `limite excedido · degrau ${strikes} · disjuntor ${openSeconds}s`,
+      note: `limite excedido · degrau ${strikes} · disjuntor ${openSeconds}s · pausa ${Math.round(pauseMs / 1000)}s`,
       error_message: String(message || 'Too many requests').slice(0, 240),
     }).catch(() => null);
+    return { untilIso, waitMs: pauseMs };
+  }
+
+  /**
+   * Fecha a janela do minuto: nenhuma rotina chama o provedor até o próximo
+   * minuto virar. Usado quando o teto interno ou o X-RateLimit-Remaining manda
+   * parar.
+   */
+  async function closeMinute({ minuteKey, minuteUsed, reason }) {
+    const untilIso = new Date(nextMinuteStart(Date.now())).toISOString();
+    await persist({
+      rate_pause_until: untilIso,
+      minute_key: minuteKey,
+      minute_used: minuteUsed,
+      last_error: String(reason).slice(0, 200),
+    });
     return untilIso;
   }
 
@@ -210,182 +210,193 @@ export async function openFootballClient(db, { apiKey, base, settings, day, limi
     },
 
     /**
-     * Executa uma chamada passando por todos os controles. Pausa, limite por
-     * minuto, orçamento e disjuntor são lançados como exceções tipadas: a
-     * rotina chamadora para imediatamente e serve o cache.
+     * Executa uma chamada passando por toda a fila. `charge: false` serve ao
+     * /status, que não consome cota diária mas ocupa a janela do minuto.
      */
-    async call(endpoint, params = {}, { cost = 1, timeoutMs, purpose = label, priority } = {}) {
-      const fresh = await loadQuota(db, day);
-      if (fresh) {
-        record = fresh;
-        used = Number(record.used || 0);
-      }
-      const nowMs = Date.now();
-      const nowIso = new Date(nowMs).toISOString();
+    async call(endpoint, params = {}, { cost = 1, timeoutMs, purpose = label, priority, charge = true } = {}) {
       const bucketPurpose = budgetPurpose(purpose);
-
-      // 1) Disjuntor do endpoint aberto: a rotina usa o cache.
       const key = endpointKey(endpoint);
-      const breaker = readBreakers(record)?.[key];
-      if (breaker?.until && Date.parse(breaker.until) > nowMs) {
-        throw new FootballCircuitOpenError(key, breaker.until);
-      }
+      let attempt = 0;
 
-      // 2) Pausa global pós-429.
-      const pauseMs = Date.parse(record?.rate_pause_until || '');
-      if (Number.isFinite(pauseMs) && pauseMs > nowMs) {
-        throw new FootballPausedError(record.rate_pause_until);
-      }
-
-      // 3) Janela por minuto: a reserva do minuto corrente e o registro real de
-      // chamadas contam juntos, e o limite nunca passa do teto interno nem do
-      // que o provedor informou em X-RateLimit-Limit.
-      const bucket = minuteBucketKey(nowMs);
-      const minuteLimit = effectiveMinuteLimit(settings, record?.provider_minute_limit);
-      const reserved = record?.minute_key === bucket ? Number(record?.minute_used || 0) : 0;
-      const windowStartIso = new Date(nowMs - 60000).toISOString();
-      const ledgerCalls =
-        Number(await db.ApiUsageLog.count({ note: LEDGER_NOTE, created_date: { $gte: windowStartIso } })) || 0;
-      const minuteUsed = Math.max(reserved, ledgerCalls);
-
-      // X-RateLimit-Remaining do minuto corrente: se o provedor já sinalizou
-      // pouco saldo, a próxima chamada espera o minuto seguinte.
-      const providerAtMs = Date.parse(record?.provider_minute_at || '');
-      const providerLeft =
-        Number.isFinite(providerAtMs) && minuteBucketKey(providerAtMs) === bucket
-          ? Number(record?.provider_minute_remaining)
-          : null;
-      const providerBlocked = Number.isFinite(providerLeft) && providerLeft - cost < TOKEN_BUCKET_RESERVE;
-
-      if (minuteUsed + cost > minuteLimit || providerBlocked) {
-        const untilIso = new Date(nowMs - (nowMs % 60000) + 60000 + 1000 + Math.floor(Math.random() * 4000)).toISOString();
-        await persist({ rate_pause_until: untilIso, minute_key: bucket, minute_used: minuteUsed });
-        throw new FootballMinuteLimitError(minuteLimit);
-      }
-
-      // 4) Ritmo por segundo: espaça as chamadas desta execução (4 req/s).
-      await paceCall();
-
-      // 4) Orçamento diário total, com a reserva da faixa.
-      if (!canSpend(used, limit, reserve, cost)) {
-        throw new FootballBudgetError(used, limit);
-      }
-
-      // 5) Contenção por faixa: 80% suspende cotações normais, 90% mantém só
-      // o essencial (jogos críticos e apuração de resultados).
-      const percent = Number(limit) > 0 ? (used / Number(limit)) * 100 : 0;
-      const critical = priority === 'CRITICA';
-      if (percent >= FOOTBALL_BUDGET_GUARD.criticalOnly) {
-        const essential = bucketPurpose === 'live' || bucketPurpose === 'audit';
-        if (!essential && !critical) throw new FootballBudgetError(used, limit);
-      } else if (percent >= FOOTBALL_BUDGET_GUARD.suspendOdds) {
-        if (bucketPurpose === 'odds' && !critical) throw new FootballBudgetError(used, limit);
-      }
-
-      // 6) Orçamento próprio da finalidade.
-      if (!canSpendPurpose(record, limit, bucketPurpose, cost)) {
-        throw new FootballBudgetError(used, limit);
-      }
-
-      // 7) Token bucket global: sem token do provedor, nenhuma chamada.
-      const tokens = Number(record?.provider_remaining);
-      if (Number.isFinite(tokens) && tokens - cost < TOKEN_BUCKET_RESERVE) {
-        throw new FootballBudgetError(used, limit);
-      }
-
-      // 8) A chamada em si, cronometrada.
-      const startedAt = Date.now();
-      let result;
-      try {
-        result = await apiFootballFetch(apiKey, endpoint, params, {
-          base,
-          ...(timeoutMs ? { timeoutMs } : {}),
-        });
-      } catch (error) {
-        const durationMs = Date.now() - startedAt;
-        if (error instanceof FootballRateLimitError) {
-          await registerRateLimit({ endpoint, retryAfterMs: error.retryAfterMs, message: error.message });
+      for (;;) {
+        const fresh = await loadQuota(db, day);
+        if (fresh) {
+          record = fresh;
+          used = Number(record.used || 0);
         }
+        const nowMs = Date.now();
+        const nowIso = new Date(nowMs).toISOString();
+
+        // 1) Disjuntor do endpoint: a rotina usa o cache.
+        const breaker = readBreakers(record)?.[key];
+        if (breaker?.until && Date.parse(breaker.until) > nowMs) {
+          throw new FootballCircuitOpenError(key, breaker.until);
+        }
+
+        // 2) Pausa global: 429 recente ou minuto fechado.
+        const pauseMs = Date.parse(record?.rate_pause_until || '');
+        if (Number.isFinite(pauseMs) && pauseMs > nowMs) {
+          throw new FootballPausedError(record.rate_pause_until);
+        }
+
+        // 3) Janela de 60 s: contador compartilhado + registro real de chamadas,
+        // com teto por prioridade (essencial usa a janela inteira).
+        const bucket = minuteBucketKey(nowMs);
+        const minuteLimit = effectiveMinuteLimit(settings, record?.provider_minute_limit);
+        const ceiling = minuteAllowance(purpose, minuteLimit);
+        const reserved = record?.minute_key === bucket ? Number(record?.minute_used || 0) : 0;
+        const windowStartIso = new Date(nowMs - 60000).toISOString();
+        const ledgerCalls =
+          Number(await db.ApiUsageLog.count({ note: LEDGER_NOTE, created_date: { $gte: windowStartIso } })) || 0;
+        const minuteUsed = Math.max(reserved, ledgerCalls);
+
+        // 4) X-RateLimit-Remaining do minuto corrente: pouco saldo fecha o minuto.
+        if (providerMinuteBlocked(record, nowMs, cost)) {
+          const untilIso = await closeMinute({
+            minuteKey: bucket,
+            minuteUsed,
+            reason: `X-RateLimit-Remaining abaixo de ${PROVIDER_REMAINING_FLOOR}`,
+          });
+          throw new FootballPausedError(untilIso);
+        }
+        if (minuteUsed + cost > ceiling) {
+          await closeMinute({
+            minuteKey: bucket,
+            minuteUsed,
+            reason: `teto de ${ceiling} requisições/minuto atingido`,
+          });
+          throw new FootballMinuteLimitError(ceiling);
+        }
+
+        // 5) Orçamento diário, contenção por faixa e cota da finalidade.
+        if (charge) {
+          if (!canSpend(used, limit, reserve, cost)) throw new FootballBudgetError(used, limit);
+          const percent = Number(limit) > 0 ? (used / Number(limit)) * 100 : 0;
+          const critical = priority === 'CRITICA';
+          if (percent >= FOOTBALL_BUDGET_GUARD.criticalOnly) {
+            const essential = bucketPurpose === 'live' || bucketPurpose === 'audit';
+            if (!essential && !critical) throw new FootballBudgetError(used, limit);
+          } else if (percent >= FOOTBALL_BUDGET_GUARD.suspendOdds) {
+            if (bucketPurpose === 'odds' && !critical) throw new FootballBudgetError(used, limit);
+          }
+          if (!canSpendPurpose(record, limit, bucketPurpose, cost)) throw new FootballBudgetError(used, limit);
+          const tokens = Number(record?.provider_remaining);
+          if (Number.isFinite(tokens) && tokens - cost < TOKEN_BUCKET_RESERVE) {
+            throw new FootballBudgetError(used, limit);
+          }
+        }
+
+        // 6) Fila: reserva o próximo slot (200 ms após o anterior) e espera.
+        const slot = planRequestSlot(record?.last_slot_at, nowMs);
+        const slotIso = new Date(slot.atMs).toISOString();
+        if (record?.last_slot_at !== slotIso) await persist({ last_slot_at: slotIso });
+        await sleep(slot.waitMs);
+
+        // 7) A chamada em si, cronometrada.
+        const startedAt = Date.now();
+        let result;
+        try {
+          result = await apiFootballFetch(apiKey, endpoint, params, {
+            base,
+            ...(timeoutMs ? { timeoutMs } : {}),
+          });
+        } catch (error) {
+          const durationMs = Date.now() - startedAt;
+          if (error instanceof FootballRateLimitError) {
+            const { waitMs } = await registerRateLimit({
+              endpoint,
+              retryAfterMs: error.retryAfterMs,
+              message: error.message,
+            });
+            // Espera o próximo minuto e tenta de novo com backoff exponencial.
+            if (attempt < RATE_LIMIT_MAX_RETRIES) {
+              attempt += 1;
+              await sleep(waitMs + retryDelayMs(attempt));
+              continue;
+            }
+          }
+          await db.ApiUsageLog.create({
+            provider: 'api_football',
+            endpoint: String(endpoint || ''),
+            purpose: bucketPurpose,
+            status_code: error?.status || 0,
+            duration_ms: durationMs,
+            cache_hit: false,
+            credits_used: 0,
+            retry_count: attempt,
+            params: purpose || label || '',
+            note: attempt ? `falha na chamada após ${attempt} retentativa(s)` : 'falha na chamada',
+            error_message: String(error?.message || error).slice(0, 240),
+          }).catch(() => null);
+          throw error;
+        }
+        const durationMs = Date.now() - startedAt;
+
+        if (result.errors.some(isRateLimitErrorText)) {
+          const message = result.errors.filter(isRateLimitErrorText).join(' | ');
+          const { waitMs } = await registerRateLimit({ endpoint, retryAfterMs: null, message });
+          if (attempt < RATE_LIMIT_MAX_RETRIES) {
+            attempt += 1;
+            await sleep(waitMs + retryDelayMs(attempt));
+            continue;
+          }
+          throw new FootballRateLimitError(message);
+        }
+
+        // 8) Cobrança diária + por finalidade + tokens + janela do minuto, numa escrita.
+        if (charge) used += cost;
+        const purposeUsage = (() => {
+          try {
+            return JSON.parse(record?.purpose_used || '{}') || {};
+          } catch {
+            return {};
+          }
+        })();
+        if (charge) purposeUsage[bucketPurpose] = (Number(purposeUsage[bucketPurpose]) || 0) + cost;
+        const breakers = readBreakers(record);
+        delete breakers[key];
+        const { messages, alerts } = charge ? alertMessages(used, limit, record?.alerts || []) : { messages: [], alerts: record?.alerts || [] };
+
+        await persist({
+          ...(charge ? { used, limit, level: quotaLevel(used, limit) } : {}),
+          purpose_used: JSON.stringify(purposeUsage),
+          blocked_endpoints: JSON.stringify(breakers),
+          ...(messages.length ? { alerts, notes: messages.join(' · ').slice(0, 400) } : {}),
+          minute_key: bucket,
+          minute_used: minuteUsed + cost,
+          rate_limit_strikes: 0,
+          ...(result.quota?.limit !== null && result.quota?.limit !== undefined ? { provider_limit: result.quota.limit } : {}),
+          ...(result.quota?.remaining !== null && result.quota?.remaining !== undefined ? { provider_remaining: result.quota.remaining } : {}),
+          ...(result.quota?.used !== null && result.quota?.used !== undefined ? { provider_used: result.quota.used } : {}),
+          ...(result.quota?.minuteLimit !== null && result.quota?.minuteLimit !== undefined
+            ? { provider_minute_limit: result.quota.minuteLimit }
+            : {}),
+          ...(result.quota?.minuteRemaining !== null && result.quota?.minuteRemaining !== undefined
+            ? { provider_minute_remaining: result.quota.minuteRemaining, provider_minute_at: nowIso }
+            : {}),
+          last_status_at: nowIso,
+          last_status_code: 200,
+        });
+
+        // 9) Registro da requisição real: base da janela por minuto e do painel.
         await db.ApiUsageLog.create({
           provider: 'api_football',
           endpoint: String(endpoint || ''),
           purpose: bucketPurpose,
-          status_code: error?.status || 0,
+          status_code: result.status || 200,
           duration_ms: durationMs,
+          records_returned: Number(result.results) || 0,
           cache_hit: false,
-          credits_used: 0,
-          rate_limit_remaining: Number.isFinite(tokens) ? tokens : null,
-          retry_count: 0,
+          credits_used: charge ? cost : 0,
+          rate_limit_remaining: result.quota?.remaining ?? null,
+          retry_count: attempt,
           params: purpose || label || '',
-          note: 'falha na chamada',
-          error_message: String(error?.message || error).slice(0, 240),
+          note: LEDGER_NOTE,
+          error_message: '',
         }).catch(() => null);
-        throw error;
+
+        return result;
       }
-      const durationMs = Date.now() - startedAt;
-
-      if (result.errors.some(isRateLimitErrorText)) {
-        const message = result.errors.filter(isRateLimitErrorText).join(' | ');
-        await registerRateLimit({ endpoint, retryAfterMs: null, message });
-        throw new FootballRateLimitError(message);
-      }
-
-      // 9) Cobrança diária + por finalidade + tokens do provedor numa escrita.
-      used += cost;
-      const purposeUsage = (() => {
-        try {
-          return JSON.parse(record?.purpose_used || '{}') || {};
-        } catch {
-          return {};
-        }
-      })();
-      purposeUsage[bucketPurpose] = (Number(purposeUsage[bucketPurpose]) || 0) + cost;
-      const breakers = readBreakers(record);
-      delete breakers[key];
-      const { messages, alerts } = alertMessages(used, limit, record?.alerts || []);
-
-      await persist({
-        used,
-        limit,
-        level: quotaLevel(used, limit),
-        purpose_used: JSON.stringify(purposeUsage),
-        blocked_endpoints: JSON.stringify(breakers),
-        ...(messages.length ? { alerts, notes: messages.join(' · ').slice(0, 400) } : {}),
-        minute_key: bucket,
-        minute_used: minuteUsed + cost,
-        rate_limit_strikes: 0,
-        ...(result.quota?.limit !== null && result.quota?.limit !== undefined ? { provider_limit: result.quota.limit } : {}),
-        ...(result.quota?.remaining !== null && result.quota?.remaining !== undefined ? { provider_remaining: result.quota.remaining } : {}),
-        ...(result.quota?.used !== null && result.quota?.used !== undefined ? { provider_used: result.quota.used } : {}),
-        ...(result.quota?.minuteLimit !== null && result.quota?.minuteLimit !== undefined
-          ? { provider_minute_limit: result.quota.minuteLimit }
-          : {}),
-        ...(result.quota?.minuteRemaining !== null && result.quota?.minuteRemaining !== undefined
-          ? { provider_minute_remaining: result.quota.minuteRemaining, provider_minute_at: nowIso }
-          : {}),
-        last_status_at: nowIso,
-        last_status_code: 200,
-      });
-
-      // 10) Registro da requisição real: base da janela por minuto e do
-      // dashboard de consumo por endpoint e finalidade.
-      await db.ApiUsageLog.create({
-        provider: 'api_football',
-        endpoint: String(endpoint || ''),
-        purpose: bucketPurpose,
-        status_code: result.status || 200,
-        duration_ms: durationMs,
-        records_returned: Number(result.results) || 0,
-        cache_hit: false,
-        credits_used: cost,
-        rate_limit_remaining: result.quota?.remaining ?? null,
-        retry_count: 0,
-        params: purpose || label || '',
-        note: LEDGER_NOTE,
-        error_message: '',
-      }).catch(() => null);
-
-      return result;
     },
   };
   return client;

@@ -3,7 +3,6 @@ import { secrets } from 'base44:runtime';
 import {
   FOOTBALL_TIMEZONE,
   footballApiBase,
-  fetchAccountStatus,
   mapFixture,
   parseAccountStatus,
   parseFixtureEvents,
@@ -338,11 +337,21 @@ export default async function (req) {
       if (quota.used !== null && quota.used !== undefined) quotaPatch.provider_used = quota.used;
     };
 
-    // `/status` não consome a cota diária e revela o limite real da conta.
+    // `/status` não consome a cota diária e revela o limite real da conta, mas
+    // passa pela fila global: espaçamento de 200 ms e janela por minuto.
     let account = null;
     let statusError = '';
     try {
-      const statusResult = await fetchAccountStatus(apiKey, base);
+      const statusClient = await openFootballClient(db, {
+        apiKey,
+        base,
+        settings,
+        day,
+        limit,
+        reserve: 0,
+        label: 'status da conta',
+      });
+      const statusResult = await statusClient.call('/status', {}, { charge: false, purpose: 'status' });
       account = parseAccountStatus(statusResult.data);
       applyQuota(statusResult.quota);
       if (statusResult.errors.length) statusError = statusResult.errors.join(' | ');

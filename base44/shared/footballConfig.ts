@@ -105,32 +105,38 @@ export const FOOTBALL_BUDGET_GUARD = {
 export const CIRCUIT_BREAKER_STEPS = [30, 60, 120, 300];
 
 /**
- * Pausa global após limite excedido (segundos). É curta de propósito: o
- * bloqueio do provedor é contado por minuto, então travar a coleta por vários
- * minutos só atrasa o ciclo seguinte.
+ * Pausa mínima após 429. O bloqueio do provedor é contado por minuto: a fila
+ * sempre espera o próximo minuto antes de tentar de novo.
  */
-export const THROTTLE_PAUSE_STEPS = [20, 30, 45, 90];
+export const RATE_LIMIT_PAUSE_MIN_MS = 1500;
 
 /** Tokens preservados no token bucket global antes de qualquer nova chamada. */
 export const TOKEN_BUCKET_RESERVE = 20;
 
 /**
- * Limites do plano no provedor: 300 requisições por minuto (≈5 por segundo).
- * A margem de segurança mantém a coleta abaixo do teto mesmo com chamadas
- * simultâneas, e o ritmo por segundo evita rajadas.
+ * Plano Pro: 300 requisições por minuto. O espaçamento mínimo entre chamadas é
+ * de 200 ms (5 por segundo = 300/min, medido em toda a plataforma) e a janela
+ * de 60 s nunca passa de 90% do plano, mesmo com execuções simultâneas.
  */
 export const PROVIDER_MINUTE_LIMIT = 300;
-export const PROVIDER_MINUTE_SAFETY = 0.8;
-export const PROVIDER_SECOND_LIMIT = 4;
+export const PROVIDER_MINUTE_SAFETY = 0.9;
+export const REQUEST_GAP_MS = 200;
+
+/** X-RateLimit-Remaining abaixo deste valor fecha o minuto e pausa a fila. */
+export const PROVIDER_REMAINING_FLOOR = 50;
+
+/** Retentativas após 429 e o backoff exponencial de cada degrau (ms). */
+export const RATE_LIMIT_MAX_RETRIES = 2;
+export const BACKOFF_STEPS_MS = [1000, 2000, 4000];
 
 /** Orçamento e proteção de consumo. */
 export const FOOTBALL_LIMITS = {
   /**
-   * Teto interno por minuto: 1/5 do limite do plano (300/min). É também o teto
-   * absoluto — o painel pode reduzir, nunca aumentar. Mantém a coleta longe do
-   * limite do provedor e do próprio registro de consumo.
+   * Teto interno por minuto: 90% dos 300/min do plano Pro. É também o teto
+   * absoluto — o painel pode reduzir, nunca aumentar. A folga de 10% absorve
+   * atrasos da fila e evita qualquer 429 do provedor.
    */
-  minuteRequests: 60,
+  minuteRequests: 270,
   /** Orçamento diário interno (abaixo dos 7.500 do plano, com margem). */
   dailyRequests: 6000,
   /** Chamadas preservadas para placares ao vivo antes de qualquer outra rotina. */

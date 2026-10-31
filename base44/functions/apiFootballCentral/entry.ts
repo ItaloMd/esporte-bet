@@ -7,6 +7,8 @@ import {
   parseAccountStatus,
 } from '../../shared/apiFootball.ts';
 import { loadQuota, quotaDayKey, quotaLevel, quotaPercent } from '../../shared/footballQuota.ts';
+import { openFootballClient } from '../../shared/footballClient.ts';
+import { effectiveMinuteLimit } from '../../shared/footballQueue.ts';
 import { FOOTBALL_SETTINGS_RULES, validateFootballSettingsPatch } from '../../shared/footballSettings.ts';
 import {
   DEFAULT_LIVE_INTERVAL_MINUTES,
@@ -311,23 +313,36 @@ export default async function (req) {
     /* ------------------------------- overview ------------------------------- */
     const apiKey = secrets.get('API_FOOTBALL_KEY');
     const base = footballApiBase(settings);
+    let quotaRecord = await loadQuota(db, day);
+
+    // O /status entra na mesma fila das demais rotinas: não consome cota
+    // diária, mas ocupa a janela de requisições do provedor.
     let account = null;
     let statusError = '';
     if (apiKey) {
       try {
-        const result = await fetchAccountStatus(apiKey, base);
+        const statusClient = await openFootballClient(db, {
+          apiKey,
+          base,
+          settings,
+          day,
+          limit: numberOr(settings.football_daily_limit, 100),
+          reserve: 0,
+          label: 'status da conta',
+        });
+        const result = await statusClient.call('/status', {}, { charge: false, purpose: 'status' });
         account = parseAccountStatus(result.data);
       } catch (error) {
         statusError = String(error?.message || error);
       }
+      quotaRecord = (await loadQuota(db, day)) || quotaRecord;
     } else {
       statusError = 'Chave da API-Football não configurada nos Secrets do app.';
     }
 
-    const quotaRecord = await loadQuota(db, day);
     // Pausa de segurança pós-429 compartilhada por todas as rotinas: visível no painel.
     const pauseMs = Date.parse(quotaRecord?.rate_pause_until || '');
-    const configuredMinuteLimit = numberOr(settings.football_minute_limit, 0);
+    const effectiveMinute = effectiveMinuteLimit(settings, quotaRecord?.provider_minute_limit);
     const pause = {
       active: Number.isFinite(pauseMs) && pauseMs > Date.now(),
       until: quotaRecord?.rate_pause_until || null,
@@ -335,7 +350,10 @@ export default async function (req) {
       last_rate_limited_at: quotaRecord?.last_rate_limited_at || null,
       last_status_code: quotaRecord?.last_status_code ?? null,
       last_error: quotaRecord?.last_error || '',
-      minute_limit: configuredMinuteLimit > 0 ? configuredMinuteLimit : 60,
+      minute_limit: effectiveMinute,
+      minute_used: numberOr(quotaRecord?.minute_used, 0),
+      minute_remaining_provider: quotaRecord?.provider_minute_remaining ?? null,
+      slot_at: quotaRecord?.last_slot_at || null,
     };
     const internalLimit = numberOr(settings.football_daily_limit, 100);
     const planLimit = account?.limit_day ?? settings.football_account_limit ?? internalLimit;
@@ -522,7 +540,7 @@ export default async function (req) {
         critical_from_minute: numberOr(settings.football_critical_from_minute, 80),
         window_days: numberOr(settings.football_window_days, 7),
         calendar_refresh_hours: Math.round(numberOr(settings.football_calendar_refresh_seconds, 86400) / 3600),
-        minute_limit: numberOr(settings.football_minute_limit, 0) || 60,
+        minute_limit: effectiveMinute,
         daily_limit: numberOr(settings.football_daily_limit, 100),
       },
       quota_percent: quotaPercent(used, internalLimit),
