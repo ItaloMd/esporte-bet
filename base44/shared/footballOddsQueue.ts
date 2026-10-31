@@ -1,111 +1,156 @@
 /**
- * Fila prioritária de cotações.
+ * Fila de cotações PRÉ-JOGO (curadoria).
  *
- * Só entra na fila a partida que realmente precisa de preço: em andamento,
- * favorita do jogador, com aposta aberta ou do dia (NORMAL). A cadência de cada
- * prioridade vem de footballConfig (60/120/180/300 s) e nenhuma partida fora da
- * fila recebe cotação.
+ * A janela de 7 dias tem milhares de partidas e o orçamento diário não permite
+ * cotar todas. Entra na fila apenas o que o jogador pode encontrar na grade:
+ *
+ * - partidas futuras cuja relevância passou do mínimo configurado em
+ *   ODDS_CURATION (competição prioritária, time de alta relevância etc.);
+ * - partidas favoritas do jogador;
+ * - partidas com aposta aberta — o preço precisa acompanhar até a liquidação.
+ *
+ * A cadência de cada item vem da distância até o início, nunca de um relógio
+ * de tempo real: 30 min perto do jogo, 6 h para o que está a dias de distância.
  */
-import { ODDS_PRIORITY, ODDS_PRIORITY_ORDER } from './footballConfig.ts';
-import { localDateString } from './oddsApi.ts';
-import { FOOTBALL_TIMEZONE } from './apiFootball.ts';
+import {
+  FOOTBALL_CADENCE,
+  ODDS_CURATION,
+  ODDS_PRIORITY,
+  ODDS_PRIORITY_ORDER,
+  oddsCadenceSeconds,
+} from './footballConfig.ts';
 import { chunkArray } from './matchLifecycle.ts';
 
-/** Teto de partidas na fila: protege o banco e a cota. */
-const MAX_QUEUE_ITEMS = 400;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Horas entre agora e o início da partida (nunca negativo). */
+export function hoursToKickoff(startTime, nowMs) {
+  const start = Date.parse(startTime || '');
+  if (!Number.isFinite(start)) return 0;
+  return Math.max(0, (start - nowMs) / (60 * 60 * 1000));
+}
 
 /** Prioridade de uma partida, da mais urgente para a menos urgente. */
-function resolvePriority({ isLive, isFavorite, hasBets }) {
-  if (isLive) return 'CRITICA';
-  if (isFavorite) return 'FAVORITA';
+function resolvePriority({ hasBets, isFavorite, relevance, hours }) {
   if (hasBets) return 'APOSTA_ABERTA';
+  if (isFavorite) return 'FAVORITA';
+  if (relevance >= ODDS_CURATION.highRelevance || hours <= 12) return 'CRITICA';
   return 'NORMAL';
 }
 
 /**
- * Monta (ou atualiza) a fila a partir do banco: live_fixtures para as partidas
- * em andamento, favoritos e apostas abertas para a urgência, e a grade publicada
- * do dia para as demais.
+ * Monta (ou atualiza) a fila a partir do banco: curadoria por relevância na
+ * janela de 7 dias, mais favoritas e apostas abertas. O que já saiu da janela
+ * ou já começou simplesmente não entra.
  */
 export async function refreshOddsQueue(db, { now = new Date() } = {}) {
-  const nowIso = now.toISOString();
   const nowMs = now.getTime();
+  const nowIso = now.toISOString();
+  const horizonIso = new Date(nowMs + FOOTBALL_CADENCE.oddsWindowDays * DAY_MS).toISOString();
 
-  const livePage = await db.LiveFixture.list({ limit: 300 });
-  const liveIds = new Set((livePage.items || []).map((row) => row.fixture_id));
-
-  const favoriteIds = new Set();
+  const favoriteFixtureIds = new Set();
   const favoritePage = await db.FavoriteMatch.list({ limit: 500 });
-  (favoritePage.items || []).forEach((row) => row.fixture_id && favoriteIds.add(String(row.fixture_id)));
+  (favoritePage.items || []).forEach((row) => row.fixture_id && favoriteFixtureIds.add(String(row.fixture_id)));
 
-  const betIds = new Set();
+  const betFixtureIds = new Set();
   const betEventIds = new Set();
-  let cursor = null;
+  let betCursor = null;
   for (let round = 0; round < 3; round += 1) {
     const page = await db.SimulationSelection.filter(
       { status: 'open' },
-      { limit: 500, ...(cursor ? { cursor } : {}) },
+      { limit: 500, ...(betCursor ? { cursor: betCursor } : {}) },
     );
     (page.items || []).forEach((row) => {
-      if (row.fixture_id) betIds.add(String(row.fixture_id));
+      if (row.fixture_id) betFixtureIds.add(String(row.fixture_id));
       if (row.event_id) betEventIds.add(row.event_id);
     });
-    cursor = page.next_cursor;
+    betCursor = page.next_cursor;
     if (!page.has_more) break;
   }
 
-  // Grade candidata: apenas partidas da fonte que ainda não começaram. Jogo
-  // iniciado não recebe mais aposta, então ocupar a fila só consumiria cota.
-  const horizon = new Date(nowMs + 6 * 24 * 60 * 60 * 1000).toISOString();
+  // Curadoria: partidas futuras acima da relevância mínima.
   const candidates = [];
-  let eventCursor = null;
-  for (let round = 0; round < 6; round += 1) {
+  let cursor = null;
+  for (let round = 0; round < 4; round += 1) {
     const page = await db.Event.filter(
       {
         source: 'provider',
         status: 'scheduled',
-        start_time: { $gt: nowIso, $lte: horizon },
+        start_time: { $gt: nowIso, $lte: horizonIso },
+        relevance_score: { $gte: ODDS_CURATION.minRelevance },
       },
-      { limit: 500, sort: 'start_time', ...(eventCursor ? { cursor: eventCursor } : {}) },
+      { limit: 500, sort: '-relevance_score', ...(cursor ? { cursor } : {}) },
     );
     const items = page.items || [];
     if (!items.length) break;
     candidates.push(...items);
-    eventCursor = page.next_cursor;
-    if (!page.has_more || candidates.length >= MAX_QUEUE_ITEMS) break;
+    cursor = page.next_cursor;
+    if (!page.has_more || candidates.length >= ODDS_CURATION.maxQueueItems) break;
   }
 
-  const rows = candidates.slice(0, MAX_QUEUE_ITEMS).map((event) => {
-    const fixtureId = String(event.fixture_id || '');
-    const isLive = liveIds.has(fixtureId) || event.status === 'live';
-    const priority = resolvePriority({
-      isLive,
-      isFavorite: favoriteIds.has(fixtureId),
-      hasBets: betIds.has(fixtureId) || betEventIds.has(event.id),
+  // Fora da curadoria, favorita e aposta aberta continuam valendo preço.
+  const known = new Map(candidates.map((event) => [event.id, event]));
+  const extraIds = [...new Set([...betEventIds, ...betFixtureIds])].filter(Boolean);
+  for (const chunk of chunkArray(extraIds, 100)) {
+    if (!chunk.length) continue;
+    const [byId, byFixture] = await Promise.all([
+      db.Event.filter({ id: { $in: chunk } }, { limit: 500 }).catch(() => ({ items: [] })),
+      db.Event.filter({ fixture_id: { $in: chunk } }, { limit: 500 }).catch(() => ({ items: [] })),
+    ]);
+    [...(byId.items || []), ...(byFixture.items || [])].forEach((event) => {
+      if (known.has(event.id)) return;
+      if (String(event.source || '') !== 'provider') return;
+      if (event.status !== 'scheduled') return;
+      const startMs = Date.parse(event.start_time || '');
+      if (!Number.isFinite(startMs) || startMs <= nowMs || startMs > Date.parse(horizonIso)) return;
+      known.set(event.id, event);
     });
-    return { event, fixtureId, priority };
-  }).filter((row) => row.fixtureId);
+  }
 
-  // Fila persistida: atualiza prioridade/cadência das já existentes.
+  const rows = [...known.values()]
+    .slice(0, ODDS_CURATION.maxQueueItems)
+    .map((event) => {
+      const fixtureId = String(event.fixture_id || '');
+      const hours = hoursToKickoff(event.start_time, nowMs);
+      const hasBets = betFixtureIds.has(fixtureId) || betEventIds.has(event.id);
+      const isFavorite = favoriteFixtureIds.has(fixtureId);
+      const relevance = Number(event.relevance_score) || 0;
+      const priority = resolvePriority({ hasBets, isFavorite, relevance, hours });
+      const cadence = Math.min(
+        oddsCadenceSeconds({ hoursToKickoff: hours, hasBets, isFavorite }),
+        ODDS_PRIORITY[priority],
+      );
+      return { event, fixtureId, priority, cadence, hasBets, isFavorite, relevance, hours };
+    })
+    .filter((row) => row.fixtureId);
+
+  // Fila persistida: atualiza prioridade/cadência e o próximo horário de coleta.
   const existing = new Map();
-  const ids = rows.map((row) => row.fixtureId);
-  for (const chunk of chunkArray(ids, 100)) {
+  for (const chunk of chunkArray(rows.map((row) => row.fixtureId), 100)) {
+    if (!chunk.length) continue;
     const page = await db.OddsQueueItem.filter({ fixture_id: { $in: chunk } }, { limit: 500 });
     (page.items || []).forEach((item) => existing.set(item.fixture_id, item));
   }
 
   const updates = [];
   const creations = [];
-  rows.forEach(({ event, fixtureId, priority }) => {
-    const cadence = ODDS_PRIORITY[priority];
+  rows.forEach(({ event, fixtureId, priority, cadence, hasBets, isFavorite, relevance }) => {
+    const reason = hasBets
+      ? 'aposta aberta'
+      : isFavorite
+        ? 'favorita do jogador'
+        : relevance >= ODDS_CURATION.highRelevance
+          ? `relevância ${Math.round(relevance)}`
+          : 'grade pré-jogo';
     const found = existing.get(fixtureId);
     if (found) {
+      if (found.priority === priority && Number(found.cadence_seconds) === cadence && found.event_id === event.id) return;
       updates.push({
         id: found.id,
         event_id: event.id,
         priority,
         cadence_seconds: cadence,
-        reason: priority === 'CRITICA' ? 'partida ao vivo' : priority === 'FAVORITA' ? 'favorita' : priority === 'APOSTA_ABERTA' ? 'aposta aberta' : 'grade do dia',
+        reason,
       });
       return;
     }
@@ -115,7 +160,7 @@ export async function refreshOddsQueue(db, { now = new Date() } = {}) {
       priority,
       cadence_seconds: cadence,
       status: 'queued',
-      reason: 'entrou na fila',
+      reason,
       next_run_at: nowIso,
       last_run_at: null,
     });
@@ -128,14 +173,11 @@ export async function refreshOddsQueue(db, { now = new Date() } = {}) {
     if (chunk.length) await db.OddsQueueItem.bulkCreate(chunk);
   }
 
-  return { size: rows.length, priorities: ODDS_PRIORITY_ORDER };
+  return { size: rows.length, updated: updates.length, created: creations.length, priorities: ODDS_PRIORITY_ORDER };
 }
 
-/**
- * Itens vencidos, na ordem de prioridade. Devolve também os dias (calendário
- * brasileiro) que precisam de uma nova coleta de cotações.
- */
-export async function dueOddsItems(db, { now = new Date(), limit = 120 } = {}) {
+/** Itens vencidos, na ordem de prioridade (aposta aberta primeiro). */
+export async function dueOddsItems(db, { now = new Date(), limit = 200 } = {}) {
   const nowIso = now.toISOString();
   const items = [];
   for (const priority of ODDS_PRIORITY_ORDER) {
@@ -146,23 +188,17 @@ export async function dueOddsItems(db, { now = new Date(), limit = 120 } = {}) {
     );
     items.push(...(page.items || []));
   }
-  if (!items.length) return { items: [], dates: [] };
+  if (!items.length) return { items: [], events: [], priority: null };
 
   const eventIds = [...new Set(items.map((item) => item.event_id).filter(Boolean))];
   const events = new Map();
   for (const chunk of chunkArray(eventIds, 100)) {
+    if (!chunk.length) continue;
     const page = await db.Event.filter({ id: { $in: chunk } }, { limit: 500 });
     (page.items || []).forEach((event) => events.set(event.id, event));
   }
 
-  const dates = [...new Set(
-    items
-      .map((item) => events.get(item.event_id))
-      .filter(Boolean)
-      .map((event) => localDateString(new Date(event.start_time), FOOTBALL_TIMEZONE)),
-  )];
-
-  return { items, dates, priority: items[0]?.priority || null };
+  return { items, events: [...events.values()], priority: items[0]?.priority || null };
 }
 
 /** Marca o item como atendido e agenda a próxima coleta pela cadência. */

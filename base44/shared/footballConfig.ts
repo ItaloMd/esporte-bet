@@ -85,18 +85,58 @@ export const FOOTBALL_CACHE_TTL = {
 export const LIVE_CACHE_KEY = 'live:fixtures';
 
 /**
- * Prioridades da fila de cotações e sua cadência de atualização (segundos).
- * Nenhuma partida fora desta fila recebe cotação.
+ * Prioridades da fila de cotações PRÉ-JOGO e cadência base de atualização
+ * (segundos). Nada aqui é tempo real: a cotação é um retrato do mercado antes
+ * do apito, e o intervalo cresce conforme a partida está mais longe.
  */
 export const ODDS_PRIORITY = {
-  CRITICA: 60,
-  FAVORITA: 120,
-  APOSTA_ABERTA: 180,
-  NORMAL: 300,
+  /** Partida com aposta aberta: preço precisa acompanhar até a liquidação. */
+  APOSTA_ABERTA: 1800,
+  /** Partida favorita do jogador: atualização horária. */
+  FAVORITA: 3600,
+  /** Partida de alta relevância (ou perto do início): de 2 em 2 horas. */
+  CRITICA: 7200,
+  /** Demais partidas curadas da janela: de 6 em 6 horas. */
+  NORMAL: 21600,
 };
 
 /** Ordem de atendimento da fila de cotações (a mais urgente primeiro). */
-export const ODDS_PRIORITY_ORDER = ['CRITICA', 'FAVORITA', 'APOSTA_ABERTA', 'NORMAL'];
+export const ODDS_PRIORITY_ORDER = ['APOSTA_ABERTA', 'FAVORITA', 'CRITICA', 'NORMAL'];
+
+/**
+ * Curadoria de cotações. A janela de 7 dias tem milhares de partidas e o
+ * orçamento não comporta todas: só recebe preço a partida que o jogador pode
+ * encontrar na grade — competição/time de relevância, favorita ou com aposta.
+ */
+export const ODDS_CURATION = {
+  /** Relevância mínima (0 a 100) para a partida entrar na fila de cotações. */
+  minRelevance: 40,
+  /** A partir daqui a partida é tratada como alta prioridade. */
+  highRelevance: 70,
+  /** Lotes (competição + data) coletados por execução. */
+  maxLotsPerRun: 10,
+  /** Teto de partidas na fila: protege o banco e a cota. */
+  maxQueueItems: 400,
+};
+
+/**
+ * Cadência de atualização de uma partida, em segundos: aposta aberta e
+ * favorita mandam; nas demais, quanto mais perto do início, mais curto o
+ * intervalo.
+ */
+export function oddsCadenceSeconds({ hoursToKickoff = 24, hasBets = false, isFavorite = false } = {}) {
+  if (hasBets) return ODDS_PRIORITY.APOSTA_ABERTA;
+  if (isFavorite) return ODDS_PRIORITY.FAVORITA;
+  if (hoursToKickoff <= 6) return ODDS_PRIORITY.APOSTA_ABERTA;
+  if (hoursToKickoff <= 24) return ODDS_PRIORITY.FAVORITA;
+  if (hoursToKickoff <= 72) return ODDS_PRIORITY.CRITICA;
+  return ODDS_PRIORITY.NORMAL;
+}
+
+/** Validade do cache de um lote (competição + data), pela partida mais próxima. */
+export function oddsLotTtlSeconds(hoursToKickoff = 24) {
+  return oddsCadenceSeconds({ hoursToKickoff });
+}
 
 /**
  * Divisão do orçamento diário interno por finalidade, em percentual.

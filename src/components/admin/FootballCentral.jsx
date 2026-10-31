@@ -9,6 +9,7 @@ import CollectionControl from "@/components/admin/football/CollectionControl";
 import ConsumptionSimulator from "@/components/admin/football/ConsumptionSimulator";
 import OpsWidgets from "@/components/admin/football/OpsWidgets";
 import ResultAuditMonitor from "@/components/admin/football/ResultAuditMonitor";
+import OddsEngine from "@/components/admin/football/OddsEngine";
 import ForecastPanel from "@/components/admin/football/ForecastPanel";
 import CentralLogs from "@/components/admin/football/CentralLogs";
 import EndpointConsumption from "@/components/admin/football/EndpointConsumption";
@@ -234,6 +235,7 @@ export default function FootballCentral() {
           />
           <EndpointConsumption connection={data.connection} />
           <OpsWidgets widgets={data.widgets} />
+          <OddsEngine engine={data.odds_engine} />
           <ResultAuditMonitor
             audit={data.result_audit}
             consumption={{ ...(data.consumption || {}), limit: data.plan?.internal_limit }}

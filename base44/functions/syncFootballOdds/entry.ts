@@ -1,8 +1,8 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.54';
 import { secrets } from 'base44:runtime';
 import { FOOTBALL_TIMEZONE, footballApiBase } from '../../shared/apiFootball.ts';
-import { MAX_ODDS_PAGES, mapOddsEntry, pageLimitReached, pickBookmaker } from '../../shared/apiFootballOdds.ts';
-import { FOOTBALL_CADENCE, FOOTBALL_LIMITS } from '../../shared/footballConfig.ts';
+import { mapOddsEntry, pageLimitReached, pickBookmaker } from '../../shared/apiFootballOdds.ts';
+import { FOOTBALL_CADENCE, ODDS_CURATION } from '../../shared/footballConfig.ts';
 import { isThrottleError, openFootballClient } from '../../shared/footballClient.ts';
 import { writeQuotes } from '../../shared/oddsWriter.ts';
 import {
@@ -22,30 +22,32 @@ import {
   writeCache,
 } from '../../shared/footballQuota.ts';
 import { DEFAULT_HOUSE_MARGIN_PERCENT, localDateString } from '../../shared/oddsApi.ts';
-import { indexByFixtureId, numberOr, upcomingDates } from '../../shared/footballSync.ts';
+import { indexByFixtureId, numberOr } from '../../shared/footballSync.ts';
 import { chunkArray } from '../../shared/matchLifecycle.ts';
 import { applyRelevancePatch, loadRelevanceConfig } from '../../shared/relevance.ts';
-import { dueOddsItems, markOddsItemsDone, refreshOddsQueue } from '../../shared/footballOddsQueue.ts';
+import {
+  dueOddsItems,
+  hoursToKickoff,
+  markOddsItemsDone,
+  refreshOddsQueue,
+} from '../../shared/footballOddsQueue.ts';
 
 const LOCK_MS = 4 * 60 * 1000;
-/** Cadências e tetos centralizados (ver shared/footballConfig.ts). */
-const ODDS_REFRESH_SECONDS = FOOTBALL_CADENCE.oddsRefreshSeconds;
-const RESERVE_CALLS = FOOTBALL_LIMITS.reservePlacares;
-const MAX_ODDS_DAYS = FOOTBALL_CADENCE.oddsWindowDays;
-/** Lotes (competição + data) coletados por execução. */
-const MAX_ODDS_LOTS = 8;
+const RESERVE_CALLS = 10;
 /** Tempo máximo de coleta por execução, para nunca estourar a função. */
 const RUN_BUDGET_MS = 45000;
+/** Lotes candidatos consultados no cache por execução. */
+const MAX_CANDIDATE_LOTS = 40;
 
 /**
- * Coleta de cotações pré-jogo pela API-Football.
+ * Motor de cotações PRÉ-JOGO da API-Football.
  *
- * - uma chamada por dia (`/odds?date=`), nunca uma por partida;
- * - cache compartilhado: o dia já coletado não é consultado de novo na mesma hora;
- * - orçamento compartilhado com a sincronização de placares, com reserva para
- *   que os resultados ao vivo nunca fiquem sem cota;
- * - em faixa de consumo alta as cotações são suspensas antes dos placares;
- * - a margem da casa é aplicada no momento da gravação, sobre o mercado completo.
+ * - a partida entra pelo resultado da curadoria (fila de odds), não pelo dia;
+ * - uma chamada por lote `competição + temporada + data`, nunca uma por partida;
+ * - o cache do lote vale o intervalo da partida mais próxima dele (30 min a 6 h),
+ *   então nada é reconsultado sem necessidade;
+ * - orçamento compartilhado com as outras rotinas, com reserva preservada;
+ * - a margem da casa é aplicada na gravação; partida iniciada não recebe preço.
  */
 export default async function (req) {
   let base44;
@@ -61,10 +63,13 @@ export default async function (req) {
     const requested = String(payload?.mode || 'auto');
     const mode = ['today', 'upcoming', 'auto'].includes(requested) ? requested : 'auto';
     const trigger = payload?.trigger === 'manual' ? 'manual' : 'scheduled';
+    /** Ação manual: ignora a validade do cache do lote (mantém todo o resto). */
+    const force = Boolean(payload?.force);
 
     const now = new Date();
     const nowMs = now.getTime();
     const nowIso = now.toISOString();
+    const todayKey = localDateString(now, FOOTBALL_TIMEZONE);
     const day = quotaDayKey(now, FOOTBALL_TIMEZONE);
 
     const settingsPage = await db.ProviderSettings.list({ limit: 1 });
@@ -83,7 +88,6 @@ export default async function (req) {
 
     let limit = numberOr(settings.football_daily_limit, DEFAULT_DAILY_LIMIT);
     quotaRecord = await loadQuota(db, day);
-    // O orçamento real é o menor entre o interno e o limite do plano contratado.
     limit = effectiveDailyLimit(limit, quotaRecord?.provider_limit);
     if (lockHeld(quotaRecord, nowMs)) {
       return Response.json({ skipped: true, reason: 'Outra sincronização está em andamento' });
@@ -93,8 +97,6 @@ export default async function (req) {
 
     const level = quotaLevel(used, limit);
     const policy = quotaPolicy(level);
-    // Somente na contingência as cotações param: a reserva de chamadas abaixo
-    // já protege os placares, que continuam mesmo em consumo reduzido.
     if (level === 3) {
       await releaseLock(db, quotaRecord);
       return Response.json({
@@ -104,8 +106,6 @@ export default async function (req) {
       });
     }
 
-    // Camada central de requisições: pausa pós-429, limite por minuto e
-    // orçamento diário compartilhados com todas as outras rotinas.
     const client = await openFootballClient(db, {
       apiKey,
       base,
@@ -113,69 +113,108 @@ export default async function (req) {
       day,
       limit,
       reserve: RESERVE_CALLS,
-      label: 'cotações api-football',
+      label: 'cotações pré-jogo api-football',
     });
 
-    // Alvos da coleta: competições com jogos futuros no catálogo, priorizando as
-    // brasileiras, em lotes de competição + data. Uma chamada devolve as
-    // cotações de todos os jogos daquela competição no dia — muito mais
-    // econômico que paginar o dia inteiro (26 páginas só para hoje).
-    await refreshOddsQueue(db, { now });
-    const { items: queueItems } = await dueOddsItems(db, { now });
-    const queuePriority = queueItems[0]?.priority || 'NORMAL';
+    /* ----------------------- alvos: fila de curadoria ----------------------- */
+    const queue = await refreshOddsQueue(db, { now });
+    const due = await dueOddsItems(db, { now, limit: 200 });
+    const queuePriority = due.priority || 'NORMAL';
 
-    const horizonDays = mode === 'today' ? 1 : MAX_ODDS_DAYS;
-    const horizonIso = new Date(nowMs + horizonDays * 24 * 60 * 60 * 1000).toISOString();
-    const upcoming = await db.Event.filter(
-      {
-        source: 'provider',
-        status: 'scheduled',
-        start_time: { $gt: nowIso, $lte: horizonIso },
-      },
-      { limit: 400, sort: 'start_time' },
-    );
+    const inWindow = (event) => {
+      const startMs = Date.parse(event?.start_time || '');
+      if (!Number.isFinite(startMs) || startMs <= nowMs) return false;
+      if (mode === 'today' && localDateString(new Date(startMs), FOOTBALL_TIMEZONE) !== todayKey) return false;
+      return true;
+    };
 
-    const lotKey = (lot) => `odds:lot:${lot.leagueId}:${lot.season}:${lot.date}`;
-    const lots = [];
-    const seenLots = new Set();
-    (upcoming.items || []).forEach((event) => {
+    let targets = (due.events || []).filter(inWindow);
+
+    // Sem item vencido (fila recém-criada ou já atendida): usa a própria
+    // curadoria, para que a grade nunca fique sem preço por falta de fila.
+    if (!targets.length) {
+      const fallback = await db.Event.filter(
+        {
+          source: 'provider',
+          status: 'scheduled',
+          start_time: { $gt: nowIso },
+          relevance_score: { $gte: ODDS_CURATION.minRelevance },
+        },
+        { limit: 400, sort: '-relevance_score' },
+      );
+      targets = (fallback.items || []).filter(inWindow);
+    }
+
+    const priorityByEvent = new Map();
+    (due.items || []).forEach((item) => {
+      if (item.event_id) priorityByEvent.set(item.event_id, item.priority);
+    });
+
+    // Lote = competição + temporada + data: uma única chamada devolve o preço de
+    // todos os jogos daquela competição no dia.
+    const lots = new Map();
+    targets.forEach((event) => {
       const leagueId = String(event.league_id || '');
       const season = String(event.season || '');
       if (!leagueId || !season || !event.start_time) return;
       const date = localDateString(new Date(event.start_time), FOOTBALL_TIMEZONE);
       const key = `${leagueId}:${season}:${date}`;
-      if (seenLots.has(key)) return;
-      seenLots.add(key);
-      lots.push({
-        leagueId,
-        season,
-        date,
-        brazilian: Boolean(event.is_brazilian),
-        name: event.competition_name || '',
-      });
+      const hours = hoursToKickoff(event.start_time, nowMs);
+      const priority = priorityByEvent.get(event.id) || 'NORMAL';
+      const current = lots.get(key);
+      if (!current) {
+        lots.set(key, {
+          key,
+          leagueId,
+          season,
+          date,
+          name: event.competition_name || '',
+          brazilian: Boolean(event.is_brazilian),
+          relevance: Number(event.relevance_score) || 0,
+          hours,
+          hasBets: priority === 'APOSTA_ABERTA',
+          priority,
+        });
+        return;
+      }
+      current.relevance = Math.max(current.relevance, Number(event.relevance_score) || 0);
+      current.hours = Math.min(current.hours, hours);
+      current.hasBets = current.hasBets || priority === 'APOSTA_ABERTA';
     });
-    // Competições brasileiras primeiro: são as que a grade destaca.
-    lots.sort((a, b) => Number(b.brazilian) - Number(a.brazilian));
 
-    // Uma única consulta ao cache para todos os lotes candidatos: ler lote por
-    // lote consumiria a cota de requisições internas sem nenhum ganho.
-    const candidateLots = lots.slice(0, 40);
+    const ordered = [...lots.values()].sort(
+      (a, b) =>
+        Number(b.hasBets) - Number(a.hasBets) ||
+        b.relevance - a.relevance ||
+        a.hours - b.hours,
+    );
+
     const cacheRows = await db.ApiCache
-      .filter({ provider: QUOTA_PROVIDER, key: { $in: candidateLots.map(lotKey) } }, { limit: 200 })
+      .filter(
+        { provider: QUOTA_PROVIDER, key: { $in: ordered.slice(0, MAX_CANDIDATE_LOTS).map((lot) => lotCacheKey(lot)) } },
+        { limit: 200 },
+      )
       .catch(() => ({ items: [] }));
     const freshKeys = new Set(
       (cacheRows.items || [])
         .filter((row) => row.expires_at && Date.parse(row.expires_at) > nowMs)
         .map((row) => row.key),
     );
-    const pendingLots = candidateLots
-      .filter((lot) => !freshKeys.has(lotKey(lot)))
-      .slice(0, MAX_ODDS_LOTS);
+
+    const pendingLots = ordered
+      .filter((lot) => force || !freshKeys.has(lotCacheKey(lot)))
+      .slice(0, ODDS_CURATION.maxLotsPerRun);
+
     if (!pendingLots.length) {
       await releaseLock(db, quotaRecord);
       return Response.json({
         skipped: true,
-        reason: `Todas as ${lots.length} competição(ões) do catálogo já estão com cotação atualizada`,
+        mode,
+        queue,
+        due: due.items.length,
+        reason: targets.length
+          ? `As ${ordered.length} competição(ões) da fila já estão com cotação válida`
+          : 'Nenhuma partida curada precisa de cotação agora',
       });
     }
 
@@ -193,13 +232,14 @@ export default async function (req) {
     const failures = [];
     const calls = [];
     const entries = [];
+    const doneLots = [];
     let pagesLimited = false;
     let rateLimited = false;
 
     for (const lot of pendingLots) {
       if (rateLimited || Date.now() - runStartedAt > RUN_BUDGET_MS) break;
       if (!canSpend(used, limit, RESERVE_CALLS, 1)) {
-        failures.push(`orçamento reservado para placares: ${used}/${limit}`);
+        failures.push(`orçamento reservado para as outras rotinas: ${used}/${limit}`);
         break;
       }
       const label = `${lot.name || lot.leagueId} · ${lot.date}`;
@@ -208,22 +248,19 @@ export default async function (req) {
       let lotRecords = 0;
       let lotClean = true;
       try {
-        // A fonte pagina /odds em 10 partidas por página e informa o total em
-        // `paging.total`: ler só a primeira página deixava metade da grade sem
-        // preço. As páginas seguintes respeitam o mesmo teto de orçamento.
         for (let page = 1; page <= maxPages; page += 1) {
           if (Date.now() - runStartedAt > RUN_BUDGET_MS) break;
           if (!canSpend(used, limit, RESERVE_CALLS, 1)) break;
-          const result = await client.call('/odds', {
-            league: lot.leagueId,
-            season: lot.season,
-            date: lot.date,
-            ...(page > 1 ? { page } : {}),
-          }, {
-            timeoutMs: 25000,
-            purpose: 'odds',
-            priority: queuePriority,
-          });
+          const result = await client.call(
+            '/odds',
+            {
+              league: lot.leagueId,
+              season: lot.season,
+              date: lot.date,
+              ...(page > 1 ? { page } : {}),
+            },
+            { timeoutMs: 25000, purpose: 'odds', priority: queuePriority },
+          );
           used = client.used;
           pagesRead += 1;
 
@@ -245,33 +282,37 @@ export default async function (req) {
           if (!totalPages && list.length < 10) break;
         }
 
-        // Só marca o lote como coletado quando a leitura veio limpa: um lote
-        // barrado pelo limite precisa ser tentado de novo na próxima execução.
         if (lotClean && pagesRead) {
+          doneLots.push(label);
+          // A validade do lote segue a partida mais próxima: um jogo em 3 h é
+          // reconsultado em 30 min; um jogo em 5 dias, só em 6 h.
           await writeCache(db, {
-            key: lotKey(lot),
+            key: lotCacheKey(lot),
             endpoint: '/odds',
             params: `league=${lot.leagueId} · season=${lot.season} · date=${lot.date}`,
-            ttlSeconds: ODDS_REFRESH_SECONDS,
+            ttlSeconds: oddsLotTtlSeconds(lot.hours),
             records: lotRecords,
             note: `${label}: ${lotRecords} partida(s) em ${pagesRead} página(s)`,
           }).catch(() => null);
         }
       } catch (error) {
         failures.push(`odds ${label}: ${String(error?.message || error)}`);
-        // Limite do provedor: o restante dos lotes fica para o próximo ciclo.
         if (isThrottleError(error)) rateLimited = true;
         break;
       }
     }
 
-    // Somente partidas já conhecidas e que ainda não começaram recebem cotação.
-    const known = await indexByFixtureId(db, entries.map((entry) => String(entry?.fixture?.id || '')).filter(Boolean));
+    /* ------------------------- gravação dos mercados ------------------------- */
+    const known = await indexByFixtureId(
+      db,
+      entries.map((entry) => String(entry?.fixture?.id || '')).filter(Boolean),
+    );
     const quotesByEvent = new Map();
     entries.forEach((entry) => {
       const fixtureId = String(entry?.fixture?.id || '');
       const eventRow = known.get(fixtureId);
       if (!eventRow || !eventRow.start_time) return;
+      // Partida iniciada não recebe mais cotação pré-jogo.
       if (Date.parse(eventRow.start_time) <= nowMs) return;
       const bookmaker = pickBookmaker(entry.bookmakers || []);
       if (!bookmaker) return;
@@ -291,12 +332,10 @@ export default async function (req) {
       ? await writeQuotes(db, { quotesByEvent, houseMargin, now })
       : { markets: 0, odds: 0, events: 0, available: 0, unavailable: 0, published: 0, suspendedMarkets: 0, removedOdds: 0 };
 
-    // Fila atendida: cada item volta com a cadência da sua prioridade
-    // (CRITICA 60s · FAVORITA 120s · APOSTA_ABERTA 180s · NORMAL 300s).
-    if (queueItems.length) await markOddsItemsDone(db, queueItems, { now }).catch(() => 0);
+    // Fila atendida: cada item volta com a cadência da sua prioridade.
+    if (due.items.length) await markOddsItemsDone(db, due.items, { now }).catch(() => 0);
 
-    // Relevância: partida cotada e publicada sobe no critério de
-    // confiabilidade (até 10 pontos) — recálculo puro, sem novas chamadas.
+    // Relevância: partida cotada e publicada sobe no critério de confiabilidade.
     if (quotesByEvent.size) {
       const relevanceConfig = await loadRelevanceConfig(db);
       const relevanceUpdates = [];
@@ -311,8 +350,9 @@ export default async function (req) {
     }
 
     const summary = [
-      'odds api-football',
+      'odds pré-jogo',
       `${calls.length} chamada(s)`,
+      `${doneLots.length} lote(s)`,
       `${written.events} partida(s)`,
       `${written.odds} cotação(ões)`,
       `${written.published} publicado(s)`,
@@ -337,18 +377,20 @@ export default async function (req) {
       requests_used: calls.length,
       records_upserted: written.odds,
       error_message: failures.join(' | ').slice(0, 400),
+      note: summary.slice(0, 400),
     });
 
     for (const call of calls) {
       await db.ApiUsageLog.create({
         provider: 'api_football',
         endpoint: `/odds?${call.date}`,
+        purpose: 'odds',
         status_code: 200,
         records_returned: call.records,
         cache_hit: false,
         credits_used: 1,
+        note: 'ledger',
         params: String(call.date),
-        note: summary.slice(0, 240),
         error_message: failures.length ? failures.join(' | ').slice(0, 240) : '',
       });
     }
@@ -356,13 +398,16 @@ export default async function (req) {
     return Response.json({
       ok: true,
       mode,
-      lots: pendingLots.map((lot) => `${lot.name || lot.leagueId} · ${lot.date}`),
+      queue,
+      due: due.items.length,
+      lots: doneLots,
       calls: calls.length,
       events_with_odds: written.events,
       odds: written.odds,
       markets: written.markets,
       published: written.published,
       quota: { used, limit, percent: quotaPercent(used, limit), level: quotaLevel(used, limit) },
+      policy,
       pages_limited: pagesLimited,
       failures,
       summary,
@@ -379,4 +424,9 @@ export default async function (req) {
     }
     return Response.json({ error: String(error?.message || error) }, { status: 500 });
   }
+}
+
+/** Chave de cache do lote: uma por competição + temporada + data. */
+function lotCacheKey(lot) {
+  return `odds:lot:${lot.leagueId}:${lot.season}:${lot.date}`;
 }

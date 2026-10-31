@@ -20,7 +20,7 @@ import {
 import { applyHouseMargin, localDateString } from '../../shared/oddsApi.ts';
 import { chunkArray } from '../../shared/matchLifecycle.ts';
 import { numberOr } from '../../shared/footballSync.ts';
-import { FOOTBALL_LIMITS } from '../../shared/footballConfig.ts';
+import { FOOTBALL_CADENCE, FOOTBALL_LIMITS, ODDS_CURATION, ODDS_PRIORITY } from '../../shared/footballConfig.ts';
 
 const ALERT_THRESHOLDS = [50, 75, 90, 95];
 const MAX_ODD_ROUNDS = 20;
@@ -622,6 +622,54 @@ export default async function (req) {
       },
     ];
 
+    /* ------------------ motor de cotações pré-jogo (curadoria) ------------------ */
+    const oddsWindowDays = numberOr(settings.football_window_days, FOOTBALL_CADENCE.oddsWindowDays);
+    const oddsHorizonIso = new Date(nowMs + oddsWindowDays * 86400000).toISOString();
+    const [oddsCurated, oddsQueueTotal, oddsDueNow, oddsPriorityRows, lastOddsJobPage] = await Promise.all([
+      db.Event.count({
+        source: 'provider',
+        status: 'scheduled',
+        start_time: { $gt: nowIso, $lte: oddsHorizonIso },
+        relevance_score: { $gte: ODDS_CURATION.minRelevance },
+      }),
+      db.OddsQueueItem.count({ status: 'queued' }),
+      db.OddsQueueItem.count({ status: 'queued', next_run_at: { $lte: nowIso } }),
+      db.OddsQueueItem
+        .aggregate({ query: { status: 'queued' }, groupBy: 'priority' })
+        .catch(() => ({ rows: [] })),
+      db.SyncJob.filter({ job_type: 'odds' }, { sort: '-created_date', limit: 1 }),
+    ]);
+    const lastOddsJob = lastOddsJobPage?.items?.[0] || null;
+    const oddsEngine = {
+      running: Boolean(settings.football_enabled) && !settings.football_paused,
+      window_days: oddsWindowDays,
+      min_relevance: ODDS_CURATION.minRelevance,
+      high_relevance: ODDS_CURATION.highRelevance,
+      max_lots: ODDS_CURATION.maxLotsPerRun,
+      max_pages: FOOTBALL_CADENCE.oddsMaxPages,
+      house_margin: numberOr(settings.house_margin_percent, 20),
+      curated_matches: oddsCurated,
+      queue_total: numberOr(oddsQueueTotal, 0),
+      due_now: numberOr(oddsDueNow, 0),
+      cadence: Object.entries(ODDS_PRIORITY).map(([priority, seconds]) => ({
+        priority,
+        minutes: Math.round(Number(seconds) / 60),
+      })),
+      by_priority: (oddsPriorityRows?.rows || [])
+        .map((row) => ({ priority: String(row.priority || '—'), count: Math.round(Number(row.count || 0)) }))
+        .sort((a, b) => b.count - a.count),
+      last_run: lastOddsJob
+        ? {
+            at: lastOddsJob.finished_at || lastOddsJob.started_at || lastOddsJob.created_date || null,
+            status: lastOddsJob.status || '',
+            requests: numberOr(lastOddsJob.requests_used, 0),
+            odds: numberOr(lastOddsJob.records_upserted, 0),
+            summary: lastOddsJob.note || '',
+            error: lastOddsJob.error_message || '',
+          }
+        : null,
+    };
+
     return Response.json({
       connection: {
         key_configured: Boolean(apiKey),
@@ -656,6 +704,7 @@ export default async function (req) {
       alerts,
       widgets,
       result_audit: resultAudit,
+      odds_engine: oddsEngine,
       pause,
       provider: {
         daily: {
