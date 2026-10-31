@@ -1,6 +1,14 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.54';
 import { secrets } from 'base44:runtime';
-import { FOOTBALL_TIMEZONE, footballApiBase, mapFixture } from '../../shared/apiFootball.ts';
+import {
+  FOOTBALL_TIMEZONE,
+  footballApiBase,
+  mapFixture,
+  parseFixtureEvents,
+  parseFixtureStatistics,
+} from '../../shared/apiFootball.ts';
+import { buildBetAudit } from '../../shared/footballAudit.ts';
+import { upsertMarketCapability } from '../../shared/footballMarkets.ts';
 import { isThrottleError, openFootballClient } from '../../shared/footballClient.ts';
 import {
   DEFAULT_DAILY_LIMIT,
@@ -37,6 +45,9 @@ import {
 import { settlePendingBets } from '../../shared/settlement.ts';
 
 const LOCK_MS = 3 * 60 * 1000;
+
+/** Partidas por execução na auditoria pós-jogo (estatísticas e eventos). */
+const MAX_POST_MORTEM_FIXTURES = 8;
 
 /**
  * Auditoria de resultados pendentes.
@@ -228,10 +239,35 @@ export default async function (req) {
     let confirmedNow = 0;
     let unavailableNow = 0;
     let reviewNow = 0;
+    let postMortemDone = 0;
     let throttledReason = '';
     const audited = candidates.slice(0, MAX_FIXTURES_PER_RUN);
 
-    if (audited.length) {
+    /* -- 4b) auditoria pós-jogo: dados que ainda faltam para liquidar mercados -- */
+    // Escanteios, cartões e primeiro gol exigem uma consulta por partida e por
+    // tipo de dado. Só são buscados quando há aposta pendente nesses mercados e
+    // o dado ainda não está gravado na partida: o que já está no banco nunca é
+    // consultado de novo, e a mesma partida nunca gera duas auditorias.
+    const postMortem = [];
+    for (const [eventId, info] of pending) {
+      const event = events.get(eventId);
+      if (!event?.fixture_id || isVoidEvent(event)) continue;
+      const markets = [...info.markets];
+      const wantsStats = markets.some((key) => key.startsWith('corners') || key.startsWith('cards'));
+      const wantsFirstGoal = markets.includes('first_goal');
+      const missingStats =
+        wantsStats &&
+        (event.corners_home === null ||
+          event.corners_home === undefined ||
+          event.cards_home === null ||
+          event.cards_home === undefined);
+      const missingFirstGoal = wantsFirstGoal && !event.first_goal_team;
+      if (!missingStats && !missingFirstGoal) continue;
+      postMortem.push({ event, info, missingStats, missingFirstGoal });
+    }
+    const postMortemTargets = postMortem.slice(0, MAX_POST_MORTEM_FIXTURES);
+
+    if (audited.length || postMortemTargets.length) {
       const apiKey = secrets.get('API_FOOTBALL_KEY');
       if (!apiKey) return Response.json({ skipped: true, reason: 'Chave da API-Football não configurada' });
       const base = footballApiBase(settings);
@@ -352,6 +388,96 @@ export default async function (req) {
         }
       }
 
+      /* ------------- 4c) auditoria pós-jogo: escanteios, cartões e gols ------------- */
+      // Cada partida encerrada com aposta pendente recebe o registro completo da
+      // auditoria (resultado, mercados vencedores e perdedores, estatísticas e
+      // eventos utilizados). O que a fonte não fornece fica registrado como não
+      // consultado — nunca se presume um mercado sem dado confirmado.
+      for (const target of postMortemTargets) {
+        if (throttledReason || !canSpend(client.used, limit, policy.reserve, 1)) break;
+        const { event, info } = target;
+        const patch = {};
+        let statistics = null;
+        let statisticsSource = '';
+        let eventsParsed = null;
+        let eventsSource = '';
+
+        if (target.missingStats) {
+          try {
+            const statsResult = await client.call(
+              '/fixtures/statistics',
+              { fixture: event.fixture_id },
+              { purpose: 'statistics' },
+            );
+            calls += 1;
+            used = client.used;
+            statistics = parseFixtureStatistics(statsResult.data);
+            statisticsSource = 'api_football';
+            if (statistics?.corners_home !== null && statistics?.corners_home !== undefined) {
+              patch.corners_home = statistics.corners_home;
+              patch.corners_away = statistics.corners_away;
+            }
+            if (statistics?.cards_home !== null && statistics?.cards_home !== undefined) {
+              patch.cards_home = statistics.cards_home;
+              patch.cards_away = statistics.cards_away;
+            }
+          } catch (error) {
+            failures.push(`estatísticas ${event.fixture_id}: ${String(error?.message || error)}`);
+            if (isThrottleError(error)) throttledReason = String(error?.message || error);
+          }
+        }
+
+        if (!throttledReason && target.missingFirstGoal) {
+          try {
+            const eventsResult = await client.call(
+              '/fixtures/events',
+              { fixture: event.fixture_id },
+              { purpose: 'events' },
+            );
+            calls += 1;
+            used = client.used;
+            eventsParsed = parseFixtureEvents(eventsResult.data, {
+              homeName: event.home_team_name,
+              awayName: event.away_team_name,
+            });
+            eventsSource = 'api_football';
+            if (eventsParsed?.first_goal) {
+              patch.first_goal_minute = eventsParsed.first_goal.minute;
+              patch.first_goal_team = eventsParsed.first_goal.side;
+            }
+          } catch (error) {
+            failures.push(`eventos ${event.fixture_id}: ${String(error?.message || error)}`);
+            if (isThrottleError(error)) throttledReason = String(error?.message || error);
+          }
+        }
+
+        const enriched = { ...event, ...patch };
+        if (Object.keys(patch).length) await db.Event.update(event.id, patch);
+
+        // Um registro de auditoria por partida: reexecuções não duplicam.
+        const existingAudit = await db.BetAudit.filter({ event_id: event.id }, { limit: 1 }).catch(() => null);
+        if (!existingAudit?.items?.length) {
+          await db.BetAudit
+            .create(
+              buildBetAudit(enriched, enriched, {
+                betCount: info.selections,
+                statistics,
+                statisticsSource,
+                events: eventsParsed,
+                eventsSource,
+              }),
+            )
+            .catch(() => null);
+        }
+        await upsertMarketCapability(db, enriched, statistics, eventsParsed).catch(() => null);
+
+        // A liquidação lê os campos da partida: o objeto enriquecido substitui o antigo.
+        const index = settlementEvents.findIndex((row) => row.id === event.id);
+        if (index >= 0) settlementEvents[index] = enriched;
+        else settlementEvents.push(enriched);
+        if (statistics || eventsParsed) postMortemDone += 1;
+      }
+
       const savedQuota = await saveQuota(db, quotaRecord, {
         ...(quotaRecord?.id ? {} : { day }),
         used,
@@ -386,6 +512,7 @@ export default async function (req) {
       `${audited.length} partida(s) consultada(s)`,
       `${confirmedNow} resultado(s) confirmado(s)`,
       `${unavailableNow} ainda indisponível(is)`,
+      `${postMortemDone} auditoria(s) pós-jogo`,
       `${settlement.selections_settled} seleção(ões) liquidada(s)`,
       `${settlement.tickets_settled} boletim(ns)`,
       `${remaining} na fila`,
@@ -422,6 +549,7 @@ export default async function (req) {
       results_confirmed: confirmedNow,
       results_unavailable: unavailableNow,
       results_review: reviewNow,
+      post_mortem_audits: postMortemDone,
       pending_selections: [...pending.values()].reduce((total, info) => total + info.selections, 0),
       pending_tickets: new Set([...pending.values()].flatMap((info) => [...info.tickets])).size,
       settlement,

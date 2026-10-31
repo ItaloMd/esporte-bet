@@ -35,27 +35,10 @@
               "trigger": "scheduled"
             }
           },
-          "then": "sincronizar_odds_futebol",
-          "x-base44": {
-            "title": "Auditar resultados pendentes",
-            "description": "Somente partidas com apostas \u00b7 20 por chamada"
-          }
-        }
-      },
-      {
-        "sincronizar_odds_futebol": {
-          "call": "invoke_backend_function",
-          "with": {
-            "function_name": "syncFootballOdds",
-            "args": {
-              "mode": "auto",
-              "trigger": "scheduled"
-            }
-          },
           "then": "liquidar_partidas",
           "x-base44": {
-            "title": "Atualizar cota\u00e7\u00f5es",
-            "description": "API-Football \u00b7 uma coleta por hora por dia"
+            "title": "Auditar resultados pendentes",
+            "description": "Somente partidas com apostas \u00b7 20 por chamada \u00b7 p\u00f3s-jogo"
           }
         }
       },
