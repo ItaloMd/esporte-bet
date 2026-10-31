@@ -12,9 +12,8 @@ import ForecastPanel from "@/components/admin/football/ForecastPanel";
 import CentralLogs from "@/components/admin/football/CentralLogs";
 import EndpointConsumption from "@/components/admin/football/EndpointConsumption";
 import ReviewQueue from "@/components/admin/football/ReviewQueue";
-
-/** Respiro entre etapas da execução manual (ms): nada de rajada ao provedor. */
-const STEP_GAP_MS = 8000;
+import StepProgress from "@/components/admin/football/StepProgress";
+import { classifyStep, nextStepWait, shouldHalt, waitWithCountdown } from "@/lib/smartStepDelay";
 
 /**
  * Central API-Football: status da conta e do plano, simulador de consumo,
@@ -28,6 +27,7 @@ export default function FootballCentral() {
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [step, setStep] = useState("");
+  const [waitSeconds, setWaitSeconds] = useState(0);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -61,20 +61,23 @@ export default function FootballCentral() {
   };
 
   const invokeStep = async (name, args, label) => {
+    const startedAt = Date.now();
     const response = await base44.functions.invoke(name, args);
     const payload = response.data || {};
+    const outcome = classifyStep(payload);
     if (payload.error) {
       toast({ title: "Falha na etapa", description: `${label}: ${payload.error}`, variant: "destructive" });
-      return false;
+    } else {
+      toast({ title: label, description: payload.summary || payload.reason || "" });
     }
-    toast({ title: label, description: payload.summary || payload.reason || "" });
-    return true;
+    return { payload, outcome, elapsedMs: Date.now() - startedAt };
   };
 
   /**
-   * Execução em etapas: cada rotina roda sozinha e as etapas seguintes esperam
-   * um respiro, para que a coleta nunca dispare várias chamadas ao provedor no
-   * mesmo minuto. A primeira etapa bloqueada pelo limite interrompe o restante.
+   * Execução em etapas com espera adaptativa: o intervalo entre rotinas cresce
+   * com o orçamento consumido e com sinais de limite do provedor, e encurta
+   * quando a etapa anterior já demorou o suficiente para espaçar as chamadas.
+   * Um limite sinalizado encerra o ciclo e deixa o restante para o próximo.
    */
   const runSteps = async (steps) => {
     setRunning(true);
@@ -82,12 +85,25 @@ export default function FootballCentral() {
       for (let index = 0; index < steps.length; index += 1) {
         const [name, args, label] = steps[index];
         setStep(`${index + 1}/${steps.length} · ${label}`);
-        if (index > 0) await new Promise((resolve) => setTimeout(resolve, STEP_GAP_MS));
-        const ok = await invokeStep(name, args, label);
-        if (!ok) break;
+        setWaitSeconds(0);
+        const { payload, outcome, elapsedMs } = await invokeStep(name, args, label);
+        if (outcome === "error") break;
+        if (shouldHalt(payload)) {
+          toast({
+            title: "Ciclo interrompido",
+            description: "O provedor sinalizou limite de consultas. As etapas restantes ficam para o próximo ciclo.",
+            variant: "destructive",
+          });
+          break;
+        }
+        if (index === steps.length - 1) break;
+        setStep(`${index + 2}/${steps.length} · ${steps[index + 1][2]}`);
+        const waitMs = nextStepWait({ payload, outcome, elapsedMs });
+        await waitWithCountdown(waitMs, (seconds) => setWaitSeconds(seconds));
       }
     } finally {
       setStep("");
+      setWaitSeconds(0);
       setRunning(false);
       await load();
     }
@@ -166,12 +182,7 @@ export default function FootballCentral() {
           </Button>
         </div>
       </div>
-      {step && (
-        <p className="flex items-center gap-2 text-xs text-muted-foreground">
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          Executando em etapas: {step}
-        </p>
-      )}
+      <StepProgress step={step} waitSeconds={waitSeconds} />
 
       <CollectionControl
         settings={settings}
