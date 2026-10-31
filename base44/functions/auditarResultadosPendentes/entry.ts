@@ -252,6 +252,9 @@ export default async function (req) {
     for (const [eventId, info] of pending) {
       const event = events.get(eventId);
       if (!event?.fixture_id || isVoidEvent(event)) continue;
+      // Só partida encerrada e com resultado confirmado recebe auditoria
+      // pós-jogo: estatística de jogo que ainda vai acontecer não existe.
+      if (event.status !== 'finished' || !hasConfirmedResult(event)) continue;
       const markets = [...info.markets];
       const wantsStats = markets.some((key) => key.startsWith('corners') || key.startsWith('cards'));
       const wantsFirstGoal = markets.includes('first_goal');
