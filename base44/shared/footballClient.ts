@@ -304,12 +304,17 @@ export async function openFootballClient(db, { apiKey, base, settings, day, limi
   async function pauseMinute(reason, { countStrike = true, retryAfterMs = null } = {}) {
     const nowMs = Date.now();
     const requested = Number.isFinite(retryAfterMs) ? nowMs + Math.max(0, Number(retryAfterMs)) : 0;
+    const strikes = countStrike ? Number(record?.rate_limit_strikes || 0) + 1 : Number(record?.rate_limit_strikes || 0);
+    // Recusas seguidas: o silêncio cresce além do próximo minuto (2, 4, 8… até
+    // 30 min). Tentar de novo a cada minuto gastava uma requisição por ciclo e
+    // recebia outro 429 — o provedor conta a rajada além da janela do minuto.
+    const escalationMs = strikes <= 2 ? 0 : Math.min(30 * 60 * 1000, 60 * 1000 * 2 ** (strikes - 2));
     const until = new Date(
-      Math.max(nextMinuteStart(nowMs), nowMs + RATE_LIMIT_PAUSE_MIN_MS, requested),
+      Math.max(nextMinuteStart(nowMs), nowMs + RATE_LIMIT_PAUSE_MIN_MS, requested, nowMs + escalationMs),
     ).toISOString();
     await persist({
       rate_pause_until: until,
-      rate_limit_strikes: countStrike ? Number(record?.rate_limit_strikes || 0) + 1 : Number(record?.rate_limit_strikes || 0),
+      rate_limit_strikes: strikes,
       last_rate_limited_at: new Date(nowMs).toISOString(),
       last_rate_scope: 'minute',
       last_error: String(reason).slice(0, 240),

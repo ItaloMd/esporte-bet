@@ -2,7 +2,7 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.54';
 import { secrets } from 'base44:runtime';
 import { FOOTBALL_TIMEZONE, footballApiBase } from '../../shared/apiFootball.ts';
 import { mapOddsEntry, pageLimitReached, pickBookmaker } from '../../shared/apiFootballOdds.ts';
-import { FOOTBALL_CADENCE, ODDS_CURATION } from '../../shared/footballConfig.ts';
+import { FOOTBALL_CADENCE, ODDS_CURATION, oddsLotTtlSeconds } from '../../shared/footballConfig.ts';
 import { isThrottleError, openFootballClient } from '../../shared/footballClient.ts';
 import { writeQuotes } from '../../shared/oddsWriter.ts';
 import {
