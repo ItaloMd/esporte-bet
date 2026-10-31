@@ -12,7 +12,7 @@ const FOOTBALL_DEFAULTS = {
   football_enabled: false,
   football_base_url: "https://v3.football.api-sports.io",
   football_daily_limit: 6000,
-  football_minute_limit: 60,
+  football_minute_limit: 240,
   football_window_days: 7,
   football_calendar_refresh_seconds: 86400,
   football_live_interval_minutes: 10,
@@ -110,10 +110,11 @@ export default function AdminFootball({ actor }) {
           </div>
           <div className="space-y-2">
             <Label htmlFor="fb_minute">Limite por minuto</Label>
-            <Input id="fb_minute" type="number" min="3" max="60" value={settings.football_minute_limit} onChange={(event) => update({ football_minute_limit: Number(event.target.value) })} />
+            <Input id="fb_minute" type="number" min="10" max="240" value={settings.football_minute_limit} onChange={(event) => update({ football_minute_limit: Number(event.target.value) })} />
             <p className="text-[11px] text-muted-foreground">
-              Teto compartilhado de requisições por minuto entre todas as rotinas — no máximo 60, bem abaixo dos
-              300/min do plano. Ao atingir, as rotinas esperam o próximo minuto em vez de receber 429 do provedor.
+              Teto compartilhado de requisições por minuto entre todas as rotinas — no máximo 240, que é 80% dos
+              300/min do plano Pro. As chamadas saem em fila, com pelo menos 200 ms entre uma e outra, e param quando
+              o X-RateLimit-Remaining do provedor fica abaixo de 50.
             </p>
           </div>
           <div className="space-y-2">
