@@ -132,10 +132,14 @@ export default function CentralStatus({ data }) {
           <p className="flex items-start gap-2">
             <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <span>
-              <span className="font-medium">Pausa de segurança até {formatDateTime(pause.until)}.</span> A fila parou de
-              chamar a API-Football porque o limite de requisições do minuto foi atingido
-              {pause.strikes ? ` (${pause.strikes} ocorrência(s))` : ""}. É proteção automática, não erro: nenhum dado
-              foi perdido, o que já está salvo continua no ar e a coleta retoma sozinha no minuto seguinte.
+              <span className="font-medium">Coleta pausada até {formatDateTime(pause.until)}.</span>{" "}
+              {pause.scope === "daily"
+                ? pause.last_error_scope === "throttle"
+                  ? "O provedor está recusando novas chamadas por excesso de tráfego, mesmo com saldo disponível. A espera é escalonada (30 min, 1 h, 2 h, 4 h e 6 h) e a coleta retoma sozinha no horário acima."
+                  : "O saldo diário da conta foi esgotado. A coleta retoma sozinha na virada do dia da conta (00:00 UTC)."
+                : "A janela de requisições do minuto foi fechada. A coleta retoma sozinha no minuto seguinte."}
+              {pause.strikes ? ` (${pause.strikes} ocorrência(s))` : ""} Nenhum dado foi perdido: o que já está salvo
+              continua no ar.
             </span>
           </p>
           {pause.last_error ? <p className="mt-1 pl-5 text-[11px] text-red-300/80">Motivo: {pause.last_error}</p> : null}
