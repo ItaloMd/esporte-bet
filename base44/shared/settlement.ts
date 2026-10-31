@@ -200,14 +200,26 @@ export async function settlePendingBets(db, { nowIso, events = null } = {}) {
       });
     });
 
-    for (const batch of chunkArray(ticketUpdates, 200)) {
+    // Bilhete removido do banco não pode travar a rotina inteira: só entra no
+    // fechamento o que realmente existe.
+    const liveTickets = new Set();
+    const RECORD_ID = /^[a-f0-9]{24}$/i;
+    const candidateIds = [...new Set(ticketUpdates.map((row) => row.id))].filter((id) => RECORD_ID.test(String(id)));
+    for (const ids of chunkArray(candidateIds, 100)) {
+      const page = await db.SimulationTicket.filter({ id: { $in: ids } }, { limit: ids.length }).catch(() => null);
+      (page?.items || []).forEach((ticket) => liveTickets.add(ticket.id));
+    }
+    const validUpdates = ticketUpdates.filter((row) => liveTickets.has(row.id));
+    const validResults = results.filter((row) => liveTickets.has(row.ticket_id));
+
+    for (const batch of chunkArray(validUpdates, 200)) {
       if (batch.length) await db.SimulationTicket.bulkUpdate(batch);
     }
-    if (results.length) await db.SimulationResult.bulkCreate(results);
-    settledTickets = results.length;
+    if (validResults.length) await db.SimulationResult.bulkCreate(validResults);
+    settledTickets = validResults.length;
 
     // Rollover conta somente na liquidação do boletim. Anulados não contam.
-    const rolloverTicketIds = results
+    const rolloverTicketIds = validResults
       .filter((row) => row.result === 'won' || row.result === 'lost')
       .map((row) => row.ticket_id);
     if (rolloverTicketIds.length) {
@@ -229,7 +241,7 @@ export async function settlePendingBets(db, { nowIso, events = null } = {}) {
     }
 
     // Prêmio creditado uma única vez: `prize_paid` é o marcador.
-    const wonIds = results.filter((row) => row.result === 'won').map((row) => row.ticket_id);
+    const wonIds = validResults.filter((row) => row.result === 'won').map((row) => row.ticket_id);
     for (const ids of chunkArray(wonIds, 100)) {
       const page = await db.SimulationTicket.filter({ id: { $in: ids } }, { limit: ids.length });
       for (const ticket of page.items || []) {

@@ -457,20 +457,26 @@ export default async function (req) {
         const enriched = { ...event, ...patch };
         if (Object.keys(patch).length) await db.Event.update(event.id, patch);
 
-        // Um registro de auditoria por partida: reexecuções não duplicam.
-        const existingAudit = await db.BetAudit.filter({ event_id: event.id }, { limit: 1 }).catch(() => null);
-        if (!existingAudit?.items?.length) {
-          await db.BetAudit
-            .create(
-              buildBetAudit(enriched, enriched, {
-                betCount: info.selections,
-                statistics,
-                statisticsSource,
-                events: eventsParsed,
-                eventsSource,
-              }),
-            )
-            .catch(() => null);
+        // Auditoria registrada só com o dado que se foi buscar: se a fonte não
+        // respondeu, a partida continua na fila e a próxima execução tenta de
+        // novo — auditoria sem estatística nunca é gravada como se fosse final.
+        const gotStats = !target.missingStats || Boolean(statistics);
+        const gotFirstGoal = !target.missingFirstGoal || Boolean(eventsParsed);
+        if (gotStats && gotFirstGoal) {
+          const auditPayload = buildBetAudit(enriched, enriched, {
+            betCount: info.selections,
+            statistics,
+            statisticsSource,
+            events: eventsParsed,
+            eventsSource,
+          });
+          // Um registro por partida: reexecução atualiza o incompleto, nunca duplica.
+          const existingAudit = await db.BetAudit.filter({ event_id: event.id }, { limit: 1 }).catch(() => null);
+          const existingRow = existingAudit?.items?.[0] || null;
+          if (!existingRow) await db.BetAudit.create(auditPayload).catch(() => null);
+          else if (!existingRow.statistics_fetched && statistics) {
+            await db.BetAudit.update(existingRow.id, auditPayload).catch(() => null);
+          }
         }
         await upsertMarketCapability(db, enriched, statistics, eventsParsed).catch(() => null);
 
