@@ -13,6 +13,9 @@ import CentralLogs from "@/components/admin/football/CentralLogs";
 import EndpointConsumption from "@/components/admin/football/EndpointConsumption";
 import ReviewQueue from "@/components/admin/football/ReviewQueue";
 
+/** Respiro entre etapas da execução manual (ms): nada de rajada ao provedor. */
+const STEP_GAP_MS = 8000;
+
 /**
  * Central API-Football: status da conta e do plano, simulador de consumo,
  * painel operacional, previsão, logs avançados e execução manual das rotinas
@@ -24,6 +27,7 @@ export default function FootballCentral() {
   const [settings, setSettings] = useState(null);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
+  const [step, setStep] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -67,35 +71,38 @@ export default function FootballCentral() {
     return true;
   };
 
-  const runDetector = async () => {
+  /**
+   * Execução em etapas: cada rotina roda sozinha e as etapas seguintes esperam
+   * um respiro, para que a coleta nunca dispare várias chamadas ao provedor no
+   * mesmo minuto. A primeira etapa bloqueada pelo limite interrompe o restante.
+   */
+  const runSteps = async (steps) => {
     setRunning(true);
     try {
-      await invokeStep("syncFootballLive", { trigger: "manual" }, "Detector ao vivo");
-      await load();
-    } finally {
-      setRunning(false);
-    }
-  };
-
-  const runCycle = async () => {
-    setRunning(true);
-    try {
-      const steps = [
-        ["syncFootball", { mode: "calendar", trigger: "manual" }, "Calendário importado"],
-        ["syncFootballLive", { trigger: "manual" }, "Detector ao vivo"],
-        ["auditarResultadosPendentes", { trigger: "manual" }, "Resultados pendentes"],
-        ["syncFootballOdds", { mode: "auto", trigger: "manual" }, "Cotações atualizadas"],
-        ["settleMatches", { trigger: "manual" }, "Bilhetes liquidados"],
-      ];
-      for (const [name, args, label] of steps) {
+      for (let index = 0; index < steps.length; index += 1) {
+        const [name, args, label] = steps[index];
+        setStep(`${index + 1}/${steps.length} · ${label}`);
+        if (index > 0) await new Promise((resolve) => setTimeout(resolve, STEP_GAP_MS));
         const ok = await invokeStep(name, args, label);
         if (!ok) break;
       }
-      await load();
     } finally {
+      setStep("");
       setRunning(false);
+      await load();
     }
   };
+
+  const runDetector = () => runSteps([["syncFootballLive", { trigger: "manual" }, "Detector ao vivo"]]);
+
+  const runCycle = () =>
+    runSteps([
+      ["syncFootball", { mode: "calendar", trigger: "manual" }, "Calendário importado"],
+      ["syncFootballLive", { trigger: "manual" }, "Detector ao vivo"],
+      ["syncFootballOdds", { mode: "auto", trigger: "manual", force: true }, "Cotações atualizadas"],
+      ["auditarResultadosPendentes", { trigger: "manual" }, "Resultados pendentes"],
+      ["settleMatches", { trigger: "manual" }, "Bilhetes liquidados"],
+    ]);
 
   /** Pausa/retomada global: gravada nas configurações e respeitada por todas as rotinas. */
   const togglePause = async () => {
@@ -118,28 +125,21 @@ export default function FootballCentral() {
     }
   };
 
-  /** Ativa a integração e executa a sincronização inicial na sequência. */
+  /** Ativa a integração e executa a coleta inicial em etapas espaçadas. */
   const activateAndSync = async () => {
-    setRunning(true);
     try {
       if (settings?.id) {
         await base44.entities.ProviderSettings.update(settings.id, { football_enabled: true, football_paused: false });
       }
-      const steps = [
-        ["syncFootball", { mode: "calendar", trigger: "manual" }, "Calendário importado"],
-        ["syncFootballLive", { trigger: "manual" }, "Detector ao vivo"],
-        ["syncFootballOdds", { mode: "auto", trigger: "manual" }, "Cotações atualizadas"],
-      ];
-      for (const [name, args, label] of steps) {
-        const ok = await invokeStep(name, args, label);
-        if (!ok) break;
-      }
-      await load();
     } catch (error) {
       toast({ title: "Falha ao ativar a integração", description: error.message, variant: "destructive" });
-    } finally {
-      setRunning(false);
+      return;
     }
+    await runSteps([
+      ["syncFootball", { mode: "calendar", trigger: "manual" }, "Calendário importado"],
+      ["syncFootballOdds", { mode: "auto", trigger: "manual", force: true }, "Cotações atualizadas"],
+      ["syncFootballLive", { trigger: "manual" }, "Detector ao vivo"],
+    ]);
   };
 
   return (
@@ -166,6 +166,12 @@ export default function FootballCentral() {
           </Button>
         </div>
       </div>
+      {step && (
+        <p className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          Executando em etapas: {step}
+        </p>
+      )}
 
       <CollectionControl
         settings={settings}
