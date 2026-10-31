@@ -8,17 +8,17 @@ import { toast } from "@/components/ui/use-toast";
 import { SIM_DEFAULTS, simulateConsumption } from "@/lib/consumptionSim";
 
 const FIELDS = [
-  { key: "liveIntervalMinutes", label: "Intervalo detector ao vivo (min)", hint: "Cadência do GET /fixtures?live=all. O agendamento mínimo da plataforma é de 5 min." },
-  { key: "monitorDefaultMinutes", label: "Monitoramento padrão (min)", hint: "Fila de jogos sem apostas. Padrão 5 min." },
-  { key: "monitorBetsMinutes", label: "Monitoramento apostas (min)", hint: "Jogos com apostas registradas. Padrão 1 min." },
-  { key: "monitorFavoritesMinutes", label: "Monitoramento favoritos (min)", hint: "Jogos favoritados por usuários. Padrão 1 min." },
-  { key: "monitorCriticalMinutes", label: "Monitoramento crítico (min)", hint: "Jogos nos minutos finais. Padrão 0,5 min (30s)." },
+  { key: "liveIntervalMinutes", label: "Placar ao vivo (min)", hint: "Cadência do GET /fixtures?live=all — uma chamada global para todas as partidas. Padrão 10 min; o mínimo aceito é 5." },
+  { key: "monitorDefaultMinutes", label: "Monitoramento padrão (min)", hint: "Fila informativa das partidas sem apostas: acompanha a cadência do detector." },
+  { key: "monitorBetsMinutes", label: "Monitoramento apostas (min)", hint: "Fila informativa das partidas com aposta; não dispara chamada própria." },
+  { key: "monitorFavoritesMinutes", label: "Monitoramento favoritos (min)", hint: "Fila informativa das partidas favoritadas; não dispara chamada própria." },
+  { key: "monitorCriticalMinutes", label: "Monitoramento crítico (min)", hint: "Fila informativa dos minutos finais; não dispara chamada própria." },
   { key: "criticalFromMinute", label: "Minuto inicial da situação crítica", hint: "A partir desse minuto o jogo entra na prioridade 4. Padrão 80." },
   { key: "gamesPerDay", label: "Jogos médios por dia", hint: "Quantidade de partidas monitoradas por dia." },
   { key: "liveSimultaneous", label: "Jogos ao vivo simultâneos", hint: "Média de partidas em andamento ao mesmo tempo." },
-  { key: "betGames", label: "Jogos monitorados por apostas", hint: "Partidas com apostas: recebem auditoria com estatísticas." },
+  { key: "betGames", label: "Jogos com bilhete ativo", hint: "Únicos que recebem estatísticas e eventos (1 consulta por partida)." },
   { key: "favoriteGames", label: "Jogos favoritados", hint: "Prioridade 3 na fila (cobertos pelo detector global)." },
-  { key: "calendarDays", label: "Dias importados por dia", hint: "Carga diária: hoje, amanhã e próximos dias. Padrão 5." },
+  { key: "calendarDays", label: "Dias importados por dia", hint: "Carga diária do calendário: uma chamada por data, uma vez ao dia. Padrão 7." },
   { key: "oddsCallsPerDay", label: "Chamadas de odds por dia", hint: "Coletas por hora × dias × páginas. Padrão 96." },
   { key: "planLimit", label: "Limite do plano (requisições/dia)", hint: "Limite diário contratado na API-Football." },
 ];
@@ -92,8 +92,8 @@ export default function ConsumptionSimulator({ monitor, planLimit, settingsId, o
         <h2 className="text-sm font-semibold">Simulador de consumo</h2>
         <p className="mt-1 text-xs text-muted-foreground">
           Projeção em tempo real conforme os intervalos e o volume de jogos. O detector global cobre todas as partidas
-          ao vivo em uma única chamada, então os intervalos da fila não geram custo extra — apenas os críticos, quando
-          mais frequentes que o detector.
+          ao vivo em uma única chamada a cada 10 minutos; a fila de prioridades não gera chamada própria. Estatísticas e
+          eventos são consultados apenas para partidas com bilhete ativo.
         </p>
       </div>
 

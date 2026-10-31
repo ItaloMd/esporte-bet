@@ -22,11 +22,11 @@ export const FOOTBALL_SETTINGS_RULES = {
   football_audit_offset_hours: { type: 'number', min: 1, max: 6 },
   football_audit_recheck_minutes: { type: 'number', min: 5, max: 120 },
   football_audit_fast_minutes: { type: 'number', min: 5, max: 120 },
-  football_live_interval_minutes: { type: 'number', min: 0.5, max: 30 },
-  football_monitor_default_minutes: { type: 'number', min: 1, max: 30 },
-  football_monitor_bets_minutes: { type: 'number', min: 0.5, max: 10 },
-  football_monitor_favorites_minutes: { type: 'number', min: 0.5, max: 10 },
-  football_monitor_critical_minutes: { type: 'number', min: 0.25, max: 10 },
+  football_live_interval_minutes: { type: 'number', min: 5, max: 60 },
+  football_monitor_default_minutes: { type: 'number', min: 5, max: 60 },
+  football_monitor_bets_minutes: { type: 'number', min: 5, max: 60 },
+  football_monitor_favorites_minutes: { type: 'number', min: 5, max: 60 },
+  football_monitor_critical_minutes: { type: 'number', min: 5, max: 60 },
   football_critical_from_minute: { type: 'number', min: 60, max: 100 },
 };
 

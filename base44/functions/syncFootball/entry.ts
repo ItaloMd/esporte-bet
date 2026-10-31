@@ -10,6 +10,7 @@ import {
   parseFixtureStatistics,
 } from '../../shared/apiFootball.ts';
 import { isThrottleError, openFootballClient } from '../../shared/footballClient.ts';
+import { FOOTBALL_CADENCE } from '../../shared/footballConfig.ts';
 import { upsertMarketCapability } from '../../shared/footballMarkets.ts';
 import {
   DEFAULT_DAILY_LIMIT,
@@ -459,7 +460,8 @@ export default async function (req) {
     /* ------------------------- importação diária ------------------------- */
     if (mode === 'calendar') {
       const windowDays = Math.min(Math.max(numberOr(settings.football_window_days, MAX_CALENDAR_DAYS), 1), MAX_CALENDAR_DAYS);
-      const calendarRefreshSeconds = numberOr(settings.football_calendar_refresh_seconds, 21600);
+      // Importação diária: uma data já importada não é consultada de novo no dia.
+      const calendarRefreshSeconds = numberOr(settings.football_calendar_refresh_seconds, FOOTBALL_CADENCE.calendarRefreshSeconds);
       // A rotina das 00:10 e o botão manual buscam as mesmas datas: o dia atual
       // (às 00:10, o dia que acabou de começar) e o(s) seguinte(s).
       const todayKey = localDateString(now, FOOTBALL_TIMEZONE);

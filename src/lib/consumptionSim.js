@@ -8,17 +8,17 @@
  * só são consultadas para partidas com apostas.
  */
 export const SIM_DEFAULTS = {
-  liveIntervalMinutes: 2,
-  monitorDefaultMinutes: 5,
-  monitorBetsMinutes: 1,
-  monitorFavoritesMinutes: 1,
-  monitorCriticalMinutes: 1,
+  liveIntervalMinutes: 10,
+  monitorDefaultMinutes: 10,
+  monitorBetsMinutes: 10,
+  monitorFavoritesMinutes: 10,
+  monitorCriticalMinutes: 10,
   criticalFromMinute: 80,
   gamesPerDay: 40,
   liveSimultaneous: 8,
   betGames: 10,
   favoriteGames: 5,
-  calendarDays: 5,
+  calendarDays: 7,
   oddsCallsPerDay: 96,
   planLimit: 7500,
 };

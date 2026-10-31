@@ -386,6 +386,7 @@ export default async function (req) {
       gamesToday, liveGames, finishedToday, monitored, pendingBets, auditedToday, auditQueue,
       criticalQueue, reviewEvents, brazilianLive, resultQueuePending, resultsConfirmed,
       resultsUnavailable, pendingTickets, nextAttemptPage, lastAuditPage,
+      rateLimitedToday, endpointConsumption,
     ] = await Promise.all([
       db.Event.count({ local_date: todayKey, source: 'provider' }),
       db.Event.count({ status: 'live', source: 'provider' }),
@@ -403,8 +404,26 @@ export default async function (req) {
       db.SimulationTicket.count({ status: 'open' }),
       db.ResultAuditQueue.filter({ status: 'pending', next_attempt_at: { $exists: true } }, { sort: 'next_attempt_at', limit: 1 }),
       db.SyncJob.filter({ job_type: 'results_audit' }, { sort: '-created_date', limit: 1 }),
+      // Respostas de limite excedido (429) recebidas hoje, compartilhadas por todas as rotinas.
+      db.ApiUsageLog.count({ provider: 'api_football', status_code: 429, created_date: { $gte: startIso } }),
+      // Consumo real por endpoint: somente as chamadas efetivamente enviadas.
+      db.ApiUsageLog
+        .aggregate({
+          query: { provider: 'api_football', note: 'ledger', created_date: { $gte: startIso } },
+          groupBy: 'endpoint',
+          sum: ['credits_used'],
+        })
+        .catch(() => ({ rows: [] })),
     ]);
     const lastAudit = lastAuditPage?.items?.[0] || null;
+    const byEndpoint = (Array.isArray(endpointConsumption?.rows) ? endpointConsumption.rows : [])
+      .map((row) => ({
+        endpoint: String(row.endpoint || '—'),
+        calls: Math.round(Number(row.count || 0)),
+        credits: Math.round(Number(row.sum_credits_used || 0)),
+      }))
+      .sort((a, b) => b.credits - a.credits || b.calls - a.calls)
+      .slice(0, 6);
 
     const widgets = {
       games_today: gamesToday,
@@ -463,8 +482,12 @@ export default async function (req) {
         status_error: statusError,
         last_sync_at: settings.football_last_sync_at || null,
         last_live_at: settings.football_last_live_at || null,
+        last_calendar_at: settings.football_last_calendar_at || null,
+        next_run_at: settings.football_next_run_at || null,
         last_sync_status: settings.football_last_status || '',
         last_summary: settings.football_last_summary || '',
+        rate_limited_today: numberOr(rateLimitedToday, 0),
+        by_endpoint: byEndpoint,
       },
       plan: {
         name: account?.plan || settings.football_plan || '',
@@ -497,7 +520,8 @@ export default async function (req) {
         monitor_favorites_minutes: numberOr(settings.football_monitor_favorites_minutes, DEFAULT_MONITOR_FAVORITES_MINUTES),
         monitor_critical_minutes: numberOr(settings.football_monitor_critical_minutes, DEFAULT_MONITOR_CRITICAL_MINUTES),
         critical_from_minute: numberOr(settings.football_critical_from_minute, 80),
-        window_days: numberOr(settings.football_window_days, 5),
+        window_days: numberOr(settings.football_window_days, 7),
+        calendar_refresh_hours: Math.round(numberOr(settings.football_calendar_refresh_seconds, 86400) / 3600),
         minute_limit: numberOr(settings.football_minute_limit, 0) || 60,
         daily_limit: numberOr(settings.football_daily_limit, 100),
       },

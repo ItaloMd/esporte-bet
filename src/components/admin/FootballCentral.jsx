@@ -10,6 +10,7 @@ import OpsWidgets from "@/components/admin/football/OpsWidgets";
 import ResultAuditMonitor from "@/components/admin/football/ResultAuditMonitor";
 import ForecastPanel from "@/components/admin/football/ForecastPanel";
 import CentralLogs from "@/components/admin/football/CentralLogs";
+import EndpointConsumption from "@/components/admin/football/EndpointConsumption";
 import ReviewQueue from "@/components/admin/football/ReviewQueue";
 
 /**
@@ -178,6 +179,7 @@ export default function FootballCentral() {
       ) : (
         <>
           <CentralStatus data={data} />
+          <EndpointConsumption connection={data.connection} />
           <OpsWidgets widgets={data.widgets} />
           <ResultAuditMonitor
             audit={data.result_audit}

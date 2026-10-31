@@ -9,17 +9,27 @@
 import { FOOTBALL_CADENCE } from './footballConfig.ts';
 import { numberOr } from './footballSync.ts';
 
-/** Detector ao vivo: 60 segundos com jogos em andamento (recomendação da documentação). */
+/** Detector ao vivo: uma chamada global a cada 10 minutos. */
 export const DEFAULT_LIVE_INTERVAL_MINUTES = FOOTBALL_CADENCE.liveSeconds / 60;
-export const DEFAULT_MONITOR_DEFAULT_MINUTES = 5;
-export const DEFAULT_MONITOR_BETS_MINUTES = 1;
-export const DEFAULT_MONITOR_FAVORITES_MINUTES = 1;
-export const DEFAULT_MONITOR_CRITICAL_MINUTES = 0.5;
+/**
+ * A fila de prioridades é informativa: o detector global é a única rotina que
+ * consulta placares, então nenhuma prioridade dispara chamada própria. Os
+ * intervalos apenas acompanham a cadência do detector.
+ */
+export const DEFAULT_MONITOR_DEFAULT_MINUTES = DEFAULT_LIVE_INTERVAL_MINUTES;
+export const DEFAULT_MONITOR_BETS_MINUTES = DEFAULT_LIVE_INTERVAL_MINUTES;
+export const DEFAULT_MONITOR_FAVORITES_MINUTES = DEFAULT_LIVE_INTERVAL_MINUTES;
+export const DEFAULT_MONITOR_CRITICAL_MINUTES = DEFAULT_LIVE_INTERVAL_MINUTES;
 export const DEFAULT_CRITICAL_FROM_MINUTE = 80;
+/** Menor cadência aceita: abaixo disso só se gasta cota sem ganho de placar. */
+export const MIN_LIVE_INTERVAL_MINUTES = 5;
 
-/** Intervalo do detector global, em minutos (mínimo 30 segundos). */
+/** Intervalo do detector global, em minutos. */
 export function liveIntervalMinutes(settings) {
-  return Math.max(0.5, numberOr(settings?.football_live_interval_minutes, DEFAULT_LIVE_INTERVAL_MINUTES));
+  return Math.max(
+    MIN_LIVE_INTERVAL_MINUTES,
+    numberOr(settings?.football_live_interval_minutes, DEFAULT_LIVE_INTERVAL_MINUTES),
+  );
 }
 
 /** Minutos finais: a partir desse minuto a partida entra em situação crítica. */
@@ -47,5 +57,5 @@ export function queueNextCheckAt(priority, settings, nowMs) {
         : priority === 2
           ? numberOr(settings?.football_monitor_bets_minutes, DEFAULT_MONITOR_BETS_MINUTES)
           : numberOr(settings?.football_monitor_default_minutes, DEFAULT_MONITOR_DEFAULT_MINUTES);
-  return new Date(nowMs + Math.max(0.5, minutes) * 60000).toISOString();
+  return new Date(nowMs + Math.max(MIN_LIVE_INTERVAL_MINUTES, minutes) * 60000).toISOString();
 }

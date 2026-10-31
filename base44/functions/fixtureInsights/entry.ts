@@ -268,6 +268,13 @@ export default async function (req) {
       }
     };
 
+    // Eventos e estatísticas são coletados durante o jogo somente para partidas
+    // com bilhete ativo: partida sem aposta não gera chamada desses endpoints.
+    // Cache válido continua sendo servido a todos, sem custo. Partida encerrada
+    // é coletada uma única vez (validade de 24 h) para a página não ficar vazia.
+    const openBets = await db.SimulationSelection.count({ event_id: eventId, status: 'open' });
+    const liveDetailAllowed = finished || openBets > 0;
+
     // Estatísticas e eventos só existem a partir do apito inicial.
     if (started) {
       sections.statistics = await collect({
@@ -276,6 +283,7 @@ export default async function (req) {
         params: { fixture: fixtureId },
         ttlSeconds: statsTtl,
         normalize: normalizeStatistics,
+        condition: liveDetailAllowed,
       });
       sections.events = await collect({
         key: `insights:events:${fixtureId}`,
@@ -283,6 +291,7 @@ export default async function (req) {
         params: { fixture: fixtureId },
         ttlSeconds: statsTtl,
         normalize: normalizeEvents,
+        condition: liveDetailAllowed,
       });
     }
 

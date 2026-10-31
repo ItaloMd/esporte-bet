@@ -2,10 +2,10 @@ import React from "react";
 import { Radio, Timer, Scale, Database } from "lucide-react";
 
 const PRIORITIES = [
-  { key: "CRITICA", label: "Crítica", cadence: "60 s", rule: "Partida em andamento (IN_PLAY)" },
-  { key: "FAVORITA", label: "Favorita", cadence: "120 s", rule: "Partida marcada pelo jogador" },
-  { key: "APOSTA_ABERTA", label: "Aposta aberta", cadence: "180 s", rule: "Bilhete pendente na partida" },
-  { key: "NORMAL", label: "Normal", cadence: "300 s", rule: "Demais partidas da grade do dia" },
+  { key: "CRITICA", label: "Crítica", cadence: "—", rule: "Partida nos minutos finais" },
+  { key: "FAVORITA", label: "Favorita", cadence: "—", rule: "Partida marcada pelo jogador" },
+  { key: "APOSTA_ABERTA", label: "Aposta aberta", cadence: "—", rule: "Bilhete pendente na partida" },
+  { key: "NORMAL", label: "Normal", cadence: "—", rule: "Demais partidas da grade do dia" },
 ];
 
 const BUDGET = [
@@ -16,7 +16,7 @@ const BUDGET = [
 ];
 
 const CACHE = [
-  { label: "live_fixtures", ttl: "120 s" },
+  { label: "live_fixtures", ttl: "10 min" },
   { label: "odds", ttl: "300 s" },
   { label: "predictions", ttl: "24 h" },
   { label: "standings", ttl: "12 h" },
@@ -49,8 +49,8 @@ export default function CollectionArchitecture() {
       <div className="grid gap-3 md:grid-cols-2">
         <Block icon={Radio} title="Fonte única" subtitle="somente o coletor chama /fixtures e /fixtures?live=all">
           <p className="text-[11px] text-muted-foreground">
-            Coletor ao vivo a cada 60 s grava <span className="text-foreground">live_fixtures</span>; monitoramento,
-            liquidação e telas leem só a tabela e o cache.
+            Coletor ao vivo a cada 10 min grava <span className="text-foreground">live_fixtures</span>; monitoramento,
+            liquidação e telas leem só a tabela e o cache. O calendário dos 7 dias é importado uma vez ao dia.
           </p>
           <p className="text-[11px] text-muted-foreground">
             Toda chamada passa pelo cliente central: token bucket pelos cabeçalhos do provedor, janela de 60 s e
@@ -58,7 +58,7 @@ export default function CollectionArchitecture() {
           </p>
         </Block>
 
-        <Block icon={Timer} title="Fila de cotações" subtitle="cadência por prioridade">
+        <Block icon={Timer} title="Fila de prioridades" subtitle="ordem de atenção, sem chamada própria por partida">
           {PRIORITIES.map((row) => (
             <div key={row.key} className="flex items-start justify-between gap-2 text-[11px]">
               <span className="text-muted-foreground">

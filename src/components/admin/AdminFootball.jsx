@@ -14,7 +14,8 @@ const FOOTBALL_DEFAULTS = {
   football_daily_limit: 6000,
   football_minute_limit: 60,
   football_window_days: 7,
-  football_calendar_refresh_seconds: 21600,
+  football_calendar_refresh_seconds: 86400,
+  football_live_interval_minutes: 10,
   football_create_events: true,
   football_audit_offset_hours: 2,
   football_audit_recheck_minutes: 30,
@@ -116,19 +117,27 @@ export default function AdminFootball({ actor }) {
             </p>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="fb_days">Dias importados por dia</Label>
-            <Input id="fb_days" type="number" min="1" max="7" value={settings.football_window_days} onChange={(event) => update({ football_window_days: Number(event.target.value) })} />
+            <Label htmlFor="fb_live">Placar ao vivo (min)</Label>
+            <Input id="fb_live" type="number" min="5" max="60" value={settings.football_live_interval_minutes} onChange={(event) => update({ football_live_interval_minutes: Number(event.target.value) })} />
             <p className="text-[11px] text-muted-foreground">
-              Quantos dias a importação das 00:10 busca, sempre incluindo o dia atual. Padrão 2: hoje e amanhã. A
-              execução manual é feita no Monitoramento da API.
+              Cadência do placar em toda a plataforma: uma única chamada global cobre todas as partidas ao vivo.
+              Padrão 10 minutos; abaixo de 5 não há ganho de placar para o visitante.
             </p>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="fb_cal">Validade do cache (horas)</Label>
+            <Label htmlFor="fb_days">Dias importados por dia</Label>
+            <Input id="fb_days" type="number" min="1" max="7" value={settings.football_window_days} onChange={(event) => update({ football_window_days: Number(event.target.value) })} />
+            <p className="text-[11px] text-muted-foreground">
+              Quantos dias a importação diária busca, sempre incluindo o dia atual. Padrão 7: hoje e os próximos seis.
+              A execução manual é feita no Monitoramento da API.
+            </p>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="fb_cal">Validade do calendário (horas)</Label>
             <Input id="fb_cal" type="number" value={Math.round(Number(settings.football_calendar_refresh_seconds || 0) / 3600)} onChange={(event) => update({ football_calendar_refresh_seconds: Number(event.target.value) * 3600 })} />
             <p className="text-[11px] text-muted-foreground">
-              Depois de importar uma data, ela não é consultada de novo enquanto o cache estiver válido — evita gastar
-              crédito reimportando o mesmo dia em execuções seguidas.
+              Cada data é importada uma única vez dentro dessa validade. Com 24 horas a importação é diária: nenhuma
+              data é consultada de novo no mesmo dia.
             </p>
           </div>
           <div className="space-y-2">
@@ -169,7 +178,9 @@ export default function AdminFootball({ actor }) {
         <div>
           <h2 className="text-sm font-semibold">Como os créditos são economizados</h2>
           <ul className="mt-1 space-y-1 text-xs text-muted-foreground">
-            <li>• Uma chamada por data na importação: todo dia às 00:10, a rotina busca o dia e o dia seguinte em lote (1 crédito por data).</li>
+            <li>• Uma chamada por data, uma vez ao dia: o calendário dos próximos 7 dias é importado em lote (1 crédito por data) e a data não é reconsultada no mesmo dia.</li>
+            <li>• Placar ao vivo a cada 10 minutos: uma única chamada global cobre todas as partidas em andamento.</li>
+            <li>• Eventos e estatísticas só são consultados para partidas com bilhete ativo — partida sem aposta não gera chamada desses endpoints.</li>
             <li>• Nenhuma consulta durante o jogo: a primeira auditoria de cada partida acontece 2 horas depois do horário de início previsto.</li>
             <li>• Se a partida ainda estiver em andamento, nova verificação em 30 minutos; a partir da segunda verificação, a cada 15 minutos até encerrar.</li>
             <li>• Encerrada (tempo normal, prorrogação ou pênaltis), o resultado é gravado e a partida nunca mais é consultada.</li>

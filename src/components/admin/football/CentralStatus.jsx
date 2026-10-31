@@ -80,12 +80,16 @@ export default function CentralStatus({ data }) {
           value={connection.last_live_at ? timeAgo(connection.last_live_at) : "nunca"}
           hint={connection.last_live_at ? formatDateTime(connection.last_live_at) : "—"}
         />
-        <Stat label="Monitoramento" value={data.monitor.enabled ? "Ativo" : "Desligado"} hint={`detector a cada ${data.monitor.live_interval_minutes} min`} />
+        <Stat
+          label="Monitoramento"
+          value={data.monitor.enabled ? "Ativo" : "Desligado"}
+          hint={`placar a cada ${data.monitor.live_interval_minutes} min · calendário ${data.monitor.calendar_refresh_hours ?? 24} h`}
+        />
         <Stat label="Partidas em revisão" value={data.widgets?.review_events ?? 0} hint="aguardando decisão administrativa" />
         <Stat
           label="Limite por minuto"
           value={pause.minute_limit ?? "—"}
-          hint={`teto compartilhado · ${pause.strikes ?? 0} bloqueio(s) de limite hoje`}
+          hint={`teto compartilhado · ${connection.rate_limited_today ?? 0} resposta(s) 429 hoje`}
         />
       </div>
 

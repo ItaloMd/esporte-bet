@@ -12,12 +12,14 @@
 
 /** Frequência das rotinas de coleta (segundos / minutos / dias). */
 export const FOOTBALL_CADENCE = {
-  /** Detector ao vivo com partidas em andamento (recomendação da documentação). */
-  liveSeconds: 60,
-  /** Detector ao vivo sem partida em andamento: desacelera para não gastar cota. */
-  liveIdleSeconds: 300,
+  /** Detector ao vivo: uma chamada global a cada 10 minutos (cadência padrão). */
+  liveSeconds: 600,
+  /** Detector sem partida em andamento: desacelera para não gastar cota. */
+  liveIdleSeconds: 900,
   /** Janela de partidas futuras mantida no sistema. */
   calendarDays: 7,
+  /** Importação do calendário: uma vez ao dia, sem reconsultar datas já importadas. */
+  calendarRefreshSeconds: 86400,
   /**
    * Cotações: dias de calendário coletados por execução. Acompanha a janela de
    * importação (today + 6) para que todos os jogos do calendário tenham cotação
@@ -53,8 +55,8 @@ export const FOOTBALL_TTL = {
  * a mesma chave devolve o dado sem tocar no provedor enquanto estiver válida.
  */
 export const FOOTBALL_CACHE_TTL = {
-  /** live_fixtures: o retrato do coletor vale dois ciclos de 60 s. */
-  live: 120,
+  /** live_fixtures: o retrato do coletor vale um ciclo completo de 10 minutos. */
+  live: 600,
   /** Cotações pré-jogo. */
   odds: 300,
   /** Prognósticos do provedor: muda no máximo uma vez por dia. */
@@ -117,5 +119,10 @@ export const FOOTBALL_LIMITS = {
   maxAttempts: 2,
 };
 
-/** Folga aplicada ao comparar "última execução" com o intervalo configurado. */
-export const CADENCE_TOLERANCE_MS = 5000;
+/**
+ * Folga aplicada ao comparar "última execução" com o intervalo configurado: o
+ * registro só é gravado no fim da execução, então a diferença entre dois ciclos
+ * agendados é sempre um pouco menor que o intervalo. Dois minutos de folga
+ * garantem que o ciclo seguinte execute no horário, sem virar 20 minutos.
+ */
+export const CADENCE_TOLERANCE_MS = 120000;
