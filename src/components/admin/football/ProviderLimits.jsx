@@ -92,6 +92,15 @@ export default function ProviderLimits({ provider, diagnostics, pause, onTest, t
         />
       </div>
 
+      {provider.breaker?.open ? (
+        <p className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          Disjuntor aberto até {clock(provider.breaker.until)}: o provedor falhou {provider.breaker.threshold} vezes
+          seguidas ({provider.breaker.reason || "indisponibilidade"}). Nenhuma rotina chama a API até lá e nada é
+          duplicado — a coleta retoma sozinha depois do cooldown, que dobra a cada abertura seguida.
+        </p>
+      ) : null}
+
       {pause?.active ? (
         <div className="space-y-2">
           <p className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">

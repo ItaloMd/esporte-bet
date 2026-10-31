@@ -1,0 +1,60 @@
+{
+  "name": "Bookmaker",
+  "type": "object",
+  "properties": {
+    "provider": {
+      "type": "string",
+      "default": "api_football"
+    },
+    "provider_id": {
+      "type": "string",
+      "description": "ID oficial da casa de apostas na API-Football (bookmaker.id), obtido em /odds/bookmakers."
+    },
+    "name": {
+      "type": "string"
+    },
+    "enabled": {
+      "type": "boolean",
+      "default": false,
+      "description": "Casa selecionada pelo administrador como refer\u00eancia de pre\u00e7o."
+    },
+    "last_seen_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "\u00daltima sincroniza\u00e7\u00e3o em que a casa apareceu na resposta oficial do provedor."
+    },
+    "synced_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "note": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "provider_id",
+    "name"
+  ],
+  "rls": {
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

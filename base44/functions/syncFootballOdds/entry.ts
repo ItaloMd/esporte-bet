@@ -25,6 +25,8 @@ import { DEFAULT_HOUSE_MARGIN_PERCENT, localDateString } from '../../shared/odds
 import { indexByFixtureId, numberOr } from '../../shared/footballSync.ts';
 import { chunkArray } from '../../shared/matchLifecycle.ts';
 import { applyRelevancePatch, loadRelevanceConfig } from '../../shared/relevance.ts';
+import { listEnabledBookmakers } from '../../shared/footballCatalog.ts';
+import { chooseOddsStrategy } from '../../shared/footballOddsStrategy.ts';
 import {
   dueOddsItems,
   hoursToKickoff,
@@ -174,12 +176,14 @@ export default async function (req) {
           hours,
           hasBets: priority === 'APOSTA_ABERTA',
           priority,
+          events: [event],
         });
         return;
       }
       current.relevance = Math.max(current.relevance, Number(event.relevance_score) || 0);
       current.hours = Math.min(current.hours, hours);
       current.hasBets = current.hasBets || priority === 'APOSTA_ABERTA';
+      current.events.push(event);
     });
 
     const ordered = [...lots.values()].sort(
@@ -204,6 +208,24 @@ export default async function (req) {
     const pendingLots = ordered
       .filter((lot) => force || !freshKeys.has(lotCacheKey(lot)))
       .slice(0, ODDS_CURATION.maxLotsPerRun);
+
+    // Custo estimado de cada estratégia ANTES de gastar requisição: consultar o
+    // dia inteiro só vence quando cobre o lote em menos páginas do que o número
+    // de partidas curadas daquele lote.
+    const plannedLots = [];
+    for (const lot of pendingLots) {
+      const fixturesInLot = await db.Event
+        .count({ source: 'provider', league_id: lot.leagueId, local_date: lot.date })
+        .catch(() => 0);
+      plannedLots.push({
+        ...lot,
+        plan: chooseOddsStrategy({
+          fixturesInLot,
+          curatedFixtures: (lot.events || []).length,
+          maxPages: FOOTBALL_CADENCE.oddsMaxPages,
+        }),
+      });
+    }
 
     if (!pendingLots.length) {
       await releaseLock(db, quotaRecord);
@@ -236,7 +258,7 @@ export default async function (req) {
     let pagesLimited = false;
     let rateLimited = false;
 
-    for (const lot of pendingLots) {
+    for (const lot of plannedLots) {
       if (rateLimited || Date.now() - runStartedAt > RUN_BUDGET_MS) break;
       if (!canSpend(used, limit, RESERVE_CALLS, 1)) {
         failures.push(`orçamento reservado para as outras rotinas: ${used}/${limit}`);
@@ -244,42 +266,51 @@ export default async function (req) {
       }
       const label = `${lot.name || lot.leagueId} · ${lot.date}`;
       const maxPages = Math.max(1, Number(FOOTBALL_CADENCE.oddsMaxPages) || 1);
+      const strategy = lot.plan?.strategy === 'fixture' && (lot.events || []).length ? 'fixture' : 'date';
+      // Estratégia escolhida pelo custo estimado: uma consulta por partida
+      // curada ou as páginas do lote inteiro (competição + data).
+      const requests = strategy === 'fixture'
+        ? (lot.events || [])
+            .slice(0, Math.max(1, Number(lot.plan?.calls) || 1))
+            .filter((event) => event.fixture_id)
+            .map((event) => ({ params: { fixture: event.fixture_id }, label: `${label} · jogo ${event.fixture_id}` }))
+        : [{ params: { league: lot.leagueId, season: lot.season, date: lot.date }, label }];
       let pagesRead = 0;
       let lotRecords = 0;
       let lotClean = true;
       try {
-        for (let page = 1; page <= maxPages; page += 1) {
-          if (Date.now() - runStartedAt > RUN_BUDGET_MS) break;
-          if (!canSpend(used, limit, RESERVE_CALLS, 1)) break;
-          const result = await client.call(
-            '/odds',
-            {
-              league: lot.leagueId,
-              season: lot.season,
-              date: lot.date,
-              ...(page > 1 ? { page } : {}),
-            },
-            { timeoutMs: 25000, purpose: 'odds', priority: queuePriority },
-          );
-          used = client.used;
-          pagesRead += 1;
+        for (const request of requests) {
+          const paramsText = Object.entries(request.params)
+            .map(([name, value]) => `${name}=${value}`)
+            .join('&');
+          for (let page = 1; page <= maxPages; page += 1) {
+            if (Date.now() - runStartedAt > RUN_BUDGET_MS) break;
+            if (!canSpend(used, limit, RESERVE_CALLS, 1)) break;
+            const result = await client.call(
+              '/odds',
+              { ...request.params, ...(page > 1 ? { page } : {}) },
+              { timeoutMs: 25000, purpose: 'odds', priority: queuePriority },
+            );
+            used = client.used;
+            pagesRead += 1;
 
-          const list = Array.isArray(result.data?.response) ? result.data.response : [];
-          entries.push(...list);
-          lotRecords += list.length;
-          calls.push({ date: `${lot.leagueId}/${lot.date}`, page, records: list.length });
+            const list = Array.isArray(result.data?.response) ? result.data.response : [];
+            entries.push(...list);
+            lotRecords += list.length;
+            calls.push({ date: paramsText, page, records: list.length, strategy, label: request.label });
 
-          if (result.errors.length) {
-            if (pageLimitReached(result.errors)) pagesLimited = true;
-            else failures.push(`odds ${label} (página ${page}): ${result.errors.join(' | ')}`);
-            lotClean = false;
-            break;
+            if (result.errors.length) {
+              if (pageLimitReached(result.errors)) pagesLimited = true;
+              else failures.push(`odds ${request.label} (página ${page}): ${result.errors.join(' | ')}`);
+              lotClean = false;
+              break;
+            }
+
+            const totalPages = Number(result.data?.paging?.total) || 0;
+            if (!list.length) break;
+            if (totalPages && page >= totalPages) break;
+            if (!totalPages && list.length < 10) break;
           }
-
-          const totalPages = Number(result.data?.paging?.total) || 0;
-          if (!list.length) break;
-          if (totalPages && page >= totalPages) break;
-          if (!totalPages && list.length < 10) break;
         }
 
         if (lotClean && pagesRead) {
@@ -292,7 +323,7 @@ export default async function (req) {
             params: `league=${lot.leagueId} · season=${lot.season} · date=${lot.date}`,
             ttlSeconds: oddsLotTtlSeconds(lot.hours),
             records: lotRecords,
-            note: `${label}: ${lotRecords} partida(s) em ${pagesRead} página(s)`,
+            note: `${label}: ${lotRecords} partida(s) em ${pagesRead} chamada(s) · estratégia ${strategy}`,
           }).catch(() => null);
         }
       } catch (error) {
@@ -303,6 +334,9 @@ export default async function (req) {
     }
 
     /* ------------------------- gravação dos mercados ------------------------- */
+    // Seleção administrativa do catálogo: só as casas marcadas servem de
+    // referência de preço. Sem seleção, vale a ordem de preferência padrão.
+    const enabledBookmakers = await listEnabledBookmakers(db);
     const known = await indexByFixtureId(
       db,
       entries.map((entry) => String(entry?.fixture?.id || '')).filter(Boolean),
@@ -314,7 +348,7 @@ export default async function (req) {
       if (!eventRow || !eventRow.start_time) return;
       // Partida iniciada não recebe mais cotação pré-jogo.
       if (Date.parse(eventRow.start_time) <= nowMs) return;
-      const bookmaker = pickBookmaker(entry.bookmakers || []);
+      const bookmaker = pickBookmaker(entry.bookmakers || [], enabledBookmakers);
       if (!bookmaker) return;
       const mapped = mapOddsEntry(entry, bookmaker, {
         homeTeam: eventRow.home_team_name,
@@ -349,10 +383,12 @@ export default async function (req) {
       }
     }
 
+    const fixtureLots = plannedLots.filter((lot) => lot.plan?.strategy === 'fixture').length;
     const summary = [
       'odds pré-jogo',
       `${calls.length} chamada(s)`,
       `${doneLots.length} lote(s)`,
+      `${fixtureLots} lote(s) por partida`,
       `${written.events} partida(s)`,
       `${written.odds} cotação(ões)`,
       `${written.published} publicado(s)`,
@@ -410,6 +446,17 @@ export default async function (req) {
       queue,
       due: due.items.length,
       lots: doneLots,
+      strategies: {
+        fixture_lots: fixtureLots,
+        date_lots: plannedLots.length - fixtureLots,
+        plans: plannedLots.map((lot) => ({
+          lot: lot.name || lot.leagueId,
+          strategy: lot.plan?.strategy || 'date',
+          calls: lot.plan?.calls || 0,
+          reason: lot.plan?.reason || '',
+        })),
+      },
+      bookmakers: enabledBookmakers || [],
       calls: calls.length,
       events_with_odds: written.events,
       odds: written.odds,

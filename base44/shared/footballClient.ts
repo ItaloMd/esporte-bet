@@ -46,6 +46,7 @@ import {
   quotaLevel,
   saveQuota,
 } from './footballQuota.ts';
+import { breakerFailurePatch, breakerState, breakerSuccessPatch, isTransientFailure } from './footballCircuit.ts';
 import {
   DEFAULT_MINUTE_LIMIT,
   RECOVERY_SUCCESSES,
@@ -127,6 +128,19 @@ export class FootballBudgetError extends Error {
   }
 }
 
+/**
+ * Disjuntor aberto: o provedor falhou de forma repetida (indisponibilidade,
+ * tempo esgotado ou rede). Nenhuma chamada é feita até o fim do cooldown —
+ * repetir aqui só gastaria requisição e tempo de execução.
+ */
+export class FootballCircuitError extends Error {
+  constructor(untilIso, reason = '') {
+    super(`Disjuntor do provedor aberto até ${untilIso}${reason ? ` · ${reason}` : ''}`);
+    this.name = 'FootballCircuitError';
+    this.untilIso = untilIso;
+  }
+}
+
 /** Erros que exigem parar imediatamente as chamadas (não são retentados). */
 export function isThrottleError(error) {
   return (
@@ -134,7 +148,8 @@ export function isThrottleError(error) {
     error instanceof FootballPausedError ||
     error instanceof FootballMinuteLimitError ||
     error instanceof FootballDailyLimitError ||
-    error instanceof FootballBudgetError
+    error instanceof FootballBudgetError ||
+    error instanceof FootballCircuitError
   );
 }
 
@@ -364,6 +379,10 @@ export async function openFootballClient(db, { apiKey, base, settings, day, limi
     get pausedUntil() {
       return record?.rate_pause_until || null;
     },
+    /** Estado do disjuntor (aberto/fechado, falhas, cooldown). */
+    get breaker() {
+      return breakerState(record);
+    },
     get dailyBlockedUntil() {
       return record?.daily_blocked_until || null;
     },
@@ -432,6 +451,12 @@ export async function openFootballClient(db, { apiKey, base, settings, day, limi
 
       const nowMs = Date.now();
       const bucket = minuteBucketKey(nowMs);
+
+      // 0b) Disjuntor: falha repetida de infraestrutura suspende as chamadas.
+      // Fica depois do cache de propósito — servir cache continua funcionando
+      // com o provedor fora do ar.
+      const circuit = breakerState(record, nowMs);
+      if (circuit.open) throw new FootballCircuitError(circuit.until, circuit.reason);
 
       // 1) Bloqueio ativo (cota do dia esgotada ou recusa temporária do
       // provedor): nada é chamado até o horário registrado.
@@ -553,6 +578,12 @@ export async function openFootballClient(db, { apiKey, base, settings, day, limi
         else if (Number(error?.status) >= 500) countMetric('errors_5xx');
         await flushMetrics();
 
+        // Falha dura de infraestrutura conta para o disjuntor; limite, chave e
+        // plano têm tratamento próprio e não abrem o disjuntor.
+        if (isTransientFailure(error)) {
+          await persist(breakerFailurePatch(record, error?.message || String(error)));
+        }
+
         if (error instanceof FootballRateLimitError) {
           const scope = error.scope === 'daily' ? 'daily' : 'minute';
           if (scope === 'daily') {
@@ -647,6 +678,7 @@ export async function openFootballClient(db, { apiKey, base, settings, day, limi
         minute_key: bucket,
         minute_used: windowUsed + cost,
         rate_limit_strikes: 0,
+        ...breakerSuccessPatch(),
         ...(() => {
           const streak = Number(record?.success_streak || 0) + 1;
           const recovered = streak >= RECOVERY_SUCCESSES;

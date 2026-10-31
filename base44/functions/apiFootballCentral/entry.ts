@@ -8,6 +8,7 @@ import {
 } from '../../shared/apiFootball.ts';
 import { loadQuota, quotaDayKey, quotaLevel, quotaPercent } from '../../shared/footballQuota.ts';
 import { openFootballClient } from '../../shared/footballClient.ts';
+import { breakerState } from '../../shared/footballCircuit.ts';
 import { clampGap, effectiveMinuteLimit, minuteWindowUsed, paceGapMs } from '../../shared/footballQueue.ts';
 import { FOOTBALL_SETTINGS_RULES, validateFootballSettingsPatch } from '../../shared/footballSettings.ts';
 import {
@@ -400,6 +401,8 @@ export default async function (req) {
     // Pausas de segurança compartilhadas por todas as rotinas: minuto e dia.
     const pauseMs = Date.parse(quotaRecord?.rate_pause_until || '');
     const dailyBlockMs = Date.parse(quotaRecord?.daily_blocked_until || '');
+    // Disjuntor: estado compartilhado por todas as rotinas (falhas duras do provedor).
+    const breaker = breakerState(quotaRecord, nowMs);
     const pause = {
       active: (Number.isFinite(pauseMs) && pauseMs > nowMs) || (Number.isFinite(dailyBlockMs) && dailyBlockMs > nowMs),
       scope: Number.isFinite(dailyBlockMs) && dailyBlockMs > nowMs ? 'daily' : Number.isFinite(pauseMs) && pauseMs > nowMs ? 'minute' : '',
@@ -620,6 +623,14 @@ export default async function (req) {
           ? `Reservada por ${quotaRecord?.lock_owner || 'outra rotina'} até ${quotaRecord?.lock_until}.`
           : 'Nenhuma rotina em execução.',
       },
+      {
+        id: 'breaker',
+        label: 'Disjuntor do provedor',
+        status: breaker.open ? 'warn' : 'ok',
+        detail: breaker.open
+          ? `Aberto até ${breaker.until} · ${breaker.reason}`
+          : `Fechado · ${breaker.failures} de ${breaker.threshold} falhas consecutivas de infraestrutura`,
+      },
     ];
 
     /* ------------------ motor de cotações pré-jogo (curadoria) ------------------ */
@@ -670,6 +681,19 @@ export default async function (req) {
         : null,
     };
 
+    /* --------------- catálogo de casas de apostas (seleção admin) --------------- */
+    const [bookmakerTotal, bookmakerSelected, bookmakerLastPage] = await Promise.all([
+      db.Bookmaker.count({ provider: 'api_football' }),
+      db.Bookmaker.count({ provider: 'api_football', enabled: true }),
+      db.Bookmaker.filter({ provider: 'api_football' }, { sort: '-synced_at', limit: 1 }),
+    ]);
+    const bookmakers = {
+      total: numberOr(bookmakerTotal, 0),
+      selected: numberOr(bookmakerSelected, 0),
+      last_sync_at: bookmakerLastPage?.items?.[0]?.synced_at || null,
+      mode: numberOr(bookmakerSelected, 0) > 0 ? 'selecao' : 'preferencia_padrao',
+    };
+
     return Response.json({
       connection: {
         key_configured: Boolean(apiKey),
@@ -705,6 +729,7 @@ export default async function (req) {
       widgets,
       result_audit: resultAudit,
       odds_engine: oddsEngine,
+      bookmakers,
       pause,
       provider: {
         daily: {
@@ -721,6 +746,7 @@ export default async function (req) {
           read_at: quotaRecord?.provider_minute_at || null,
         },
         window: { used: pause.minute_used, limit: effectiveMinute, key: quotaRecord?.minute_key || null },
+        breaker,
         pacing: {
           gap_ms: clampGap(Number(quotaRecord?.request_gap_ms) || paceGapMs(effectiveMinute)),
           learned: Boolean(quotaRecord?.request_gap_ms),

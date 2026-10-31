@@ -239,6 +239,8 @@ export function cacheTtlSeconds(endpoint, params = {}) {
   if (path === '/status') return 0; // consulta ao vivo, não consome cota diária
   if (path.startsWith('/odds/live')) return 10; // dinâmico
   if (path === '/odds') return 300; // cotações pré-jogo
+  if (path === '/odds/bookmakers') return 604800; // estático: catálogo de casas
+  if (path === '/odds/bets') return 3600; // semidinâmico: bets liberados pelo plano
   if (path === '/fixtures/events') return 30; // dinâmico
   if (path === '/fixtures/statistics') return 60; // dinâmico
   if (path === '/fixtures/lineups') return 120;

@@ -50,9 +50,25 @@ export function pageLimitReached(errors = []) {
   return errors.some((message) => /page/i.test(String(message)));
 }
 
-/** Casa de referência: a preferida que tiver mercados; senão a mais completa. */
-export function pickBookmaker(bookmakers = []) {
-  const withBets = bookmakers.filter((book) => (book?.bets || []).length);
+/** Consulta direcionada de uma partida (estratégia alternativa à consulta por data). */
+export function fetchOddsByFixture(apiKey, base, fixtureId, page = 1) {
+  const params = { fixture: fixtureId };
+  if (page > 1) params.page = page;
+  return apiFootballFetch(apiKey, '/odds', params, { base, timeoutMs: 20000 });
+}
+
+/**
+ * Casa de referência: a preferida que tiver mercados; senão a mais completa.
+ * `allowedNames` é a seleção administrativa do catálogo — quando informada, só
+ * essas casas podem servir de referência de preço.
+ */
+export function pickBookmaker(bookmakers = [], allowedNames = null) {
+  const allowed = Array.isArray(allowedNames) && allowedNames.length
+    ? new Set(allowedNames.map((name) => String(name || '').trim().toLowerCase()))
+    : null;
+  const withBets = bookmakers
+    .filter((book) => (book?.bets || []).length)
+    .filter((book) => !allowed || allowed.has(String(book?.name || '').trim().toLowerCase()));
   if (!withBets.length) return null;
   for (const name of BOOKMAKER_PREFERENCE) {
     const found = withBets.find((book) => String(book.name || '').trim().toLowerCase() === name.toLowerCase());

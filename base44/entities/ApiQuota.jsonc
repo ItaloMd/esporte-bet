@@ -117,6 +117,34 @@
       "format": "date-time",
       "description": "Momento em que o bloqueio di\u00e1rio foi registrado."
     },
+    "breaker_failures": {
+      "type": "number",
+      "default": 0,
+      "description": "Falhas duras consecutivas do provedor (5xx, tempo esgotado, rede). O disjuntor abre ao atingir o limite da pol\u00edtica."
+    },
+    "breaker_open_until": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Disjuntor aberto: nenhuma chamada \u00e9 feita ao provedor at\u00e9 este hor\u00e1rio, que dobra a cada abertura consecutiva."
+    },
+    "breaker_opened_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Momento da \u00faltima abertura do disjuntor."
+    },
+    "breaker_reason": {
+      "type": "string",
+      "description": "Motivo registrado na abertura do disjuntor."
+    },
+    "breaker_trips": {
+      "type": "number",
+      "default": 0,
+      "description": "Aberturas consecutivas sem nenhuma chamada bem-sucedida entre elas."
+    },
+    "breaker_last_failure_at": {
+      "type": "string",
+      "format": "date-time"
+    },
     "cache_hits": {
       "type": "number",
       "default": 0,
@@ -171,7 +199,7 @@
     },
     "last_error_scope": {
       "type": "string",
-      "description": "Natureza do \u00faltimo erro: minute, daily, auth, plan."
+      "description": "Natureza do \u00faltimo erro: minute, daily, auth, plan, breaker."
     },
     "lock_until": {
       "type": "string",
