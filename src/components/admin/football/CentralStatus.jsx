@@ -128,11 +128,18 @@ export default function CentralStatus({ data }) {
       ) : null}
 
       {pause.active ? (
-        <p className="flex items-start gap-2 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300">
-          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          Pausa de segurança ativa até {formatDateTime(pause.until)} · {pause.strikes} ocorrência(s) de limite ·
-          nenhuma chamada é feita à API até lá; os dados confirmados permanecem e a revalidação retoma sozinha.
-        </p>
+        <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+          <p className="flex items-start gap-2">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>
+              <span className="font-medium">Pausa de segurança até {formatDateTime(pause.until)}.</span> A fila parou de
+              chamar a API-Football porque o limite de requisições do minuto foi atingido
+              {pause.strikes ? ` (${pause.strikes} ocorrência(s))` : ""}. É proteção automática, não erro: nenhum dado
+              foi perdido, o que já está salvo continua no ar e a coleta retoma sozinha no minuto seguinte.
+            </span>
+          </p>
+          {pause.last_error ? <p className="mt-1 pl-5 text-[11px] text-red-300/80">Motivo: {pause.last_error}</p> : null}
+        </div>
       ) : pause.last_rate_limited_at ? (
         <p className="text-[11px] text-muted-foreground">
           Último bloqueio de limite: {timeAgo(pause.last_rate_limited_at)} · pausa cumprida, rotinas operando normalmente.

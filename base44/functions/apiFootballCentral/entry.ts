@@ -315,11 +315,17 @@ export default async function (req) {
     const base = footballApiBase(settings);
     let quotaRecord = await loadQuota(db, day);
 
-    // O /status entra na mesma fila das demais rotinas: não consome cota
-    // diária, mas ocupa a janela de requisições do provedor.
+    // Recarregar o painel nunca chama o provedor: `skip_status` devolve apenas o
+    // estado salvo (plano, limite e consumo já gravados em ProviderSettings e no
+    // registro de cota). A consulta de conta (/status) fica para uma ação
+    // explícita do administrador — ela não consome cota diária, mas ocupa a
+    // janela de requisições compartilhada e por isso não pode ser automática.
+    const skipStatus = Boolean(body?.skip_status);
     let account = null;
     let statusError = '';
-    if (apiKey) {
+    if (skipStatus) {
+      statusError = '';
+    } else if (apiKey) {
       try {
         const statusClient = await openFootballClient(db, {
           apiKey,

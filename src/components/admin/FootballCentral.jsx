@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Loader2, RefreshCw, SearchCheck, Timer } from "lucide-react";
+import { Loader2, RefreshCw, Wifi } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/use-toast";
@@ -13,6 +13,7 @@ import CentralLogs from "@/components/admin/football/CentralLogs";
 import EndpointConsumption from "@/components/admin/football/EndpointConsumption";
 import ReviewQueue from "@/components/admin/football/ReviewQueue";
 import StepProgress from "@/components/admin/football/StepProgress";
+import ManualActions from "@/components/admin/football/ManualActions";
 import { classifyStep, nextStepWait, shouldHalt, waitWithCountdown } from "@/lib/smartStepDelay";
 
 /**
@@ -29,10 +30,18 @@ export default function FootballCentral() {
   const [step, setStep] = useState("");
   const [waitSeconds, setWaitSeconds] = useState(0);
 
-  const load = useCallback(async () => {
+  /**
+   * Recarrega o painel. Por padrão usa apenas o estado já salvo — nenhuma
+   * chamada à API-Football, nenhum efeito na janela de requisições. A consulta
+   * de conta (/status) só acontece quando o administrador pede.
+   */
+  const load = useCallback(async ({ withStatus = false } = {}) => {
     setLoading(true);
     try {
-      const response = await base44.functions.invoke("apiFootballCentral", { action: "overview" });
+      const response = await base44.functions.invoke("apiFootballCentral", {
+        action: "overview",
+        skip_status: !withStatus,
+      });
       const payload = response.data || {};
       if (payload.error) {
         toast({ title: "Falha ao carregar a central", description: payload.error, variant: "destructive" });
@@ -109,16 +118,18 @@ export default function FootballCentral() {
     }
   };
 
-  const runDetector = () => runSteps([["syncFootballLive", { trigger: "manual" }, "Detector ao vivo"]]);
+  /** Ação manual escolhida no painel: uma rotina específica ou o ciclo completo. */
+  const runAction = (steps) => runSteps(steps);
 
-  const runCycle = () =>
-    runSteps([
-      ["syncFootball", { mode: "calendar", trigger: "manual" }, "Calendário importado"],
-      ["syncFootballLive", { trigger: "manual" }, "Detector ao vivo"],
-      ["syncFootballOdds", { mode: "auto", trigger: "manual", force: true }, "Cotações atualizadas"],
-      ["auditarResultadosPendentes", { trigger: "manual" }, "Resultados pendentes"],
-      ["settleMatches", { trigger: "manual" }, "Bilhetes liquidados"],
-    ]);
+  /** Consulta a conta no provedor: única ação do painel que chama /status. */
+  const checkAccount = async () => {
+    setRunning(true);
+    try {
+      await load({ withStatus: true });
+    } finally {
+      setRunning(false);
+    }
+  };
 
   /** Pausa/retomada global: gravada nas configurações e respeitada por todas as rotinas. */
   const togglePause = async () => {
@@ -168,20 +179,20 @@ export default function FootballCentral() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button size="sm" variant="outline" onClick={load} disabled={loading || running}>
+          <Button size="sm" variant="outline" onClick={() => load()} disabled={loading || running}>
             {loading ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-2 h-3.5 w-3.5" />}
-            Atualizar
+            Atualizar painel
           </Button>
-          <Button size="sm" variant="outline" onClick={runDetector} disabled={running}>
-            <Timer className="mr-2 h-3.5 w-3.5" />
-            Detector agora
-          </Button>
-          <Button size="sm" onClick={runCycle} disabled={running}>
-            <SearchCheck className="mr-2 h-3.5 w-3.5" />
-            Ciclo completo
+          <Button size="sm" variant="outline" onClick={checkAccount} disabled={loading || running}>
+            <Wifi className="mr-2 h-3.5 w-3.5" />
+            Consultar conta
           </Button>
         </div>
       </div>
+      <p className="text-[11px] text-muted-foreground">
+        Atualizar painel recarrega apenas os dados já salvos, sem chamar a API-Football. Consultar conta é a única ação
+        que fala com o provedor aqui — não consome cota diária, mas ocupa a janela de requisições do minuto.
+      </p>
       <StepProgress step={step} waitSeconds={waitSeconds} />
 
       <CollectionControl
@@ -190,6 +201,8 @@ export default function FootballCentral() {
         onActivate={activateAndSync}
         onTogglePause={togglePause}
       />
+
+      <ManualActions busy={running} onRun={runAction} />
 
       {!data ? (
         <div className="card-surface h-64 animate-pulse" />
