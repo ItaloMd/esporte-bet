@@ -371,8 +371,17 @@ export default async function (req) {
     });
     await releaseLock(db, savedQuota || quotaRecord);
 
+    // Limite do provedor não é falha do motor: a fila fecha e o próximo ciclo
+    // retoma sozinho. Só o que não é limite conta como erro no histórico.
+    const providerHeld = rateLimited && !written.odds;
     await db.SyncJob.update(job.id, {
-      status: failures.length && !written.odds ? 'error' : failures.length ? 'partial' : 'success',
+      status: providerHeld
+        ? 'skipped'
+        : failures.length && !written.odds
+          ? 'error'
+          : failures.length
+            ? 'partial'
+            : 'success',
       finished_at: new Date().toISOString(),
       requests_used: calls.length,
       records_upserted: written.odds,

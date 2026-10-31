@@ -117,11 +117,13 @@ export function planRequestSlot(lastSlotAtIso, nowMs, gapMs = REQUEST_GAP_MS) {
 export const MIN_REQUEST_GAP_MS = REQUEST_GAP_MS;
 
 /**
- * Teto do espaçamento aprendido: 5 s (~12 chamadas/min). O suficiente para
- * todas as rotinas e para o painel continuarem respondendo, mesmo que o
- * provedor esteja recusando rajadas bem menores que o limite informado.
+ * Teto do espaçamento aprendido: 12 s (~5 chamadas/min). O provedor recusa
+ * rajadas bem menores que o limite anunciado (a conta já respondeu 429 com
+ * saldo intacto); sem este teto mais largo, o espaçamento travava em 5 s e a
+ * coleta apanhava 429 a cada minuto, sem nunca desacelerar o suficiente para
+ * passar.
  */
-export const MAX_REQUEST_GAP_MS = 5000;
+export const MAX_REQUEST_GAP_MS = 12000;
 
 /** Sucessos consecutivos necessários para voltar a acelerar. */
 export const RECOVERY_SUCCESSES = 12;
