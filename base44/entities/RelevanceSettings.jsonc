@@ -4,23 +4,28 @@
   "properties": {
     "weight_competition": {
       "type": "number",
-      "default": 50,
+      "default": 40,
       "description": "Peso m\u00e1ximo do componente de relev\u00e2ncia da competi\u00e7\u00e3o."
     },
     "weight_regional": {
       "type": "number",
-      "default": 20,
+      "default": 15,
       "description": "Peso m\u00e1ximo do componente de interesse regional (destaque para o Brasil)."
     },
     "weight_importance": {
       "type": "number",
       "default": 15,
-      "description": "Peso m\u00e1ximo do componente de fase decisiva ou partida ao vivo."
+      "description": "Peso m\u00e1ximo do componente de fase decisiva ou partida em andamento."
     },
     "weight_data": {
       "type": "number",
       "default": 10,
       "description": "Peso m\u00e1ximo do componente de disponibilidade de odds (crit\u00e9rio de confiabilidade)."
+    },
+    "weight_team": {
+      "type": "number",
+      "default": 15,
+      "description": "Peso m\u00e1ximo do componente de equipe selecionada como de alta relev\u00e2ncia."
     },
     "weight_other": {
       "type": "number",
@@ -30,6 +35,10 @@
     "priority_competitions": {
       "type": "string",
       "description": "Tabela de competi\u00e7\u00f5es priorit\u00e1rias em JSON: league_id oficial da API-Football, nome, pa\u00eds, grupo (br/intl), pontua\u00e7\u00e3o e tokens de fallback."
+    },
+    "priority_teams": {
+      "type": "string",
+      "description": "Equipes de alta relev\u00e2ncia em JSON: [{team_id, name, score}]. Partidas com uma dessas equipes recebem o componente de equipe na pontua\u00e7\u00e3o."
     },
     "country_weights": {
       "type": "string",

@@ -22,15 +22,19 @@
 import { slugify } from './oddsApi.ts';
 
 export const DEFAULT_WEIGHTS = {
-  competition: 50,
-  regional: 20,
+  competition: 40,
+  regional: 15,
   importance: 15,
   data: 10,
+  team: 15,
   other: 5,
 };
 
 /** Pontuação de competição fora da tabela de prioridades. */
 export const DEFAULT_COMPETITION_SCORE = 10;
+
+/** Pontuação padrão de uma equipe marcada como de alta relevância. */
+export const DEFAULT_TEAM_SCORE = 40;
 
 /** Estaduais brasileiras: prioridade média por país + token, sem depender de ID. */
 const BRAZIL_STATE_TOKENS = [
@@ -103,6 +107,22 @@ function findPriority(leagueId, competitionName, country, list) {
 }
 
 /**
+ * Equipe de alta relevância: casa primeiro pelo ID oficial da API-Football e,
+ * como reserva, pelo nome normalizado (o ID é sempre a chave confiável).
+ */
+function findPriorityTeam(teamIds, teamNames, list) {
+  const ids = (teamIds || []).map((value) => String(value || '')).filter(Boolean);
+  const names = (teamNames || []).map((value) => slugify(value || '')).filter(Boolean);
+  return (
+    (list || []).find((row) => {
+      if (row?.team_id && ids.includes(String(row.team_id))) return true;
+      const key = slugify(row?.name || '');
+      return Boolean(key) && names.includes(key);
+    }) || null
+  );
+}
+
+/**
  * Fase decisiva (league.round) e partida ao vivo. 'Semi-final' contém 'final',
  * então a ordem dos testes importa.
  */
@@ -119,6 +139,11 @@ export function importancePoints(roundLabel, isLive) {
 export function computeRelevance(input, config, previous = null) {
   const weights = config.weights;
   const entry = findPriority(input.leagueId, input.competitionName, input.country, config.priorityCompetitions);
+  const teamEntry = findPriorityTeam(
+    [input.homeTeamId, input.awayTeamId],
+    [input.homeTeamName, input.awayTeamName],
+    config.priorityTeams,
+  );
   const scale = (raw, cap, weight) => Math.round(raw * 10 * (weight / cap)) / 10;
 
   const competition = scale(entry ? entry.score : DEFAULT_COMPETITION_SCORE, 50, weights.competition);
@@ -134,6 +159,8 @@ export function computeRelevance(input, config, previous = null) {
 
   const dataRaw = input.oddsAvailable ? (input.published ? 10 : 7) : 0;
   const data = scale(dataRaw, 10, weights.data);
+  // Equipe de alta relevância: pontua só quando um dos times foi escolhido no painel.
+  const team = teamEntry ? scale(Number(teamEntry.score) || DEFAULT_TEAM_SCORE, 50, weights.team) : 0;
   const other = input.isFeatured ? scale(5, 5, weights.other) : 0;
 
   const breakdown = {
@@ -141,11 +168,13 @@ export function computeRelevance(input, config, previous = null) {
     regional,
     importance,
     data,
+    team,
     other,
     group: entry?.group || 'other',
+    team_name: teamEntry?.name || '',
     round: String(input.roundLabel || ''),
   };
-  const score = Math.min(100, Math.round(competition + regional + importance + data + other));
+  const score = Math.min(100, Math.round(competition + regional + importance + data + team + other));
   return { score, breakdown };
 }
 
@@ -153,6 +182,7 @@ export function defaultRelevanceConfig() {
   return {
     weights: { ...DEFAULT_WEIGHTS },
     priorityCompetitions: DEFAULT_PRIORITY_COMPETITIONS.map((row) => ({ ...row })),
+    priorityTeams: [],
     countryWeights: { ...DEFAULT_COUNTRY_WEIGHTS },
   };
 }
@@ -169,10 +199,13 @@ export async function loadRelevanceConfig(db) {
       regional: numberOr(row.weight_regional, DEFAULT_WEIGHTS.regional),
       importance: numberOr(row.weight_importance, DEFAULT_WEIGHTS.importance),
       data: numberOr(row.weight_data, DEFAULT_WEIGHTS.data),
+      team: numberOr(row.weight_team, DEFAULT_WEIGHTS.team),
       other: numberOr(row.weight_other, DEFAULT_WEIGHTS.other),
     };
     const priority = parseBreakdown(row.priority_competitions);
     if (Array.isArray(priority) && priority.length) config.priorityCompetitions = priority;
+    const priorityTeams = parseBreakdown(row.priority_teams);
+    if (Array.isArray(priorityTeams)) config.priorityTeams = priorityTeams;
     const countries = parseBreakdown(row.country_weights);
     if (countries && !Array.isArray(countries)) config.countryWeights = countries;
   } catch {
@@ -195,6 +228,10 @@ export function scoreEvent(event, config, extras = {}) {
       leagueId: extras.leagueId || event?.league_id || event?.competition_id,
       competitionName: extras.competitionName || event?.competition_name,
       country: extras.country || event?.country,
+      homeTeamId: event?.home_team_id,
+      awayTeamId: event?.away_team_id,
+      homeTeamName: event?.home_team_name,
+      awayTeamName: event?.away_team_name,
       roundLabel,
       isFeatured: Boolean(event?.is_featured),
       isLive: extras.isLive ?? event?.status === 'live',
