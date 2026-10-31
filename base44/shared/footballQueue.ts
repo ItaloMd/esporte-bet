@@ -144,10 +144,54 @@ export function gapAfterRateLimit(gapMs) {
   return clampGap(Math.max(800, clampGap(gapMs) * 2));
 }
 
-/** Depois de uma sequência de sucessos: acelera 20%, sem voltar ao piso. */
-export function gapAfterSuccess(gapMs, streak) {
+/**
+ * Depois de uma sequência de sucessos: acelera 20% sem nunca passar do ritmo
+ * configurado (`floorGapMs`). Assim a recuperação é gradual e converge para o
+ * espaçamento nominal, em vez de disparar direto para o piso.
+ */
+export function gapAfterSuccess(gapMs, streak, floorGapMs = MIN_REQUEST_GAP_MS) {
   if (Number(streak) < RECOVERY_SUCCESSES) return clampGap(gapMs);
-  return clampGap(clampGap(gapMs) * 0.8);
+  const floor = Math.max(MIN_REQUEST_GAP_MS, Number(floorGapMs) || MIN_REQUEST_GAP_MS);
+  return clampGap(Math.max(floor, clampGap(gapMs) * 0.8));
+}
+
+/**
+ * Marcadores a zerar quando um bloqueio já expirou, para a coleta retomar
+ * limpa: pausa e bloqueio vencidos saem, as janelas de minuto e segundo viram,
+ * o slot antigo é descartado e o espaçamento volta ao ritmo configurado.
+ *
+ * Devolve `{}` quando não há nada vencido — é isso que torna a limpeza
+ * idempotente: execuções simultâneas não limpam a fila repetidamente.
+ */
+export function resumeQueuePatch(record, { nowMs = Date.now(), minuteLimit = DEFAULT_MINUTE_LIMIT } = {}) {
+  const patch = {};
+  const pauseMs = Date.parse(record?.rate_pause_until || '');
+  const blockMs = Date.parse(record?.daily_blocked_until || '');
+  const expired = (Number.isFinite(pauseMs) && pauseMs <= nowMs) || (Number.isFinite(blockMs) && blockMs <= nowMs);
+
+  if (expired) {
+    patch.rate_pause_until = null;
+    patch.daily_blocked_until = null;
+    patch.daily_blocked_at = null;
+    patch.rate_limit_strikes = 0;
+    patch.success_streak = 0;
+    patch.last_slot_at = null;
+    // Retomada pelo ritmo configurado: nem o piso, nem o ritmo lento que o
+    // bloqueio anterior impôs.
+    patch.request_gap_ms = paceGapMs(minuteLimit);
+  }
+
+  const minuteKey = minuteBucketKey(nowMs);
+  if (record?.minute_key !== minuteKey && Number(record?.minute_used)) {
+    patch.minute_key = minuteKey;
+    patch.minute_used = 0;
+  }
+  const secondKey = secondBucketKey(nowMs);
+  if (record?.second_key !== secondKey && Number(record?.second_used)) {
+    patch.second_key = secondKey;
+    patch.second_used = 0;
+  }
+  return patch;
 }
 
 /** Backoff exponencial entre tentativas de rede/5xx (1s, 2s, 4s). */

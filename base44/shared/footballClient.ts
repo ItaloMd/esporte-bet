@@ -61,6 +61,7 @@ import {
   paceGapMs,
   planRequestSlot,
   providerMinuteBlocked,
+  resumeQueuePatch,
   secondBucketKey,
   secondWindowUsed,
   sleep,
@@ -407,6 +408,18 @@ export async function openFootballClient(db, { apiKey, base, settings, day, limi
         used = Number(record.used || 0);
       }
 
+      // 0a) Bloqueio vencido: a fila é zerada antes de qualquer trava. Pausa e
+      // bloqueio expirados saem, o slot antigo é descartado e o espaçamento
+      // volta ao ritmo configurado. Só grava quando há algo vencido, então
+      // execuções simultâneas não limpam a fila repetidamente.
+      if (fresh) {
+        const resume = resumeQueuePatch(record, {
+          nowMs: Date.now(),
+          minuteLimit: effectiveMinuteLimit(settings, record?.provider_minute_limit),
+        });
+        if (Object.keys(resume).length) await persist(resume);
+      }
+
       // 0) Cache compartilhado ANTES de qualquer trava: servir cache não
       // consome cota, não entra na fila e mantém as telas de pé mesmo com o
       // provedor em 429. A chave é o endpoint + parâmetros ordenados.
@@ -689,7 +702,8 @@ export async function openFootballClient(db, { apiKey, base, settings, day, limi
           const recovered = streak >= RECOVERY_SUCCESSES;
           return {
             success_streak: recovered ? 0 : streak,
-            request_gap_ms: gapAfterSuccess(gap, streak),
+            // Acelera só até o ritmo configurado (paceGapMs), nunca além dele.
+            request_gap_ms: gapAfterSuccess(gap, streak, paceGapMs(minuteLimit)),
           };
         })(),
         ...(result.quota?.limit !== null && result.quota?.limit !== undefined
