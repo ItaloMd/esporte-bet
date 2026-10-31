@@ -7,7 +7,6 @@ import {
   parseAccountStatus,
 } from '../../shared/apiFootball.ts';
 import { loadQuota, quotaDayKey, quotaLevel, quotaPercent } from '../../shared/footballQuota.ts';
-import { FOOTBALL_LIMITS } from '../../shared/footballConfig.ts';
 import { FOOTBALL_SETTINGS_RULES, validateFootballSettingsPatch } from '../../shared/footballSettings.ts';
 import {
   DEFAULT_LIVE_INTERVAL_MINUTES,
@@ -336,7 +335,7 @@ export default async function (req) {
       last_rate_limited_at: quotaRecord?.last_rate_limited_at || null,
       last_status_code: quotaRecord?.last_status_code ?? null,
       last_error: quotaRecord?.last_error || '',
-      minute_limit: configuredMinuteLimit > 0 ? configuredMinuteLimit : FOOTBALL_LIMITS.minuteRequests,
+      minute_limit: configuredMinuteLimit > 0 ? configuredMinuteLimit : 60,
     };
     const internalLimit = numberOr(settings.football_daily_limit, 100);
     const planLimit = account?.limit_day ?? settings.football_account_limit ?? internalLimit;
@@ -523,7 +522,7 @@ export default async function (req) {
         critical_from_minute: numberOr(settings.football_critical_from_minute, 80),
         window_days: numberOr(settings.football_window_days, 7),
         calendar_refresh_hours: Math.round(numberOr(settings.football_calendar_refresh_seconds, 86400) / 3600),
-        minute_limit: numberOr(settings.football_minute_limit, 0) || FOOTBALL_LIMITS.minuteRequests,
+        minute_limit: numberOr(settings.football_minute_limit, 0) || 60,
         daily_limit: numberOr(settings.football_daily_limit, 100),
       },
       quota_percent: quotaPercent(used, internalLimit),

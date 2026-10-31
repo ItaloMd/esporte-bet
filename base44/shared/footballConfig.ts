@@ -105,53 +105,32 @@ export const FOOTBALL_BUDGET_GUARD = {
 export const CIRCUIT_BREAKER_STEPS = [30, 60, 120, 300];
 
 /**
- * Pausa global após limite excedido (segundos). O bloqueio do provedor é
- * contado por minuto: a pausa aplicada é sempre a maior entre o degrau abaixo e
- * o tempo que falta para o próximo minuto (ver footballClient).
+ * Pausa global após limite excedido (segundos). É curta de propósito: o
+ * bloqueio do provedor é contado por minuto, então travar a coleta por vários
+ * minutos só atrasa o ciclo seguinte.
  */
-export const THROTTLE_PAUSE_STEPS = [30, 45, 60, 120];
+export const THROTTLE_PAUSE_STEPS = [20, 30, 45, 90];
 
 /** Tokens preservados no token bucket global antes de qualquer nova chamada. */
 export const TOKEN_BUCKET_RESERVE = 20;
 
 /**
- * Reserva de X-RateLimit-Remaining: com menos requisições restantes que este
- * valor, o minuto está comprometido e nenhuma chamada é feita até o próximo
- * minuto — a folga do plano nunca é gasta.
- */
-export const RATE_LIMIT_MINUTE_RESERVE = 50;
-
-/**
- * Limites do plano Pro no provedor: 300 requisições por minuto (5 por segundo).
+ * Limites do plano no provedor: 300 requisições por minuto (≈5 por segundo).
  * A margem de segurança mantém a coleta abaixo do teto mesmo com chamadas
- * simultâneas, e o espaçamento mínimo entre chamadas evita rajadas.
+ * simultâneas, e o ritmo por segundo evita rajadas.
  */
 export const PROVIDER_MINUTE_LIMIT = 300;
 export const PROVIDER_MINUTE_SAFETY = 0.8;
-export const PROVIDER_SECOND_LIMIT = 5;
-
-/** Espaçamento mínimo entre chamadas consecutivas: 200 ms → no máximo 300/min. */
-export const MIN_CALL_GAP_MS = Math.ceil(1000 / PROVIDER_SECOND_LIMIT);
-
-/**
- * Retentativa de 429: sempre depois do próximo minuto, com backoff exponencial.
- * `maxWaitMs` é o orçamento de tempo que a execução aceita esperar — acima
- * disso a rotina para e o ciclo agendado seguinte assume.
- */
-export const RETRY_POLICY = {
-  maxAttempts: 2,
-  baseMs: 4000,
-  maxWaitMs: 30000,
-};
+export const PROVIDER_SECOND_LIMIT = 4;
 
 /** Orçamento e proteção de consumo. */
 export const FOOTBALL_LIMITS = {
   /**
-   * Teto interno por minuto: 80% do plano Pro (300/min). É também o teto
+   * Teto interno por minuto: 1/5 do limite do plano (300/min). É também o teto
    * absoluto — o painel pode reduzir, nunca aumentar. Mantém a coleta longe do
    * limite do provedor e do próprio registro de consumo.
    */
-  minuteRequests: 240,
+  minuteRequests: 60,
   /** Orçamento diário interno (abaixo dos 7.500 do plano, com margem). */
   dailyRequests: 6000,
   /** Chamadas preservadas para placares ao vivo antes de qualquer outra rotina. */
