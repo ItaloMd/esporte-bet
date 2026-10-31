@@ -321,6 +321,11 @@ export default async function (req) {
           rate_pause_until: null,
           provider_remaining: null,
           rate_limit_strikes: 0,
+          // O ritmo aprendido pertence ao bloqueio: liberado o bloqueio, a fila
+          // volta ao espaçamento nominal em vez de seguir no ritmo lento que a
+          // recusa anterior impôs.
+          request_gap_ms: null,
+          success_streak: 0,
           last_error: '',
           last_error_scope: '',
         });
