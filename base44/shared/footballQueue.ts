@@ -114,12 +114,23 @@ export function providerMinuteBlocked(record, nowMs, cost = 1) {
 }
 
 /**
- * Reserva do próximo slot da fila: 200 ms depois do último slot reservado,
- * nunca no passado. `waitMs` é o tempo que a execução aguarda antes de chamar.
+ * Espaçamento efetivo entre chamadas. O piso é de 200 ms (300/min); depois de
+ * um 429 o intervalo dobra por ocorrência e volta a 200 ms no primeiro sucesso.
  */
-export function planRequestSlot(lastSlotAtIso, nowMs) {
+export function requestGapMs(strikes = 0) {
+  const level = Math.min(Math.max(0, Number(strikes) || 0), 3);
+  return REQUEST_GAP_MS * 2 ** level;
+}
+
+/**
+ * Reserva do próximo slot da fila: um intervalo depois do último slot
+ * reservado, nunca no passado. `waitMs` é o tempo que a execução aguarda antes
+ * de chamar.
+ */
+export function planRequestSlot(lastSlotAtIso, nowMs, gapMs = REQUEST_GAP_MS) {
   const last = Date.parse(lastSlotAtIso || '');
-  const earliest = Number.isFinite(last) ? last + REQUEST_GAP_MS : nowMs;
+  const gap = Math.max(REQUEST_GAP_MS, Number(gapMs) || REQUEST_GAP_MS);
+  const earliest = Number.isFinite(last) ? last + gap : nowMs;
   const atMs = Math.max(nowMs, earliest);
   return { atMs, waitMs: Math.max(0, atMs - nowMs) };
 }

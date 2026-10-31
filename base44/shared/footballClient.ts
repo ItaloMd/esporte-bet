@@ -25,6 +25,7 @@ import {
   PROVIDER_REMAINING_FLOOR,
   RATE_LIMIT_MAX_RETRIES,
   RATE_LIMIT_PAUSE_MIN_MS,
+  RATE_LIMIT_RETRY_MAX_WAIT_MS,
   TOKEN_BUCKET_RESERVE,
 } from './footballConfig.ts';
 import {
@@ -44,6 +45,7 @@ import {
   nextMinuteStart,
   planRequestSlot,
   providerMinuteBlocked,
+  requestGapMs,
   retryDelayMs,
   sleep,
 } from './footballQueue.ts';
@@ -218,6 +220,16 @@ export async function openFootballClient(db, { apiKey, base, settings, day, limi
       const key = endpointKey(endpoint);
       let attempt = 0;
 
+      /**
+       * Retentativa só vale a pena quando a espera cabe na execução: pausa
+       * longa é devolvida à rotina, que para e serve o cache. Consultas sem
+       * cobrança (status da conta) nunca retentam — o painel abre na hora.
+       */
+      const canRetry = (waitMs) =>
+        charge &&
+        attempt < RATE_LIMIT_MAX_RETRIES &&
+        Number(waitMs) + retryDelayMs(attempt + 1) <= RATE_LIMIT_RETRY_MAX_WAIT_MS;
+
       for (;;) {
         const fresh = await loadQuota(db, day);
         if (fresh) {
@@ -286,8 +298,9 @@ export async function openFootballClient(db, { apiKey, base, settings, day, limi
           }
         }
 
-        // 6) Fila: reserva o próximo slot (200 ms após o anterior) e espera.
-        const slot = planRequestSlot(record?.last_slot_at, nowMs);
+        // 6) Fila: reserva o próximo slot e espera. O intervalo dobra a cada
+        // 429 e volta a 200 ms no primeiro sucesso.
+        const slot = planRequestSlot(record?.last_slot_at, nowMs, requestGapMs(record?.rate_limit_strikes));
         const slotIso = new Date(slot.atMs).toISOString();
         if (record?.last_slot_at !== slotIso) await persist({ last_slot_at: slotIso });
         await sleep(slot.waitMs);
@@ -309,7 +322,7 @@ export async function openFootballClient(db, { apiKey, base, settings, day, limi
               message: error.message,
             });
             // Espera o próximo minuto e tenta de novo com backoff exponencial.
-            if (attempt < RATE_LIMIT_MAX_RETRIES) {
+            if (canRetry(waitMs)) {
               attempt += 1;
               await sleep(waitMs + retryDelayMs(attempt));
               continue;
@@ -335,7 +348,7 @@ export async function openFootballClient(db, { apiKey, base, settings, day, limi
         if (result.errors.some(isRateLimitErrorText)) {
           const message = result.errors.filter(isRateLimitErrorText).join(' | ');
           const { waitMs } = await registerRateLimit({ endpoint, retryAfterMs: null, message });
-          if (attempt < RATE_LIMIT_MAX_RETRIES) {
+          if (canRetry(waitMs)) {
             attempt += 1;
             await sleep(waitMs + retryDelayMs(attempt));
             continue;

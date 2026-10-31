@@ -129,6 +129,13 @@ export const PROVIDER_REMAINING_FLOOR = 50;
 export const RATE_LIMIT_MAX_RETRIES = 2;
 export const BACKOFF_STEPS_MS = [1000, 2000, 4000];
 
+/**
+ * Teto de espera para retentar dentro da mesma execução. Uma pausa maior que
+ * isso não é aguardada: a rotina para e serve o cache, e o próximo ciclo
+ * (ou o painel) retoma quando o minuto do provedor tiver virado.
+ */
+export const RATE_LIMIT_RETRY_MAX_WAIT_MS = 30000;
+
 /** Orçamento e proteção de consumo. */
 export const FOOTBALL_LIMITS = {
   /**
