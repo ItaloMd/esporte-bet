@@ -1,13 +1,24 @@
 /**
  * Parâmetros da integração API-Football em um único lugar.
  *
+ * Base: documentação v3 (API-SPORTS) e o manual "How to optimize API-SPORTS
+ * calls and quota usage". Três fatos da documentação guiam este arquivo:
+ *
+ * 1. Existem DOIS limites independentes e ambos vêm nos cabeçalhos de toda
+ *    resposta: diário (`x-ratelimit-requests-limit/remaining`) e por minuto
+ *    (`X-RateLimit-Limit/Remaining`). O provedor avisa que excesso de tráfego
+ *    por minuto pode bloquear o acesso no firewall — então a fila precisa
+ *    ficar sempre abaixo do limite por minuto, com folga.
+ * 2. `/status` não consome cota diária e é a fonte oficial do consumo.
+ * 3. Dados têm ritmos diferentes (estáticos, semidinâmicos e dinâmicos): cada
+ *    classe tem sua própria validade de cache e nenhuma rotina repete uma
+ *    chamada ainda válida.
+ *
  * Regra da casa: nenhuma rotina define intervalo, validade de cache ou teto de
  * requisição por conta própria. Tudo que controla frequência e consumo vive
- * aqui; o painel (ProviderSettings) pode sobrescrever apenas o que é operacional
- * (intervalo do detector, orçamento diário, teto por minuto).
+ * aqui; o painel (ProviderSettings) só ajusta o que é operacional.
  *
- * Plano contratado: 7.500 requisições/dia e 300/minuto. Os valores internos são
- * conservadores por decisão de operação, não por limite do provedor.
+ * Plano contratado: 7.500 requisições/dia e 300/minuto.
  */
 
 /** Frequência das rotinas de coleta (segundos / minutos / dias). */
@@ -20,15 +31,15 @@ export const FOOTBALL_CADENCE = {
   calendarDays: 7,
   /** Importação do calendário: uma vez ao dia, sem reconsultar datas já importadas. */
   calendarRefreshSeconds: 86400,
-  /**
-   * Cotações: dias de calendário coletados por execução. Acompanha a janela de
-   * importação (today + 6) para que todos os jogos do calendário tenham cotação
-   * e apareçam publicados na grade.
-   */
-  oddsWindowDays: 7,
-  /** Validade das cotações pré-jogo de um dia. */
+  /** Validade das cotações pré-jogo de um lote (competição + data). */
   oddsRefreshSeconds: 3600,
-  /** Páginas máximas de /odds por dia (10 partidas por página). */
+  /** Janela de datas com cotação mantida no sistema. */
+  oddsWindowDays: 7,
+  /**
+   * Páginas de `/odds` por lote. A fonte entrega 10 partidas por página e
+   * informa o total em `paging.total`: sem ler as páginas seguintes, uma
+   * competição com mais de 10 jogos no dia fica com metade da grade sem preço.
+   */
   oddsMaxPages: 3,
   /** Teto de suspeitas de encerramento confirmadas por execução do detector. */
   suspectsPerRun: 100,
@@ -36,7 +47,7 @@ export const FOOTBALL_CADENCE = {
   auditOffsetHours: 2,
 };
 
-/** Validade dos dados por tipo (segundos). */
+/** Validade dos dados por tipo (segundos) — classe dinâmica e semidinâmica. */
 export const FOOTBALL_TTL = {
   /** Estatísticas e eventos durante o jogo. */
   liveStats: 300,
@@ -53,6 +64,8 @@ export const FOOTBALL_TTL = {
 /**
  * Cache compartilhado por tipo de dado (segundos) — equivalente ao Redis:
  * a mesma chave devolve o dado sem tocar no provedor enquanto estiver válida.
+ * A classificação segue o manual: estático (meses), semidinâmico (horas) e
+ * dinâmico (minutos, só com o dado em uso).
  */
 export const FOOTBALL_CACHE_TTL = {
   /** live_fixtures: o retrato do coletor vale um ciclo completo de 10 minutos. */
@@ -85,77 +98,80 @@ export const ODDS_PRIORITY = {
 /** Ordem de atendimento da fila de cotações (a mais urgente primeiro). */
 export const ODDS_PRIORITY_ORDER = ['CRITICA', 'FAVORITA', 'APOSTA_ABERTA', 'NORMAL'];
 
-/** Reserva do orçamento diário por finalidade, em percentual. */
+/**
+ * Divisão do orçamento diário interno por finalidade, em percentual.
+ * Não é um teto rígido de gasto: serve para uma rotina não consumir a cota que
+ * pertence a outra. Somam 100%.
+ */
 export const FOOTBALL_BUDGET = {
   live: 40,
-  odds: 30,
-  audit: 20,
-  emergency: 10,
+  odds: 35,
+  audit: 25,
 };
-
-/** Faixas de contenção do orçamento diário (percentual consumido). */
-export const FOOTBALL_BUDGET_GUARD = {
-  /** A partir daqui as cotações normais são suspensas. */
-  suspendOdds: 80,
-  /** A partir daqui só jogos críticos e apuração de resultados. */
-  criticalOnly: 90,
-};
-
-/** Degraus do backoff do disjuntor, em segundos (429). */
-export const CIRCUIT_BREAKER_STEPS = [30, 60, 120, 300];
 
 /**
- * Pausa mínima após 429. O bloqueio do provedor é contado por minuto: a fila
- * sempre espera o próximo minuto antes de tentar de novo.
+ * Faixas de contenção do orçamento diário (percentual consumido).
+ * Abaixo da faixa crítica tudo roda; nas faixas altas só o essencial continua.
  */
-export const RATE_LIMIT_PAUSE_MIN_MS = 1500;
-
-/** Tokens preservados no token bucket global antes de qualquer nova chamada. */
-export const TOKEN_BUCKET_RESERVE = 20;
+export const FOOTBALL_BUDGET_GUARD = {
+  /** A partir daqui as cotações sem prioridade crítica são suspensas. */
+  suspendOdds: 85,
+  /** A partir daqui só placares e apuração de resultados. */
+  criticalOnly: 95,
+};
 
 /**
  * Plano Pro: 300 requisições por minuto. O espaçamento mínimo entre chamadas é
- * de 200 ms (5 por segundo = 300/min, medido em toda a plataforma) e a janela
- * de 60 s nunca passa de 90% do plano, mesmo com execuções simultâneas.
+ * de 230 ms (~260/min, 13% de folga) e a janela de 60 s nunca passa de 90% do
+ * plano (270), mesmo com execuções simultâneas.
  */
 export const PROVIDER_MINUTE_LIMIT = 300;
 export const PROVIDER_MINUTE_SAFETY = 0.9;
-export const REQUEST_GAP_MS = 200;
+export const REQUEST_GAP_MS = 230;
 
 /** X-RateLimit-Remaining abaixo deste valor fecha o minuto e pausa a fila. */
-export const PROVIDER_REMAINING_FLOOR = 50;
-
-/** Retentativas após 429 e o backoff exponencial de cada degrau (ms). */
-export const RATE_LIMIT_MAX_RETRIES = 2;
-export const BACKOFF_STEPS_MS = [1000, 2000, 4000];
+export const PROVIDER_REMAINING_FLOOR = 3;
 
 /**
- * Teto de espera para retentar dentro da mesma execução. Uma pausa maior que
- * isso não é aguardada: a rotina para e serve o cache, e o próximo ciclo
- * (ou o painel) retoma quando o minuto do provedor tiver virado.
+ * Saldo diário do provedor abaixo do qual a coleta para por completo, até a
+ * virada do dia (00:00 UTC). Guardar algumas chamadas evita chegar a zero no
+ * meio de uma apuração de resultado.
  */
-export const RATE_LIMIT_RETRY_MAX_WAIT_MS = 30000;
+export const PROVIDER_DAILY_FLOOR = 10;
+
+/** Pausa mínima após 429 por minuto. O bloqueio do provedor é contado por minuto. */
+export const RATE_LIMIT_PAUSE_MIN_MS = 2000;
+
+/** Backoff exponencial entre tentativas de rede/5xx (nunca em 429). */
+export const BACKOFF_STEPS_MS = [1000, 2000, 4000];
 
 /** Orçamento e proteção de consumo. */
 export const FOOTBALL_LIMITS = {
   /**
    * Teto interno por minuto: 90% dos 300/min do plano Pro. É também o teto
-   * absoluto — o painel pode reduzir, nunca aumentar. A folga de 10% absorve
-   * atrasos da fila e evita qualquer 429 do provedor.
+   * absoluto — o painel pode reduzir, nunca aumentar.
    */
-  minuteRequests: 270,
+  minuteRequests: Math.floor(PROVIDER_MINUTE_LIMIT * PROVIDER_MINUTE_SAFETY),
   /** Orçamento diário interno (abaixo dos 7.500 do plano, com margem). */
   dailyRequests: 6000,
   /** Chamadas preservadas para placares ao vivo antes de qualquer outra rotina. */
   reservePlacares: 10,
   /** Tentativas por chamada em falha de rede/5xx (429 nunca é retentado). */
-  maxAttempts: 2,
+  maxAttempts: 1,
 };
 
 /**
  * Folga aplicada ao comparar "última execução" com o intervalo configurado: o
  * registro só é gravado no fim da execução, então a diferença entre dois ciclos
- * agendados é sempre um pouco menor que o intervalo. Dois minutos de folga
- * garantem que o ciclo seguinte execute no horário, sem virar 20 minutos.
+ * agendados é sempre um pouco menor que o intervalo.
  */
 export const CADENCE_TOLERANCE_MS = 120000;
+
+/**
+ * Próxima virada do contador diário do provedor: 00:00 UTC (a conta API-SPORTS
+ * renova o dia em UTC, não no fuso local).
+ */
+export function nextProviderDayStartMs(nowMs) {
+  const date = new Date(nowMs);
+  return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() + 1, 0, 1, 0);
+}

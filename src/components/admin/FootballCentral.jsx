@@ -4,6 +4,7 @@ import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/use-toast";
 import CentralStatus from "@/components/admin/football/CentralStatus";
+import ProviderLimits from "@/components/admin/football/ProviderLimits";
 import CollectionControl from "@/components/admin/football/CollectionControl";
 import ConsumptionSimulator from "@/components/admin/football/ConsumptionSimulator";
 import OpsWidgets from "@/components/admin/football/OpsWidgets";
@@ -27,6 +28,7 @@ export default function FootballCentral() {
   const [settings, setSettings] = useState(null);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
+  const [testing, setTesting] = useState(false);
   const [step, setStep] = useState("");
   const [waitSeconds, setWaitSeconds] = useState(0);
 
@@ -121,6 +123,21 @@ export default function FootballCentral() {
   /** Ação manual escolhida no painel: uma rotina específica ou o ciclo completo. */
   const runAction = (steps) => runSteps(steps);
 
+  /**
+   * Libera o bloqueio registrado e tenta uma leitura imediata da conta: útil
+   * quando o provedor recusou o tráfego e o administrador quer confirmar que a
+   * coleta já pode voltar, sem esperar a espera escalonada terminar.
+   */
+  const testConnection = async () => {
+    setTesting(true);
+    try {
+      await base44.functions.invoke("apiFootballCentral", { action: "clear_block" });
+      await load({ withStatus: true });
+    } finally {
+      setTesting(false);
+    }
+  };
+
   /** Consulta a conta no provedor: única ação do painel que chama /status. */
   const checkAccount = async () => {
     setRunning(true);
@@ -209,6 +226,13 @@ export default function FootballCentral() {
       ) : (
         <>
           <CentralStatus data={data} />
+          <ProviderLimits
+            provider={data.provider}
+            diagnostics={data.diagnostics}
+            pause={data.pause}
+            onTest={testConnection}
+            testing={testing}
+          />
           <EndpointConsumption connection={data.connection} />
           <OpsWidgets widgets={data.widgets} />
           <ResultAuditMonitor

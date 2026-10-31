@@ -1,23 +1,20 @@
 /**
- * Fila global de requisições da API-Football (plano Pro: 300 req/min).
+ * Fila global de requisições da API-Football — decisões puras.
  *
- * Toda chamada externa do sistema passa por aqui — placares, calendário,
- * cotações, auditoria, estatísticas, eventos e status da conta. O estado da
- * fila é compartilhado por todas as execuções (rotinas agendadas e ações do
- * painel) e vive no registro de cota do dia:
+ * O estado da fila é compartilhado por todas as execuções (rotinas agendadas e
+ * ações do painel) e vive no registro de cota do dia:
  *
  * - `last_slot_at`: último horário reservado na fila. Cada chamada reserva o
- *   slot seguinte com 200 ms de distância (5 req/s = 300/min), inclusive entre
- *   execuções diferentes;
- * - `minute_key` / `minute_used`: janela deslizante de 60 s;
+ *   slot seguinte com o espaçamento calculado a partir do limite por minuto,
+ *   inclusive entre execuções diferentes;
+ * - `minute_key` / `minute_used`: janela de 60 s compartilhada;
  * - `provider_minute_remaining` / `provider_minute_at`: X-RateLimit-Remaining
- *   devolvido pelo provedor no minuto corrente. Abaixo do piso de segurança a
- *   janela é fechada e a fila espera o próximo minuto;
- * - `rate_pause_until`: pausa global (429 ou minuto fechado). Nenhuma rotina
- *   chama o provedor enquanto estiver ativa.
+ *   devolvido pelo provedor no minuto corrente. Perto de zero a janela é
+ *   fechada e a fila espera o próximo minuto;
+ * - `rate_pause_until`: pausa global (limite por minuto excedido).
  *
  * Este módulo é puro: recebe o estado, devolve decisões. Quem persiste é o
- * cliente central (footballClient), que é o único ponto de chamada externa.
+ * cliente central (footballClient), único ponto de chamada externa.
  */
 import {
   BACKOFF_STEPS_MS,
@@ -31,23 +28,6 @@ import {
 /** Teto interno por minuto (o painel pode reduzir, nunca aumentar). */
 export const DEFAULT_MINUTE_LIMIT = FOOTBALL_LIMITS.minuteRequests;
 
-/** Fração da janela reservada às cotações e insights (o resto é do essencial). */
-export const NON_CRITICAL_MINUTE_SHARE = 0.9;
-
-/** Piso de segurança lido de X-RateLimit-Remaining. */
-export const MINUTE_REMAINING_FLOOR = PROVIDER_REMAINING_FLOOR;
-
-/** Finalidades que nunca podem ser sacrificadas por prioridade. */
-const CRITICAL_PURPOSES = [
-  'live',
-  'live_confirm',
-  'audit',
-  'results_audit',
-  'statistics',
-  'events',
-  'emergency',
-];
-
 /** Chave do minuto corrente (UTC): contador compartilhado da janela de 60 s. */
 export function minuteBucketKey(nowMs) {
   return new Date(Math.floor(nowMs / 60000) * 60000).toISOString().slice(0, 16);
@@ -60,13 +40,13 @@ export function minuteBucketKey(nowMs) {
  */
 export function nextMinuteStart(nowMs) {
   const base = Math.floor(nowMs / 60000) * 60000 + 60000;
-  return base + 500 + Math.floor(Math.random() * 2000);
+  return base + 1000 + Math.floor(Math.random() * 1500);
 }
 
 /**
  * Limite por minuto efetivo. O painel pode reduzir, nunca aumentar: o valor é
- * limitado pelo teto interno (90% de 300/min), pela margem do plano e pelo
- * limite que o provedor informou em X-RateLimit-Limit.
+ * limitado pelo teto interno (90% de 300/min) e pelo limite que o provedor
+ * informou em X-RateLimit-Limit.
  */
 export function effectiveMinuteLimit(settings, providerMinuteLimit = null) {
   const planCap = Math.max(1, Math.floor(PROVIDER_MINUTE_LIMIT * PROVIDER_MINUTE_SAFETY));
@@ -80,20 +60,13 @@ export function effectiveMinuteLimit(settings, providerMinuteLimit = null) {
   return Math.max(1, Math.min(base, DEFAULT_MINUTE_LIMIT, planCap, providerCap));
 }
 
-/** Verdadeiro quando a finalidade é essencial (não cede a janela por prioridade). */
-export function isCriticalPurpose(purpose) {
-  return CRITICAL_PURPOSES.includes(String(purpose || '').toLowerCase());
-}
-
 /**
- * Teto da janela para esta finalidade: o essencial usa a janela inteira e as
- * demais param nos 90%, preservando o último décimo do minuto para placares e
- * apuração de resultados.
+ * Espaçamento entre chamadas para caber no limite por minuto: o minuto é
+ * dividido pelo teto efetivo, nunca abaixo do piso de 230 ms.
  */
-export function minuteAllowance(purpose, minuteLimit) {
-  const limit = Math.max(1, Number(minuteLimit) || 1);
-  if (isCriticalPurpose(purpose)) return limit;
-  return Math.max(1, Math.floor(limit * NON_CRITICAL_MINUTE_SHARE));
+export function paceGapMs(minuteLimit) {
+  const limit = Math.max(1, Number(minuteLimit) || DEFAULT_MINUTE_LIMIT);
+  return Math.max(REQUEST_GAP_MS, Math.ceil(60000 / limit));
 }
 
 /**
@@ -110,32 +83,72 @@ export function providerMinuteLeft(record, nowMs) {
 /** Verdadeiro quando o provedor já sinalizou pouco saldo no minuto corrente. */
 export function providerMinuteBlocked(record, nowMs, cost = 1) {
   const left = providerMinuteLeft(record, nowMs);
-  return left !== null && left - Number(cost) < MINUTE_REMAINING_FLOOR;
+  return left !== null && left - Number(cost) < PROVIDER_REMAINING_FLOOR;
 }
 
-/**
- * Espaçamento efetivo entre chamadas. O piso é de 200 ms (300/min); depois de
- * um 429 o intervalo dobra por ocorrência e volta a 200 ms no primeiro sucesso.
- */
-export function requestGapMs(strikes = 0) {
-  const level = Math.min(Math.max(0, Number(strikes) || 0), 3);
-  return REQUEST_GAP_MS * 2 ** level;
+/** Requisições já feitas no minuto corrente (0 quando o minuto virou). */
+export function minuteWindowUsed(record, nowMs) {
+  if (record?.minute_key !== minuteBucketKey(nowMs)) return 0;
+  return Math.max(0, Number(record?.minute_used) || 0);
 }
 
 /**
  * Reserva do próximo slot da fila: um intervalo depois do último slot
  * reservado, nunca no passado. `waitMs` é o tempo que a execução aguarda antes
  * de chamar.
+ *
+ * Quando o slot já está no futuro, significa que outra execução o reservou:
+ * uma variação curta evita que duas rotinas acordem no mesmo milissegundo.
  */
 export function planRequestSlot(lastSlotAtIso, nowMs, gapMs = REQUEST_GAP_MS) {
   const last = Date.parse(lastSlotAtIso || '');
   const gap = Math.max(REQUEST_GAP_MS, Number(gapMs) || REQUEST_GAP_MS);
   const earliest = Number.isFinite(last) ? last + gap : nowMs;
-  const atMs = Math.max(nowMs, earliest);
+  const base = Math.max(nowMs, earliest);
+  const contention = earliest > nowMs ? Math.min(250, Math.floor(gap / 3)) : 0;
+  const jitter = contention ? Math.floor(Math.random() * contention) : 0;
+  const atMs = base + jitter;
   return { atMs, waitMs: Math.max(0, atMs - nowMs) };
 }
 
-/** Backoff exponencial entre retentativas após 429 (1s, 2s, 4s). */
+/* ------------------------- espaçamento aprendido (AIMD) ------------------------- */
+
+/** Piso do espaçamento entre chamadas (o mesmo da fila nominal). */
+export const MIN_REQUEST_GAP_MS = REQUEST_GAP_MS;
+
+/**
+ * Teto do espaçamento aprendido: 5 s (~12 chamadas/min). O suficiente para
+ * todas as rotinas e para o painel continuarem respondendo, mesmo que o
+ * provedor esteja recusando rajadas bem menores que o limite informado.
+ */
+export const MAX_REQUEST_GAP_MS = 5000;
+
+/** Sucessos consecutivos necessários para voltar a acelerar. */
+export const RECOVERY_SUCCESSES = 12;
+
+/** Mantém o espaçamento dentro dos limites operacionais. */
+export function clampGap(gapMs) {
+  const value = Number(gapMs);
+  if (!Number.isFinite(value) || value <= 0) return MIN_REQUEST_GAP_MS;
+  return Math.min(MAX_REQUEST_GAP_MS, Math.max(MIN_REQUEST_GAP_MS, Math.round(value)));
+}
+
+/**
+ * Depois de um limite do provedor: dobra o espaçamento. O provedor recusa
+ * rajadas mesmo com saldo nos cabeçalhos, então o ritmo aprendido é o que
+ * realmente importa — e ele é persistido, valendo para todas as execuções.
+ */
+export function gapAfterRateLimit(gapMs) {
+  return clampGap(Math.max(800, clampGap(gapMs) * 2));
+}
+
+/** Depois de uma sequência de sucessos: acelera 20%, sem voltar ao piso. */
+export function gapAfterSuccess(gapMs, streak) {
+  if (Number(streak) < RECOVERY_SUCCESSES) return clampGap(gapMs);
+  return clampGap(clampGap(gapMs) * 0.8);
+}
+
+/** Backoff exponencial entre tentativas de rede/5xx (1s, 2s, 4s). */
 export function retryDelayMs(attempt) {
   const index = Math.min(Math.max(0, Number(attempt) - 1), BACKOFF_STEPS_MS.length - 1);
   const base = BACKOFF_STEPS_MS[index];

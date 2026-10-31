@@ -203,38 +203,60 @@ export default async function (req) {
         break;
       }
       const label = `${lot.name || lot.leagueId} · ${lot.date}`;
+      const maxPages = Math.max(1, Number(FOOTBALL_CADENCE.oddsMaxPages) || 1);
+      let pagesRead = 0;
+      let lotRecords = 0;
+      let lotClean = true;
       try {
-        const result = await client.call('/odds', {
-          league: lot.leagueId,
-          season: lot.season,
-          date: lot.date,
-        }, {
-          timeoutMs: 25000,
-          purpose: 'odds',
-          priority: queuePriority,
-        });
-        used = client.used;
+        // A fonte pagina /odds em 10 partidas por página e informa o total em
+        // `paging.total`: ler só a primeira página deixava metade da grade sem
+        // preço. As páginas seguintes respeitam o mesmo teto de orçamento.
+        for (let page = 1; page <= maxPages; page += 1) {
+          if (Date.now() - runStartedAt > RUN_BUDGET_MS) break;
+          if (!canSpend(used, limit, RESERVE_CALLS, 1)) break;
+          const result = await client.call('/odds', {
+            league: lot.leagueId,
+            season: lot.season,
+            date: lot.date,
+            ...(page > 1 ? { page } : {}),
+          }, {
+            timeoutMs: 25000,
+            purpose: 'odds',
+            priority: queuePriority,
+          });
+          used = client.used;
+          pagesRead += 1;
 
-        const list = Array.isArray(result.data?.response) ? result.data.response : [];
-        entries.push(...list);
-        calls.push({ date: `${lot.leagueId}/${lot.date}`, page: 1, records: list.length });
+          const list = Array.isArray(result.data?.response) ? result.data.response : [];
+          entries.push(...list);
+          lotRecords += list.length;
+          calls.push({ date: `${lot.leagueId}/${lot.date}`, page, records: list.length });
 
-        if (result.errors.length) {
-          if (pageLimitReached(result.errors)) pagesLimited = true;
-          else failures.push(`odds ${label}: ${result.errors.join(' | ')}`);
-          break;
+          if (result.errors.length) {
+            if (pageLimitReached(result.errors)) pagesLimited = true;
+            else failures.push(`odds ${label} (página ${page}): ${result.errors.join(' | ')}`);
+            lotClean = false;
+            break;
+          }
+
+          const totalPages = Number(result.data?.paging?.total) || 0;
+          if (!list.length) break;
+          if (totalPages && page >= totalPages) break;
+          if (!totalPages && list.length < 10) break;
         }
 
-        // Só marca o lote como coletado quando a resposta veio limpa: um dia
+        // Só marca o lote como coletado quando a leitura veio limpa: um lote
         // barrado pelo limite precisa ser tentado de novo na próxima execução.
-        await writeCache(db, {
-          key: lotKey(lot),
-          endpoint: '/odds',
-          params: `league=${lot.leagueId} · season=${lot.season} · date=${lot.date}`,
-          ttlSeconds: ODDS_REFRESH_SECONDS,
-          records: list.length,
-          note: `${label}: ${list.length} partida(s) com cotação`,
-        }).catch(() => null);
+        if (lotClean && pagesRead) {
+          await writeCache(db, {
+            key: lotKey(lot),
+            endpoint: '/odds',
+            params: `league=${lot.leagueId} · season=${lot.season} · date=${lot.date}`,
+            ttlSeconds: ODDS_REFRESH_SECONDS,
+            records: lotRecords,
+            note: `${label}: ${lotRecords} partida(s) em ${pagesRead} página(s)`,
+          }).catch(() => null);
+        }
       } catch (error) {
         failures.push(`odds ${label}: ${String(error?.message || error)}`);
         // Limite do provedor: o restante dos lotes fica para o próximo ciclo.

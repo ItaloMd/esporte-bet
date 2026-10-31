@@ -8,7 +8,7 @@ import {
 } from '../../shared/apiFootball.ts';
 import { loadQuota, quotaDayKey, quotaLevel, quotaPercent } from '../../shared/footballQuota.ts';
 import { openFootballClient } from '../../shared/footballClient.ts';
-import { effectiveMinuteLimit } from '../../shared/footballQueue.ts';
+import { clampGap, effectiveMinuteLimit, minuteWindowUsed, paceGapMs } from '../../shared/footballQueue.ts';
 import { FOOTBALL_SETTINGS_RULES, validateFootballSettingsPatch } from '../../shared/footballSettings.ts';
 import {
   DEFAULT_LIVE_INTERVAL_MINUTES,
@@ -308,6 +308,34 @@ export default async function (req) {
       return Response.json({ ok: true, event_id: event.id, decision, score: scoreLabel });
     }
 
+    /* ------------------------- liberar bloqueio e testar ------------------------- */
+    // Dá ao administrador o controle de tentar de novo agora, sem esperar o
+    // bloqueio temporário do provedor expirar sozinho. Não consome cota diária.
+    if (action === 'clear_block') {
+      const current = await loadQuota(db, day);
+      if (current?.id) {
+        await db.ApiQuota.update(current.id, {
+          daily_blocked_until: null,
+          daily_blocked_at: null,
+          rate_pause_until: null,
+          provider_remaining: null,
+          rate_limit_strikes: 0,
+          last_error: '',
+          last_error_scope: '',
+        });
+      }
+      await db.AdminAuditLog.create({
+        actor_id: user.id,
+        actor_email: user.email,
+        action: 'provider.football_block_cleared',
+        target_type: 'ApiQuota',
+        target_id: current?.id || '',
+        details: 'Bloqueio de coleta liberado manualmente para teste imediato',
+        severity: 'warning',
+      }).catch(() => null);
+      return Response.json({ ok: true });
+    }
+
     if (action !== 'overview') return Response.json({ error: 'Ação inválida.' }, { status: 400 });
 
     /* ------------------------------- overview ------------------------------- */
@@ -346,25 +374,53 @@ export default async function (req) {
       statusError = 'Chave da API-Football não configurada nos Secrets do app.';
     }
 
-    // Pausa de segurança pós-429 compartilhada por todas as rotinas: visível no painel.
-    const pauseMs = Date.parse(quotaRecord?.rate_pause_until || '');
+    /* -------- limites oficiais: dia (x-ratelimit-requests-*) e minuto (X-RateLimit-*) -------- */
+    const pickNumber = (value) =>
+      value === null || value === undefined || value === '' || !Number.isFinite(Number(value)) ? null : Number(value);
+    const nowMs = Date.now();
     const effectiveMinute = effectiveMinuteLimit(settings, quotaRecord?.provider_minute_limit);
+    const headersAt = quotaRecord?.last_status_at || quotaRecord?.provider_minute_at || '';
+    // O saldo diário do provedor só vale para o dia corrente (virada em UTC).
+    const headersFresh = Boolean(headersAt && String(headersAt).slice(0, 10) === new Date(nowMs).toISOString().slice(0, 10));
+    const providerRemaining = headersFresh ? pickNumber(quotaRecord?.provider_remaining) : null;
+    const providerLimit = headersFresh ? pickNumber(quotaRecord?.provider_limit) : null;
+    const providerUsed =
+      account?.current !== null && account?.current !== undefined
+        ? Number(account.current)
+        : providerLimit !== null && providerRemaining !== null
+          ? Math.max(0, providerLimit - providerRemaining)
+          : null;
+
+    // Pausas de segurança compartilhadas por todas as rotinas: minuto e dia.
+    const pauseMs = Date.parse(quotaRecord?.rate_pause_until || '');
+    const dailyBlockMs = Date.parse(quotaRecord?.daily_blocked_until || '');
     const pause = {
-      active: Number.isFinite(pauseMs) && pauseMs > Date.now(),
-      until: quotaRecord?.rate_pause_until || null,
+      active: (Number.isFinite(pauseMs) && pauseMs > nowMs) || (Number.isFinite(dailyBlockMs) && dailyBlockMs > nowMs),
+      scope: Number.isFinite(dailyBlockMs) && dailyBlockMs > nowMs ? 'daily' : Number.isFinite(pauseMs) && pauseMs > nowMs ? 'minute' : '',
+      until:
+        Number.isFinite(dailyBlockMs) && dailyBlockMs > nowMs
+          ? quotaRecord.daily_blocked_until
+          : quotaRecord?.rate_pause_until || null,
+      daily_until: quotaRecord?.daily_blocked_until || null,
+      minute_until: quotaRecord?.rate_pause_until || null,
       strikes: numberOr(quotaRecord?.rate_limit_strikes, 0),
       last_rate_limited_at: quotaRecord?.last_rate_limited_at || null,
+      last_rate_scope: quotaRecord?.last_rate_scope || '',
       last_status_code: quotaRecord?.last_status_code ?? null,
       last_error: quotaRecord?.last_error || '',
+      last_error_scope: quotaRecord?.last_error_scope || '',
       minute_limit: effectiveMinute,
-      minute_used: numberOr(quotaRecord?.minute_used, 0),
-      minute_remaining_provider: quotaRecord?.provider_minute_remaining ?? null,
+      minute_used: minuteWindowUsed(quotaRecord, nowMs),
+      minute_remaining_provider: pickNumber(quotaRecord?.provider_minute_remaining),
       slot_at: quotaRecord?.last_slot_at || null,
     };
+
     const internalLimit = numberOr(settings.football_daily_limit, 100);
-    const planLimit = account?.limit_day ?? settings.football_account_limit ?? internalLimit;
-    const used = account?.current !== null && account?.current !== undefined ? account.current : numberOr(quotaRecord?.used, 0);
-    const remaining = Math.max(0, planLimit - used);
+    const configuredPlanLimit = numberOr(settings.football_account_limit, 0);
+    const planLimit = account?.limit_day ?? providerLimit ?? (configuredPlanLimit || internalLimit);
+    // Consumo: contagem oficial do provedor quando disponível; senão o interno.
+    const used = providerUsed !== null ? providerUsed : numberOr(quotaRecord?.used, 0);
+    const remaining = providerRemaining !== null ? providerRemaining : Math.max(0, planLimit - used);
     const percent = planLimit > 0 ? Math.round((used / planLimit) * 1000) / 10 : 0;
     const alerts = ALERT_THRESHOLDS.map((threshold) => ({ threshold, reached: percent >= threshold }));
 
@@ -410,7 +466,7 @@ export default async function (req) {
       gamesToday, liveGames, finishedToday, monitored, pendingBets, auditedToday, auditQueue,
       criticalQueue, reviewEvents, brazilianLive, resultQueuePending, resultsConfirmed,
       resultsUnavailable, pendingTickets, nextAttemptPage, lastAuditPage,
-      rateLimitedToday, endpointConsumption,
+      rateLimitedToday, endpointConsumption, ledgerCalls, lastCallPage,
     ] = await Promise.all([
       db.Event.count({ local_date: todayKey, source: 'provider' }),
       db.Event.count({ status: 'live', source: 'provider' }),
@@ -438,6 +494,9 @@ export default async function (req) {
           sum: ['credits_used'],
         })
         .catch(() => ({ rows: [] })),
+      // Requisições realmente enviadas hoje (linhas de registro) e a última delas.
+      db.ApiUsageLog.count({ provider: 'api_football', note: 'ledger', created_date: { $gte: startIso } }),
+      db.ApiUsageLog.filter({ provider: 'api_football', note: 'ledger' }, { sort: '-created_date', limit: 1 }),
     ]);
     const lastAudit = lastAuditPage?.items?.[0] || null;
     const byEndpoint = (Array.isArray(endpointConsumption?.rows) ? endpointConsumption.rows : [])
@@ -499,6 +558,68 @@ export default async function (req) {
     if (existingForecast.items?.[0]) await db.ApiConsumptionForecast.update(existingForecast.items[0].id, forecastPayload);
     else await db.ApiConsumptionForecast.create(forecastPayload);
 
+    /* ---------------- limites oficiais e diagnóstico de conciliação ---------------- */
+    const lastCallAt = lastCallPage?.items?.[0]?.created_date || null;
+    const lockMs = Date.parse(quotaRecord?.lock_until || '');
+    const lockStuck = Number.isFinite(lockMs) && lockMs > nowMs;
+    const internalUsed = numberOr(quotaRecord?.used, 0);
+    const divergence = providerUsed !== null ? internalUsed - providerUsed : null;
+    const checks = [
+      {
+        id: 'key',
+        label: 'Chave da API configurada',
+        status: apiKey ? 'ok' : 'error',
+        detail: apiKey ? 'Secret API_FOOTBALL_KEY presente.' : 'Cadastre API_FOOTBALL_KEY nos Secrets do app.',
+      },
+      {
+        id: 'headers',
+        label: 'Leitura oficial do provedor',
+        status: headersFresh ? 'ok' : 'warn',
+        detail: headersFresh
+          ? `Saldo lido em ${headersAt}.`
+          : 'Sem leitura de hoje: use Consultar conta (/status, não consome cota diária).',
+      },
+      {
+        id: 'daily',
+        label: 'Saldo diário',
+        status: pause.scope === 'daily' ? (pause.last_error_scope === 'throttle' ? 'warn' : 'error') : remaining > 0 ? 'ok' : 'error',
+        detail:
+          pause.scope === 'daily'
+            ? pause.last_error_scope === 'throttle'
+              ? `Provedor bloqueou o tráfego temporariamente por excesso de requisições (saldo informado ${remaining}). Coleta retoma em ${pause.until}.`
+              : `Cota diária esgotada. Coleta bloqueada até ${pause.until}.`
+            : `${remaining} de ${planLimit} requisições restantes${
+                providerUsed !== null ? '' : ' (contador interno)'
+              }.`,
+      },
+      {
+        id: 'minute',
+        label: 'Limite por minuto',
+        status: pause.scope === 'minute' ? 'warn' : 'ok',
+        detail:
+          pause.scope === 'minute'
+            ? `Fila fechada até ${pause.until}; reabre sozinha no próximo minuto.`
+            : `${pause.minute_used} de ${effectiveMinute} usados neste minuto.`,
+      },
+      {
+        id: 'ledger',
+        label: 'Conciliação de consumo',
+        status: divergence !== null && Math.abs(divergence) > 10 ? 'warn' : 'ok',
+        detail:
+          divergence !== null
+            ? `Contador interno ${internalUsed} · provedor ${providerUsed} · diferença ${divergence}.`
+            : 'Aguardando leitura oficial para conciliar contadores.',
+      },
+      {
+        id: 'lock',
+        label: 'Trava de execução',
+        status: lockStuck ? 'warn' : 'ok',
+        detail: lockStuck
+          ? `Reservada por ${quotaRecord?.lock_owner || 'outra rotina'} até ${quotaRecord?.lock_until}.`
+          : 'Nenhuma rotina em execução.',
+      },
+    ];
+
     return Response.json({
       connection: {
         key_configured: Boolean(apiKey),
@@ -534,6 +655,36 @@ export default async function (req) {
       widgets,
       result_audit: resultAudit,
       pause,
+      provider: {
+        daily: {
+          limit: planLimit,
+          remaining,
+          used,
+          source: providerUsed !== null ? 'provedor' : 'interno',
+          fresh: headersFresh && providerRemaining !== null,
+          read_at: headersAt || null,
+        },
+        minute: {
+          limit: effectiveMinute,
+          remaining: pause.minute_remaining_provider,
+          read_at: quotaRecord?.provider_minute_at || null,
+        },
+        window: { used: pause.minute_used, limit: effectiveMinute, key: quotaRecord?.minute_key || null },
+        pacing: {
+          gap_ms: clampGap(Number(quotaRecord?.request_gap_ms) || paceGapMs(effectiveMinute)),
+          learned: Boolean(quotaRecord?.request_gap_ms),
+          next_slot_at: quotaRecord?.last_slot_at || null,
+        },
+        internal: { limit: internalLimit, used: internalUsed, purposes: quotaRecord?.purpose_used || '' },
+      },
+      diagnostics: {
+        ledger_calls_today: numberOr(ledgerCalls, 0),
+        internal_used: internalUsed,
+        provider_used: providerUsed,
+        divergence,
+        last_call_at: lastCallAt,
+        checks,
+      },
       forecast,
       history,
       monitor: {

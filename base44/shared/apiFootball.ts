@@ -161,29 +161,82 @@ function parseQuota(headers) {
   };
 }
 
-function readErrors(payload) {
-  const raw = payload?.errors;
-  if (!raw) return [];
-  if (Array.isArray(raw)) return raw.filter(Boolean).map(String);
-  if (typeof raw === "object") {
-    return Object.values(raw)
-      .flat()
-      .filter(Boolean)
-      .map(String);
+function safeJson(text) {
+  try {
+    return JSON.parse(String(text || ""));
+  } catch {
+    return null;
   }
-  return [String(raw)];
+}
+
+/**
+ * Classifica os erros devolvidos pelo provedor no corpo da resposta.
+ *
+ * A documentação separa dois limites e o corpo usa chaves diferentes para cada
+ * um: `rateLimit` é o limite POR MINUTO e `requests` é o limite DIÁRIO. Tratar
+ * os dois como o mesmo erro é o que fazia o sistema retentar em cascata depois
+ * de esgotar a cota do dia.
+ */
+export function parseProviderErrors(payload) {
+  const raw = payload?.errors;
+  const entries = [];
+  if (Array.isArray(raw)) {
+    raw.filter(Boolean).forEach((value) => entries.push(["", String(value)]));
+  } else if (raw && typeof raw === "object") {
+    Object.entries(raw).forEach(([key, value]) => {
+      const list = Array.isArray(value) ? value : [value];
+      list.filter(Boolean).forEach((item) => entries.push([String(key), String(item)]));
+    });
+  } else if (raw) {
+    entries.push(["", String(raw)]);
+  }
+
+  const messages = entries.map(([key, value]) => (key ? `${key}: ${value}` : value));
+  const text = messages.join(" | ");
+  const hasKey = (pattern) => entries.some(([key]) => pattern.test(key));
+  const hasText = (pattern) => pattern.test(text);
+
+  const daily =
+    hasKey(/^requests?$/i) ||
+    hasText(/request limit for the day|daily (request )?limit|reached the (daily )?limit/i);
+  const minute =
+    !daily && (hasKey(/^rate.?limit$/i) || hasText(/too many requests|per minute|rate.?limit/i));
+  const token =
+    hasKey(/^(token|key|apikey|api.?key)$/i) ||
+    hasText(/invalid api key|not subscribed|account is not active|suspended/i);
+  const plan =
+    !token &&
+    (hasKey(/^(plan|subscription)$/i) ||
+      hasText(/do(es)? not have access|upgrade your plan|free plan|not included in your (current )?plan/i));
+
+  return { messages, daily, minute, token, plan, empty: messages.length === 0 };
 }
 
 /* ----------------------- erros e política de tentativas ----------------------- */
 
-/** Erro de limite por minuto/dia da API (HTTP 429 ou corpo equivalente). */
+/**
+ * Erro de limite da API (HTTP 429 ou corpo equivalente).
+ * `scope` separa os dois limites: `minute` (pausa até o próximo minuto) e
+ * `daily` (coleta bloqueada até a virada do dia na conta do provedor).
+ */
 export class FootballRateLimitError extends Error {
   constructor(message, options = {}) {
     super(message);
     this.name = "FootballRateLimitError";
     this.status = options.status || 429;
+    this.scope = options.scope === "daily" ? "daily" : "minute";
     // Retry-After do provedor, em milissegundos, quando presente.
     this.retryAfterMs = Number.isFinite(options.retryAfterMs) ? options.retryAfterMs : null;
+  }
+}
+
+/** Resposta que exige correção (plano sem o dado, parâmetro inválido) — nunca retentada. */
+export class FootballProviderError extends Error {
+  constructor(message, options = {}) {
+    super(message);
+    this.name = "FootballProviderError";
+    this.code = options.code || "provider";
+    this.status = options.status || 200;
   }
 }
 
@@ -228,7 +281,7 @@ function backoffDelayMs(attempt) {
  * (x-ratelimit-requests-limit/remaining/used).
  */
 export async function apiFootballFetch(apiKey, path, params = {}, options = {}) {
-  const { timeoutMs = 15000, retries = 2, base } = options;
+  const { timeoutMs = 15000, retries = 1, base } = options;
   const url = new URL(`${base || DEFAULT_BASE_URL}${path}`);
   Object.entries(params).forEach(([key, value]) => {
     if (value === undefined || value === null || value === "") return;
@@ -245,15 +298,16 @@ export async function apiFootballFetch(apiKey, path, params = {}, options = {}) 
       });
       const quota = parseQuota(response.headers);
 
-      // Limite por minuto/dia excedido: sem retentativa imediata — a pausa
-      // progressiva fica registrada na camada central.
-      // Sem retentativa: o bloqueio do provedor é por minuto e repetir a
-      // chamada aqui só multiplica requisições. A camada central registra a
-      // pausa progressiva e as rotinas seguem servindo o cache.
+      // Limite excedido: NUNCA retentado aqui — cada repetição consome mais uma
+      // requisição do mesmo minuto. O escopo sai do corpo quando o provedor
+      // informa (`requests` = dia, `rateLimit` = minuto).
       if (response.status === 429) {
-        throw new FootballRateLimitError("API-Football: limite de requisições excedido (HTTP 429)", {
-          retryAfterMs: retryAfterMsFrom(response),
-        });
+        const body = await response.text().catch(() => "");
+        const info = parseProviderErrors({ errors: safeJson(body)?.errors });
+        throw new FootballRateLimitError(
+          info.messages.join(" | ") || "API-Football: limite de requisições excedido (HTTP 429)",
+          { retryAfterMs: retryAfterMsFrom(response), scope: info.daily ? "daily" : "minute", status: 429 },
+        );
       }
       if (response.status === 401) {
         const body = await response.text();
@@ -268,20 +322,44 @@ export async function apiFootballFetch(apiKey, path, params = {}, options = {}) 
       }
       if (!response.ok) {
         const body = await response.text();
+        const info = parseProviderErrors({ errors: safeJson(body)?.errors });
+        if (info.token) throw new FootballAuthError(`API-Football ${response.status}: ${info.messages.join(" | ")}`);
+        if (info.plan) {
+          throw new FootballProviderError(`API-Football ${response.status}: ${info.messages.join(" | ")}`, {
+            code: "plan",
+            status: response.status,
+          });
+        }
         throw new Error(`API-Football ${response.status}: ${body.slice(0, 180)}`);
       }
 
       const payload = await response.json();
-      const errors = readErrors(payload);
-      // Limite reportado no corpo (HTTP 200): mesmo tratamento do 429.
-      // Limite reportado no corpo (HTTP 200): mesmo tratamento do 429.
-      if (errors.some(isRateLimitErrorText)) {
-        throw new FootballRateLimitError(errors.filter(isRateLimitErrorText).join(" | "));
+      const info = parseProviderErrors(payload);
+      // Limite reportado no corpo (HTTP 200): mesmo tratamento do 429, com o
+      // escopo definido pela chave usada pelo provedor.
+      if (info.daily) {
+        throw new FootballRateLimitError(info.messages.join(" | "), { scope: "daily", status: 200 });
       }
-      return { data: payload, quota, status: response.status, errors, results: Number(payload?.results) || 0 };
+      if (info.minute) {
+        throw new FootballRateLimitError(info.messages.join(" | "), { scope: "minute", status: 200 });
+      }
+      // Chave inválida, conta suspensa e plano sem o dado não se resolvem
+      // repetindo a chamada: viram erro de configuração, visível no painel.
+      if (info.token) throw new FootballAuthError(info.messages.join(" | "));
+      if (info.plan) {
+        throw new FootballProviderError(info.messages.join(" | "), { code: "plan", status: 200 });
+      }
+      return {
+        data: payload,
+        quota,
+        status: response.status,
+        errors: info.messages,
+        results: Number(payload?.results) || 0,
+      };
     } catch (error) {
       if (error instanceof FootballRateLimitError) throw error;
       if (error instanceof FootballAuthError) throw error;
+      if (error instanceof FootballProviderError) throw error;
       if (String(error?.message || "").startsWith("API-Football ")) throw error;
       lastError =
         error?.name === "TimeoutError" || error?.name === "AbortError"

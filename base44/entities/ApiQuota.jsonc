@@ -26,7 +26,7 @@
     },
     "provider_remaining": {
       "type": "number",
-      "description": "Tokens restantes informados pelo provedor (x-ratelimit-requests-remaining). Base do token bucket global."
+      "description": "Requisi\u00e7\u00f5es restantes no dia informadas pelo provedor (x-ratelimit-requests-remaining). Fonte da verdade do saldo di\u00e1rio."
     },
     "provider_used": {
       "type": "number"
@@ -46,11 +46,11 @@
     },
     "purpose_used": {
       "type": "string",
-      "description": "Consumo por finalidade em JSON: {\"live\":0,\"odds\":0,\"audit\":0,\"emergency\":0}."
+      "description": "Consumo por finalidade em JSON: {\"live\":0,\"odds\":0,\"audit\":0}."
     },
     "blocked_endpoints": {
       "type": "string",
-      "description": "Disjuntores abertos em JSON: {\"/fixtures\":{\"until\":\"...\",\"strikes\":1}}."
+      "description": "Reservado a disjuntores por endpoint (legado)."
     },
     "minute_key": {
       "type": "string",
@@ -64,22 +64,49 @@
     "last_slot_at": {
       "type": "string",
       "format": "date-time",
-      "description": "\u00daltimo hor\u00e1rio reservado na fila global de requisi\u00e7\u00f5es. O slot seguinte fica 200 ms depois, garantindo no m\u00e1ximo 5 chamadas por segundo (300/min) entre todas as execu\u00e7\u00f5es."
+      "description": "\u00daltimo hor\u00e1rio reservado na fila global: o slot seguinte fica um espa\u00e7amento depois, garantindo chamadas nunca simult\u00e2neas entre execu\u00e7\u00f5es."
+    },
+    "request_gap_ms": {
+      "type": "number",
+      "description": "Espa\u00e7amento aprendido entre chamadas (230 a 5000 ms). Dobra a cada limite do provedor e cai 20% ap\u00f3s uma sequ\u00eancia de sucessos."
+    },
+    "success_streak": {
+      "type": "number",
+      "default": 0,
+      "description": "Sucessos consecutivos desde o \u00faltimo limite; usado para voltar a acelerar o ritmo aos poucos."
     },
     "rate_pause_until": {
       "type": "string",
       "format": "date-time",
-      "description": "Pausa de seguran\u00e7a ap\u00f3s HTTP 429 ou minuto fechado pelo X-RateLimit-Remaining: nenhuma requisi\u00e7\u00e3o \u00e0 API \u00e9 feita at\u00e9 este hor\u00e1rio."
+      "description": "Pausa por limite de minuto: nenhuma requisi\u00e7\u00e3o \u00e0 API \u00e9 feita at\u00e9 este hor\u00e1rio (pr\u00f3ximo minuto)."
     },
     "rate_limit_strikes": {
       "type": "number",
       "default": 0,
-      "description": "Ocorr\u00eancias consecutivas de limite excedido: cada uma sobe um degrau no backoff exponencial das retentativas."
+      "description": "Ocorr\u00eancias consecutivas de limite por minuto; zera na primeira chamada bem-sucedida."
     },
     "last_rate_limited_at": {
       "type": "string",
       "format": "date-time",
-      "description": "Hor\u00e1rio da \u00faltima resposta de limite excedido (HTTP 429) recebida do provedor."
+      "description": "Hor\u00e1rio da \u00faltima resposta de limite por minuto (HTTP 429)."
+    },
+    "last_rate_scope": {
+      "type": "string",
+      "enum": [
+        "minute",
+        "daily"
+      ],
+      "description": "Qual limite foi excedido na \u00faltima ocorr\u00eancia."
+    },
+    "daily_blocked_until": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Saldo di\u00e1rio do provedor esgotado: nenhuma rotina chama a API-Football at\u00e9 a virada do dia na conta (00:00 UTC)."
+    },
+    "daily_blocked_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Momento em que o bloqueio di\u00e1rio foi registrado."
     },
     "alerts": {
       "type": "array",
@@ -97,6 +124,10 @@
     },
     "last_error": {
       "type": "string"
+    },
+    "last_error_scope": {
+      "type": "string",
+      "description": "Natureza do \u00faltimo erro: minute, daily, auth, plan."
     },
     "lock_until": {
       "type": "string",

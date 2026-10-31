@@ -76,20 +76,20 @@ export function alertMessages(used, limit, previousAlerts = []) {
 
 /* ----------------------------- orçamento por finalidade ----------------------------- */
 
-/** Finalidades do orçamento diário (reserva de 40/30/20/10%). */
-export const BUDGET_PURPOSES = ['live', 'odds', 'audit', 'emergency'];
+/** Finalidades do orçamento diário (reserva de 40/35/25%). */
+export const BUDGET_PURPOSES = ['live', 'odds', 'audit'];
 
 /**
- * Categoria de orçamento de uma finalidade de chamada. Estatísticas, eventos,
- * apuração e calendário são contabilizados na cota da sua família para que
- * nenhuma rotina consuma a reserva das outras.
+ * Categoria de orçamento de uma finalidade de chamada. Placar tem cota própria,
+ * cotações e insights dividem a cota comercial, e todo o resto (calendário,
+ * apuração, estatísticas, eventos) entra na cota de apuração — nenhuma rotina
+ * consome a reserva das outras.
  */
 export function budgetPurpose(purpose) {
   const value = String(purpose || '').toLowerCase();
-  if (value === 'live') return 'live';
-  if (value === 'odds' || value === 'calendar' || value === 'insights') return 'odds';
-  if (value === 'audit' || value === 'statistics' || value === 'events' || value === 'predictions') return 'audit';
-  return 'emergency';
+  if (value === 'live' || value === 'live_confirm') return 'live';
+  if (value === 'odds' || value === 'insights') return 'odds';
+  return 'audit';
 }
 
 /** Teto diário de uma finalidade, a partir da reserva percentual configurada. */
