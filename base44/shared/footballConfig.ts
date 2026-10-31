@@ -129,6 +129,13 @@ export const PROVIDER_MINUTE_LIMIT = 300;
 export const PROVIDER_MINUTE_SAFETY = 0.9;
 export const REQUEST_GAP_MS = 230;
 
+/**
+ * Plano: 5 requisições por segundo. O teto interno fica em 4/s. O espaçamento
+ * entre chamadas não basta — duas execuções simultâneas podem disparar no mesmo
+ * segundo —, por isso existe uma janela de 1 s compartilhada por todas.
+ */
+export const PROVIDER_SECOND_LIMIT = 5;
+
 /** X-RateLimit-Remaining abaixo deste valor fecha o minuto e pausa a fila. */
 export const PROVIDER_REMAINING_FLOOR = 3;
 
@@ -156,6 +163,8 @@ export const FOOTBALL_LIMITS = {
   dailyRequests: 6000,
   /** Chamadas preservadas para placares ao vivo antes de qualquer outra rotina. */
   reservePlacares: 10,
+  /** Teto interno por segundo (o plano permite 5). Janela de 1 s compartilhada. */
+  secondRequests: 4,
   /** Tentativas por chamada em falha de rede/5xx (429 nunca é retentado). */
   maxAttempts: 1,
 };
@@ -174,4 +183,46 @@ export const CADENCE_TOLERANCE_MS = 120000;
 export function nextProviderDayStartMs(nowMs) {
   const date = new Date(nowMs);
   return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() + 1, 0, 1, 0);
+}
+
+/**
+ * Validade do cache compartilhado, por classe de dado (manual API-SPORTS):
+ * estático (referência, dias), semidinâmico (horas) e dinâmico (segundos, só
+ * com o dado em uso). Zero significa "nunca cachear".
+ */
+export function cacheTtlSeconds(endpoint, params = {}) {
+  const path = String(endpoint || '');
+  const has = (name) => {
+    const value = params?.[name];
+    return value !== undefined && value !== null && value !== '';
+  };
+  if (path === '/status') return 0; // consulta ao vivo, não consome cota diária
+  if (path.startsWith('/odds/live')) return 10; // dinâmico
+  if (path === '/odds') return 300; // cotações pré-jogo
+  if (path === '/fixtures/events') return 30; // dinâmico
+  if (path === '/fixtures/statistics') return 60; // dinâmico
+  if (path === '/fixtures/lineups') return 120;
+  if (path === '/fixtures/players') return 300;
+  if (path === '/fixtures') {
+    if (has('live')) return 15; // placar ao vivo
+    if (has('ids')) return 120;
+    if (has('date') || has('from') || has('to')) return 900; // calendário
+    return 600;
+  }
+  if (path === '/leagues') return 86400; // estático: cobertura oficial
+  if (path === '/countries') return 604800;
+  if (path === '/standings') return 1800; // semidinâmico
+  if (path === '/fixtures/headtohead') return 86400;
+  if (path.startsWith('/teams/statistics')) return 86400;
+  if (path.startsWith('/players')) return 86400;
+  return 120;
+}
+
+/** Chave estável do cache: endpoint + parâmetros ordenados. */
+export function cacheKeyFor(endpoint, params = {}) {
+  const entries = Object.entries(params || {})
+    .filter(([, value]) => value !== undefined && value !== null && value !== '')
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([name, value]) => `${name}=${value}`);
+  return `${String(endpoint || '')}?${entries.join('&')}`;
 }

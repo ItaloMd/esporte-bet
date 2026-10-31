@@ -20,6 +20,7 @@ import {
 import { applyHouseMargin, localDateString } from '../../shared/oddsApi.ts';
 import { chunkArray } from '../../shared/matchLifecycle.ts';
 import { numberOr } from '../../shared/footballSync.ts';
+import { FOOTBALL_LIMITS } from '../../shared/footballConfig.ts';
 
 const ALERT_THRESHOLDS = [50, 75, 90, 95];
 const MAX_ODD_ROUNDS = 20;
@@ -683,6 +684,23 @@ export default async function (req) {
         provider_used: providerUsed,
         divergence,
         last_call_at: lastCallAt,
+        cache: {
+          hits: numberOr(quotaRecord?.cache_hits, 0),
+          misses: numberOr(quotaRecord?.cache_misses, 0),
+          dedupe: numberOr(quotaRecord?.dedupe_hits, 0),
+          calls: numberOr(quotaRecord?.call_count, 0),
+          avg_ms:
+            numberOr(quotaRecord?.call_count, 0) > 0
+              ? Math.round(numberOr(quotaRecord?.total_duration_ms, 0) / numberOr(quotaRecord?.call_count, 0))
+              : 0,
+          count_429: numberOr(quotaRecord?.count_429, 0),
+          errors_5xx: numberOr(quotaRecord?.errors_5xx, 0),
+        },
+        second: {
+          key: quotaRecord?.second_key || null,
+          used: numberOr(quotaRecord?.second_used, 0),
+          limit: FOOTBALL_LIMITS.secondRequests,
+        },
         checks,
       },
       forecast,

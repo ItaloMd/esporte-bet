@@ -160,3 +160,24 @@ export function sleep(ms) {
   if (!(ms > 0)) return Promise.resolve();
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
+
+/* ------------------------------ janela de 1 s ------------------------------ */
+
+/** Chave do segundo corrente (UTC): janela de 1 s compartilhada por execuções. */
+export function secondBucketKey(nowMs) {
+  return String(Math.floor(nowMs / 1000));
+}
+
+/** Requisições já feitas no segundo corrente (0 quando o segundo virou). */
+export function secondWindowUsed(record, nowMs) {
+  if (record?.second_key !== secondBucketKey(nowMs)) return 0;
+  return Math.max(0, Number(record?.second_used) || 0);
+}
+
+/**
+ * Próximo segundo, com variação curta: a fila reabre depois que o segundo virou
+ * sem que todas as execuções voltem no mesmo milissegundo.
+ */
+export function nextSecondStart(nowMs) {
+  return Math.floor(nowMs / 1000) * 1000 + 1000 + Math.floor(Math.random() * 120);
+}

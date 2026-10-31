@@ -30,8 +30,11 @@ import {
 } from './apiFootball.ts';
 import {
   FOOTBALL_BUDGET_GUARD,
+  FOOTBALL_LIMITS,
   PROVIDER_DAILY_FLOOR,
   RATE_LIMIT_PAUSE_MIN_MS,
+  cacheKeyFor,
+  cacheTtlSeconds,
   nextProviderDayStartMs,
 } from './footballConfig.ts';
 import {
@@ -53,9 +56,12 @@ import {
   minuteBucketKey,
   minuteWindowUsed,
   nextMinuteStart,
+  nextSecondStart,
   paceGapMs,
   planRequestSlot,
   providerMinuteBlocked,
+  secondBucketKey,
+  secondWindowUsed,
   sleep,
 } from './footballQueue.ts';
 
@@ -63,6 +69,22 @@ export { DEFAULT_MINUTE_LIMIT, effectiveMinuteLimit, minuteBucketKey };
 
 /** Marca das linhas de registro de cada requisição real enviada ao provedor. */
 const LEDGER_NOTE = 'ledger';
+
+/** Validade da marca de "busca em andamento" usada contra chamadas simultâneas. */
+const INFLIGHT_TTL_MS = 25000;
+
+/** Teto de tamanho do payload guardado no cache compartilhado (caracteres). */
+const MAX_CACHE_CHARS = 250000;
+
+/** Intervalo mínimo entre gravações de métricas (evita excesso de escritas). */
+const METRICS_FLUSH_MS = 5000;
+
+/** Espera pela resposta de outra execução: tentativas e intervalo. */
+const SHARED_WAIT_ATTEMPTS = 3;
+const SHARED_WAIT_MS = 350;
+
+/** Rodadas de espera quando a janela de 1 s está cheia. */
+const SECOND_WAIT_ROUNDS = 4;
 
 /** Pausa por limite de minuto ainda ativa: nenhuma chamada até este horário. */
 export class FootballPausedError extends Error {
@@ -141,10 +163,135 @@ export async function openFootballClient(db, { apiKey, base, settings, day, limi
     return db.ApiUsageLog.create({ provider: 'api_football', ...entry }).catch(() => null);
   }
 
-  /** Fecha o minuto corrente: nenhuma rotina chama o provedor até o próximo. */
-  async function pauseMinute(reason, { countStrike = true } = {}) {
+  /* --------------- métricas reais do dia (base do painel) --------------- */
+
+  const pendingMetrics = {};
+  let metricsFlushedAt = 0;
+
+  /** Acumula uma contagem: as escritas são agrupadas, nunca uma por evento. */
+  function countMetric(key, amount = 1) {
+    pendingMetrics[key] = (pendingMetrics[key] || 0) + Number(amount);
+  }
+
+  /** Contagens pendentes como valores absolutos, prontas para o próximo persist. */
+  function metricsFields() {
+    const patch = {};
+    Object.keys(pendingMetrics).forEach((key) => {
+      patch[key] = Number(record?.[key] || 0) + pendingMetrics[key];
+      delete pendingMetrics[key];
+    });
+    return patch;
+  }
+
+  /** Grava as contagens pendentes (limitado a uma escrita a cada 5 s). */
+  async function flushMetrics({ force = false } = {}) {
+    if (!Object.keys(pendingMetrics).length) return;
+    if (!force && Date.now() - metricsFlushedAt < METRICS_FLUSH_MS) return;
+    const latest = await loadQuota(db, day).catch(() => null);
+    if (latest) {
+      record = latest;
+      used = Number(latest.used || 0);
+    }
+    metricsFlushedAt = Date.now();
+    await persist(metricsFields());
+  }
+
+  /* ------------- cache compartilhado e deduplicação de chamadas ------------- */
+
+  const inflightKeyOf = (key) => `inflight:${key}`;
+
+  /** Lê, numa única consulta, o payload em cache e a marca de busca paralela. */
+  async function readCacheState(key) {
+    const page = await db.ApiCache
+      .filter({ provider: 'api_football', key: { $in: [key, inflightKeyOf(key)] } }, { limit: 2 })
+      .catch(() => null);
+    const rows = page?.items || [];
+    const payloadRow = rows.find((row) => row.key === key) || null;
+    const inflightRow = rows.find((row) => row.key === inflightKeyOf(key)) || null;
+    let payload = null;
+    if (payloadRow?.note && payloadRow.note.startsWith('{')) {
+      try {
+        payload = JSON.parse(payloadRow.note);
+      } catch {
+        payload = null;
+      }
+    }
+    const fresh = Boolean(payload && payloadRow?.expires_at && Date.parse(payloadRow.expires_at) > Date.now());
+    return {
+      payload: fresh ? payload : null,
+      fetched_at: payloadRow?.fetched_at || null,
+      row_id: payloadRow?.id || null,
+      inflight: Boolean(
+        inflightRow?.fetched_at && Date.parse(inflightRow.fetched_at) > Date.now() - INFLIGHT_TTL_MS,
+      ),
+    };
+  }
+
+  /** Grava a resposta no cache compartilhado com a validade da classe de dado. */
+  async function writeCached(key, endpoint, params, ttlSeconds, payload, rowId) {
+    let encoded = '';
+    try {
+      encoded = JSON.stringify(payload);
+    } catch {
+      encoded = '';
+    }
+    const now = new Date();
+    const data = {
+      provider: 'api_football',
+      key,
+      endpoint,
+      params: JSON.stringify(params || {}),
+      records: Number(payload?.results) || 0,
+      fetched_at: now.toISOString(),
+      expires_at: new Date(now.getTime() + Number(ttlSeconds) * 1000).toISOString(),
+      last_ok_at: now.toISOString(),
+      note: encoded && encoded.length <= MAX_CACHE_CHARS ? encoded : 'resposta grande demais para o cache compartilhado',
+    };
+    if (rowId) return db.ApiCache.update(rowId, data).catch(() => null);
+    return db.ApiCache.create(data).catch(() => null);
+  }
+
+  async function markInflight(key) {
+    return db.ApiCache
+      .create({
+        provider: 'api_football',
+        key: inflightKeyOf(key),
+        endpoint: 'inflight',
+        params: String(key).slice(0, 400),
+        records: 0,
+        fetched_at: new Date().toISOString(),
+        expires_at: new Date(Date.now() + INFLIGHT_TTL_MS).toISOString(),
+        note: 'busca em andamento por outra execução',
+      })
+      .catch(() => null);
+  }
+
+  async function clearInflight(key) {
+    return db.ApiCache.deleteMany({ provider: 'api_football', key: inflightKeyOf(key) }).catch(() => null);
+  }
+
+  /** Espera a resposta da execução que já está buscando o mesmo dado. */
+  async function waitForShared(key) {
+    for (let attempt = 0; attempt < SHARED_WAIT_ATTEMPTS; attempt += 1) {
+      await sleep(SHARED_WAIT_MS);
+      const state = await readCacheState(key);
+      if (state.payload) return state;
+      if (!state.inflight) return null;
+    }
+    return null;
+  }
+
+  /**
+   * Fecha o minuto corrente: nenhuma rotina chama o provedor até o próximo.
+   * Quando o provedor informa `Retry-After`, esse tempo é respeitado — esperar
+   * menos que o pedido garante outro 429 na volta.
+   */
+  async function pauseMinute(reason, { countStrike = true, retryAfterMs = null } = {}) {
     const nowMs = Date.now();
-    const until = new Date(Math.max(nextMinuteStart(nowMs), nowMs + RATE_LIMIT_PAUSE_MIN_MS)).toISOString();
+    const requested = Number.isFinite(retryAfterMs) ? nowMs + Math.max(0, Number(retryAfterMs)) : 0;
+    const until = new Date(
+      Math.max(nextMinuteStart(nowMs), nowMs + RATE_LIMIT_PAUSE_MIN_MS, requested),
+    ).toISOString();
     await persist({
       rate_pause_until: until,
       rate_limit_strikes: countStrike ? Number(record?.rate_limit_strikes || 0) + 1 : Number(record?.rate_limit_strikes || 0),
@@ -225,14 +372,62 @@ export async function openFootballClient(db, { apiKey, base, settings, day, limi
      * Executa uma chamada passando por todo o portão. `charge: false` serve ao
      * `/status`, que não consome cota diária mas ocupa a janela do minuto.
      */
-    async call(endpoint, params = {}, { cost = 1, timeoutMs, purpose = label, priority, charge = true } = {}) {
+    async call(endpoint, params = {}, { cost = 1, timeoutMs, purpose = label, priority, charge = true, cache = true } = {}) {
       const bucketPurpose = budgetPurpose(purpose);
+      const path = String(endpoint || '');
 
       // Estado sempre fresco: várias execuções compartilham o mesmo registro.
       const fresh = await loadQuota(db, day);
       if (fresh) {
         record = fresh;
         used = Number(record.used || 0);
+      }
+
+      // 0) Cache compartilhado ANTES de qualquer trava: servir cache não
+      // consome cota, não entra na fila e mantém as telas de pé mesmo com o
+      // provedor em 429. A chave é o endpoint + parâmetros ordenados.
+      const ttlSeconds = cacheTtlSeconds(path, params);
+      const cacheKey = cacheKeyFor(path, params);
+      const useCache = Boolean(charge && cache && ttlSeconds > 0);
+      let cacheRowId = null;
+      if (useCache) {
+        const state = await readCacheState(cacheKey);
+        cacheRowId = state.row_id;
+        if (state.payload) {
+          countMetric('cache_hits');
+          await flushMetrics();
+          return {
+            data: state.payload,
+            quota: null,
+            status: 200,
+            errors: [],
+            results: Number(state.payload?.results) || 0,
+            cached: true,
+            cached_at: state.fetched_at,
+          };
+        }
+        countMetric('cache_misses');
+        // Mesma consulta já em andamento em outra execução: espera o resultado
+        // dela em vez de disparar uma segunda requisição idêntica.
+        if (state.inflight) {
+          const shared = await waitForShared(cacheKey);
+          if (shared?.payload) {
+            countMetric('dedupe_hits');
+            countMetric('cache_hits');
+            await flushMetrics();
+            return {
+              data: shared.payload,
+              quota: null,
+              status: 200,
+              errors: [],
+              results: Number(shared.payload?.results) || 0,
+              cached: true,
+              shared: true,
+              cached_at: shared.fetched_at,
+            };
+          }
+        }
+        await markInflight(cacheKey);
       }
 
       const nowMs = Date.now();
@@ -300,12 +495,33 @@ export async function openFootballClient(db, { apiKey, base, settings, day, limi
         throw new FootballMinuteLimitError(minuteLimit, untilIso);
       }
 
-      // 6) Fila: o espaçamento aprendido (persistido no registro do dia) define
+      // 6) Janela de 1 s: o plano permite 5/s e o teto interno é 4/s. O
+      // espaçamento sozinho não protege duas execuções simultâneas, que podem
+      // disparar no mesmo segundo.
+      const secondLimit = FOOTBALL_LIMITS.secondRequests;
+      let secondNow = Date.now();
+      let secondUsed = secondWindowUsed(record, secondNow);
+      for (let attempt = 0; secondUsed + cost > secondLimit && attempt < SECOND_WAIT_ROUNDS; attempt += 1) {
+        await sleep(Math.max(60, nextSecondStart(secondNow) - secondNow));
+        const afterSecond = await loadQuota(db, day).catch(() => null);
+        if (afterSecond) {
+          record = afterSecond;
+          used = Number(record.used || 0);
+        }
+        secondNow = Date.now();
+        secondUsed = secondWindowUsed(record, secondNow);
+      }
+
+      // 7) Fila: o espaçamento aprendido (persistido no registro do dia) define
       // o próximo slot. O piso é 230 ms; depois de uma recusa ele dobra.
       const gap = clampGap(Number(record?.request_gap_ms) || paceGapMs(minuteLimit));
-      const slot = planRequestSlot(record?.last_slot_at, nowMs, gap);
+      const slot = planRequestSlot(record?.last_slot_at, secondNow, gap);
       const slotIso = new Date(slot.atMs).toISOString();
-      if (record?.last_slot_at !== slotIso) await persist({ last_slot_at: slotIso });
+      await persist({
+        last_slot_at: slotIso,
+        second_key: secondBucketKey(secondNow),
+        second_used: Math.min(secondLimit, secondUsed + cost),
+      });
       await sleep(slot.waitMs);
 
       // 6b) Enquanto esperávamos, outra execução pode ter fechado o minuto.
@@ -329,6 +545,13 @@ export async function openFootballClient(db, { apiKey, base, settings, day, limi
         });
       } catch (error) {
         const durationMs = Date.now() - startedAt;
+
+        // Falha: libera a marca de busca paralela (senão os demais ficariam
+        // esperando uma resposta que nunca vai chegar) e contabiliza o erro.
+        if (useCache) await clearInflight(cacheKey);
+        if (error instanceof FootballRateLimitError || Number(error?.status) === 429) countMetric('count_429');
+        else if (Number(error?.status) >= 500) countMetric('errors_5xx');
+        await flushMetrics();
 
         if (error instanceof FootballRateLimitError) {
           const scope = error.scope === 'daily' ? 'daily' : 'minute';
@@ -364,7 +587,7 @@ export async function openFootballClient(db, { apiKey, base, settings, day, limi
               untilIso,
             );
           }
-          const untilIso = await pauseMinute(error.message);
+          const untilIso = await pauseMinute(error.message, { retryAfterMs: error.retryAfterMs || null });
           await log({
             endpoint: String(endpoint || ''),
             purpose: bucketPurpose,
@@ -402,6 +625,8 @@ export async function openFootballClient(db, { apiKey, base, settings, day, limi
       const durationMs = Date.now() - startedAt;
 
       // 8) Cobrança interna + saldo do provedor + janela do minuto, numa escrita.
+      countMetric('call_count');
+      countMetric('total_duration_ms', durationMs);
       if (charge) used += cost;
       const purposeUsage = (() => {
         try {
@@ -449,9 +674,17 @@ export async function openFootballClient(db, { apiKey, base, settings, day, limi
         last_status_code: 200,
         last_error: '',
         last_error_scope: '',
+        ...metricsFields(),
       });
 
-      // 9) Registro da requisição real: base do painel e da conciliação.
+      // 9) Cache compartilhado: a próxima consulta idêntica sai daqui, sem
+      // tocar no provedor e sem consumir cota.
+      if (useCache) {
+        await writeCached(cacheKey, path, params, ttlSeconds, result.data, cacheRowId);
+        await clearInflight(cacheKey);
+      }
+
+      // 10) Registro da requisição real: base do painel e da conciliação.
       await log({
         endpoint: String(endpoint || ''),
         purpose: bucketPurpose,
