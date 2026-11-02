@@ -189,18 +189,20 @@ export default function Register() {
         </>
       }
     >
-      <Button variant="outline" className="mb-6 h-12 w-full text-sm font-medium" onClick={handleGoogle}>
+      <Button
+        type="button"
+        variant="outline"
+        className="mb-6 h-12 w-full border-border/70 bg-secondary/40 text-sm font-medium hover:bg-secondary"
+        onClick={handleGoogle}
+      >
         <GoogleIcon className="mr-2 h-5 w-5" />
         Continuar com Google
       </Button>
 
-      <div className="relative mb-6">
-        <div className="absolute inset-0 flex items-center">
-          <div className="w-full border-t border-border" />
-        </div>
-        <div className="relative flex justify-center text-xs uppercase">
-          <span className="bg-card px-3 text-muted-foreground">ou</span>
-        </div>
+      <div className="mb-6 flex items-center gap-3 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+        <span className="h-px flex-1 bg-border" aria-hidden="true" />
+        ou
+        <span className="h-px flex-1 bg-border" aria-hidden="true" />
       </div>
 
       {error && <div className="mb-4 rounded-lg bg-destructive/10 p-3 text-sm text-destructive">{error}</div>}
