@@ -17,6 +17,7 @@ import EndpointConsumption from "@/components/admin/football/EndpointConsumption
 import ReviewQueue from "@/components/admin/football/ReviewQueue";
 import StepProgress from "@/components/admin/football/StepProgress";
 import ManualActions from "@/components/admin/football/ManualActions";
+import PurgeGamesCard from "@/components/admin/football/PurgeGamesCard";
 import { classifyStep, nextStepWait, shouldHalt, waitWithCountdown } from "@/lib/smartStepDelay";
 
 /**
@@ -221,6 +222,8 @@ export default function FootballCentral() {
       />
 
       <ManualActions busy={running} onRun={runAction} />
+
+      <PurgeGamesCard onDone={() => load()} />
 
       {!data ? (
         <div className="card-surface h-64 animate-pulse" />

@@ -170,11 +170,12 @@ export const PROVIDER_MINUTE_SAFETY = 0.9;
 export const REQUEST_GAP_MS = 230;
 
 /**
- * Plano: 5 requisições por segundo. O teto interno fica em 4/s. O espaçamento
- * entre chamadas não basta — duas execuções simultâneas podem disparar no mesmo
- * segundo —, por isso existe uma janela de 1 s compartilhada por todas.
+ * Plano Pro: 3 requisições por segundo. O teto interno fica exatamente em 3/s,
+ * nunca acima: o espaçamento entre chamadas não basta — duas execuções
+ * simultâneas podem disparar no mesmo segundo —, por isso existe uma janela de
+ * 1 s compartilhada por todas as rotinas.
  */
-export const PROVIDER_SECOND_LIMIT = 5;
+export const PROVIDER_SECOND_LIMIT = 3;
 
 /** X-RateLimit-Remaining abaixo deste valor fecha o minuto e pausa a fila. */
 export const PROVIDER_REMAINING_FLOOR = 3;
@@ -203,8 +204,8 @@ export const FOOTBALL_LIMITS = {
   dailyRequests: 6000,
   /** Chamadas preservadas para placares ao vivo antes de qualquer outra rotina. */
   reservePlacares: 10,
-  /** Teto interno por segundo (o plano permite 5). Janela de 1 s compartilhada. */
-  secondRequests: 4,
+  /** Teto interno por segundo (o plano permite 3). Janela de 1 s compartilhada. */
+  secondRequests: 3,
   /** Tentativas por chamada em falha de rede/5xx (429 nunca é retentado). */
   maxAttempts: 1,
 };

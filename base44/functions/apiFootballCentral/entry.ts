@@ -20,6 +20,8 @@ import {
 } from '../../shared/footballMonitor.ts';
 import { applyHouseMargin, localDateString } from '../../shared/oddsApi.ts';
 import { chunkArray } from '../../shared/matchLifecycle.ts';
+import { buildBetAudit } from '../../shared/footballAudit.ts';
+import { settlePendingBets } from '../../shared/settlement.ts';
 import { numberOr } from '../../shared/footballSync.ts';
 import { FOOTBALL_CADENCE, FOOTBALL_LIMITS, ODDS_CURATION, ODDS_PRIORITY } from '../../shared/footballConfig.ts';
 
@@ -183,13 +185,55 @@ export default async function (req) {
     }
 
     /* ---------------- fila de revisão administrativa de resultados ---------------- */
+    // Reúne o que precisa de decisão humana: partidas em revisão, encerradas sem
+    // confirmação, jogos que passaram do horário sem encerrar (intervalo, 1º
+    // tempo, abandono) e, na busca por nome, qualquer partida já gravada.
+    // Nenhuma chamada ao provedor: tudo vem do banco.
     if (action === 'review_queue') {
-      const page = await db.Event.filter({ settlement_state: 'review' }, { limit: 60, sort: '-updated_date' });
-      const events = page.items || [];
-      const ids = events.map((event) => event.id);
+      const search = String(body.search || '').trim().toLowerCase();
+      const staleIso = new Date(Date.now() - 3 * 3600000).toISOString();
+      const [reviewPage, finishedPage, stalePage, searchPage] = await Promise.all([
+        db.Event.filter({ settlement_state: 'review' }, { limit: 60, sort: '-updated_date' }),
+        db.Event.filter({ status: 'finished' }, { limit: 150, sort: '-start_time' }),
+        db.Event.filter(
+          { status: { $in: ['scheduled', 'live'] }, start_time: { $lte: staleIso } },
+          { limit: 80, sort: '-start_time' },
+        ),
+        search
+          ? db.Event
+              .filter(
+                {
+                  $or: [
+                    { home_team_name: { $regex: search, $options: 'i' } },
+                    { away_team_name: { $regex: search, $options: 'i' } },
+                    { competition_name: { $regex: search, $options: 'i' } },
+                  ],
+                },
+                { limit: 40, sort: '-start_time' },
+              )
+              .catch(() => ({ items: [] }))
+          : Promise.resolve({ items: [] }),
+      ]);
+
+      const candidates = new Map();
+      const add = (event, reason) => {
+        if (!event || candidates.has(event.id)) return;
+        candidates.set(event.id, { event, reason });
+      };
+      (reviewPage.items || []).forEach((event) => add(event, 'review'));
+      (finishedPage.items || []).forEach((event) => {
+        if (!event.result_confirmed_at) add(event, 'unconfirmed');
+        else if (event.settlement_state !== 'settled') add(event, 'pending_settlement');
+      });
+      (stalePage.items || []).forEach((event) => add(event, 'stale'));
+      (searchPage.items || []).forEach((event) => add(event, 'search'));
+
+      const selected = [...candidates.values()].slice(0, 40);
+      const ids = selected.map((row) => row.event.id);
 
       const auditsByEvent = new Map();
       const betsByEvent = new Map();
+      const marketsByEvent = new Map();
       if (ids.length) {
         const [auditPage, betsPage] = await Promise.all([
           db.BetAudit.filter({ event_id: { $in: ids } }, { sort: '-created_date', limit: 300 }),
@@ -200,11 +244,16 @@ export default async function (req) {
         });
         (betsPage.items || []).forEach((row) => {
           betsByEvent.set(row.event_id, (betsByEvent.get(row.event_id) || 0) + 1);
+          const key = String(row.market_key || 'outros');
+          if (!marketsByEvent.has(row.event_id)) marketsByEvent.set(row.event_id, new Map());
+          const map = marketsByEvent.get(row.event_id);
+          map.set(key, (map.get(key) || 0) + 1);
         });
       }
 
-      const rows = events.map((event) => {
+      const rows = selected.map(({ event, reason }) => {
         const audit = auditsByEvent.get(event.id) || null;
+        const markets = marketsByEvent.get(event.id) || new Map();
         return {
           id: event.id,
           fixture_id: event.fixture_id || '',
@@ -216,14 +265,26 @@ export default async function (req) {
           status: event.status,
           phase: event.phase || '',
           phase_label: event.phase_label || '',
+          reason,
           home_score: event.home_score ?? null,
           away_score: event.away_score ?? null,
           ht_home_score: event.ht_home_score ?? null,
           ht_away_score: event.ht_away_score ?? null,
+          corners_home: event.corners_home ?? null,
+          corners_away: event.corners_away ?? null,
+          cards_home: event.cards_home ?? null,
+          cards_away: event.cards_away ?? null,
+          first_goal_minute: event.first_goal_minute ?? null,
+          first_goal_team: event.first_goal_team || '',
           result_source: event.result_source || '',
+          result_confirmed_at: event.result_confirmed_at || null,
+          settlement_state: event.settlement_state || 'none',
           last_sync_at: event.last_sync_at || null,
           audit_checks: numberOr(event.audit_checks, 0),
           open_selections: betsByEvent.get(event.id) || 0,
+          pending_markets: [...markets.entries()]
+            .map(([market_key, count]) => ({ market_key, count }))
+            .sort((a, b) => b.count - a.count),
           evidence: audit
             ? {
                 audited_at: audit.audited_at,
@@ -237,13 +298,14 @@ export default async function (req) {
             : null,
         };
       });
-      return Response.json({ events: rows, count: rows.length });
+      return Response.json({ events: rows, count: rows.length, search });
     }
 
     /* ---------------- decisão de revisão: confirmar ou anular ---------------- */
-    // Idempotente: só age sobre partidas efetivamente em revisão. A decisão
-    // nunca liquida apostas diretamente — a liquidação acontece no próximo
-    // ciclo, a partir do resultado confirmado, e fica na trilha de auditoria.
+    // Resultado informado manualmente vale como confirmação oficial: grava o
+    // placar (e as estatísticas usadas pelas apostas), registra a auditoria e
+    // liquida as seleções abertas da partida na mesma chamada. Serve para jogos
+    // parados no 1º tempo/intervalo ou que a fonte não confirmou.
     if (action === 'resolve_review') {
       const eventId = String(body.event_id || '');
       const decision = String(body.decision || '');
@@ -253,9 +315,21 @@ export default async function (req) {
       const eventPage = await db.Event.filter({ id: eventId }, { limit: 1 });
       const event = eventPage.items?.[0];
       if (!event) return Response.json({ error: 'Partida não encontrada.' }, { status: 404 });
-      if (event.settlement_state !== 'review') {
-        return Response.json({ error: 'A partida não está em revisão administrativa.' }, { status: 400 });
+
+      const startMs = Date.parse(event.start_time || '');
+      const overdue = Number.isFinite(startMs) && Date.now() - startMs > 2 * 3600000;
+      if (!(event.settlement_state === 'review' || !event.result_confirmed_at || overdue || body.force === true)) {
+        return Response.json(
+          { error: 'Partida ainda dentro do prazo normal de confirmação pela fonte.' },
+          { status: 400 },
+        );
       }
+
+      const num = (value) => {
+        if (value === undefined || value === null || value === '') return null;
+        const parsed = Number(value);
+        return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+      };
 
       const nowIso = new Date().toISOString();
       const patch = {
@@ -270,24 +344,40 @@ export default async function (req) {
       let scoreLabel = '';
 
       if (decision === 'confirm') {
-        const home = body.home_score === undefined || body.home_score === null || body.home_score === ''
-          ? event.home_score
-          : Number(body.home_score);
-        const away = body.away_score === undefined || body.away_score === null || body.away_score === ''
-          ? event.away_score
-          : Number(body.away_score);
-        if (!Number.isFinite(home) || !Number.isFinite(away) || home < 0 || away < 0) {
+        const home = num(body.home_score);
+        const away = num(body.away_score);
+        if (home === null || away === null) {
           return Response.json({ error: 'Placar final necessário para confirmar o resultado.' }, { status: 400 });
         }
         patch.status = 'finished';
         patch.home_score = home;
         patch.away_score = away;
-        const htHome = Number(body.ht_home_score);
-        const htAway = Number(body.ht_away_score);
-        if (Number.isFinite(htHome) && Number.isFinite(htAway)) {
+        // Tempo regulamentar acompanha o resultado informado: é a base da
+        // liquidação dos mercados de 90 minutos.
+        patch.reg_home_score = home;
+        patch.reg_away_score = away;
+        const htHome = num(body.ht_home_score);
+        const htAway = num(body.ht_away_score);
+        if (htHome !== null && htAway !== null) {
           patch.ht_home_score = htHome;
           patch.ht_away_score = htAway;
         }
+        const cornersHome = num(body.corners_home);
+        const cornersAway = num(body.corners_away);
+        if (cornersHome !== null && cornersAway !== null) {
+          patch.corners_home = cornersHome;
+          patch.corners_away = cornersAway;
+        }
+        const cardsHome = num(body.cards_home);
+        const cardsAway = num(body.cards_away);
+        if (cardsHome !== null && cardsAway !== null) {
+          patch.cards_home = cardsHome;
+          patch.cards_away = cardsAway;
+        }
+        const firstGoalMinute = num(body.first_goal_minute);
+        if (firstGoalMinute !== null) patch.first_goal_minute = firstGoalMinute;
+        const firstGoalTeam = String(body.first_goal_team || '');
+        if (firstGoalTeam === 'home' || firstGoalTeam === 'away') patch.first_goal_team = firstGoalTeam;
         scoreLabel = `${home} x ${away}`;
       } else {
         patch.status = 'cancelled';
@@ -295,19 +385,88 @@ export default async function (req) {
       }
 
       await db.Event.update(event.id, patch);
+      const updated = await db.Event.get(event.id);
+
+      if (decision === 'confirm') {
+        const betCount = await db.SimulationSelection.count({ event_id: event.id, status: 'open' }).catch(() => 0);
+        const hasStats = updated.corners_home !== null && updated.corners_home !== undefined;
+        const statistics = hasStats
+          ? {
+              corners_home: Number(updated.corners_home) || 0,
+              corners_away: Number(updated.corners_away) || 0,
+              cards_home: Number(updated.cards_home) || 0,
+              cards_away: Number(updated.cards_away) || 0,
+              yellow_home: Number(updated.cards_home) || 0,
+              yellow_away: Number(updated.cards_away) || 0,
+              red_home: 0,
+              red_away: 0,
+            }
+          : null;
+        const audit = buildBetAudit(updated, updated, {
+          betCount,
+          statistics,
+          statisticsSource: statistics ? 'revisão manual' : '',
+        });
+        const existingAudit = await db.BetAudit.filter({ event_id: event.id }, { limit: 1 });
+        if (existingAudit.items?.[0]) await db.BetAudit.update(existingAudit.items[0].id, audit);
+        else await db.BetAudit.create(audit);
+      }
+
+      // Liquidação imediata: o resultado confirmado manualmente já basta.
+      let settlement = null;
+      try {
+        settlement = await settlePendingBets(db, { nowIso, events: [updated] });
+      } catch (error) {
+        settlement = { error: String(error?.message || error) };
+      }
+
       await db.AdminAuditLog.create({
         actor_id: user.id,
         actor_email: user.email,
         action: 'match.review_resolved',
         target_type: 'Event',
         target_id: event.id,
-        details: `Revisão resolvida (${decision === 'confirm' ? 'resultado confirmado' : 'partida anulada'}) · ${
+        details: `Revisão resolvida (${decision === 'confirm' ? 'resultado confirmado manualmente' : 'partida anulada'}) · ${
           event.home_team_name
         } x ${event.away_team_name} · ${scoreLabel}`.slice(0, 400),
         severity: 'warning',
       }).catch(() => null);
 
-      return Response.json({ ok: true, event_id: event.id, decision, score: scoreLabel });
+      return Response.json({ ok: true, event_id: event.id, decision, score: scoreLabel, settlement });
+    }
+
+    /* --------------------- limpeza total da base de jogos --------------------- */
+    // Reinicia o catálogo de partidas: apaga jogos, cotações, filas e auditorias
+    // vinculadas. Apostas e bilhetes são preservados (não são jogos).
+    if (action === 'purge_events') {
+      const [events, odds, oddsQueue, auditQueue, audits] = await Promise.all([
+        db.Event.count({}),
+        db.Odd.count({}),
+        db.OddsQueueItem.count({}),
+        db.ResultAuditQueue.count({}),
+        db.BetAudit.count({}),
+      ]);
+
+      await db.Odd.deleteMany({});
+      await db.OddsQueueItem.deleteMany({});
+      await db.ResultAuditQueue.deleteMany({});
+      await db.BetAudit.deleteMany({});
+      await db.Event.deleteMany({});
+
+      await db.AdminAuditLog.create({
+        actor_id: user.id,
+        actor_email: user.email,
+        action: 'catalog.events_purged',
+        target_type: 'Event',
+        target_id: '',
+        details: `Base de jogos limpa: ${events} partida(s), ${odds} cotação(ões), ${oddsQueue} item(ns) de fila, ${auditQueue} auditoria(s) pendente(s)`,
+        severity: 'warning',
+      }).catch(() => null);
+
+      return Response.json({
+        ok: true,
+        removed: { events, odds, odds_queue: oddsQueue, audit_queue: auditQueue, audits },
+      });
     }
 
     /* ------------------------- liberar bloqueio e testar ------------------------- */

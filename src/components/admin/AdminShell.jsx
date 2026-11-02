@@ -2,7 +2,7 @@ import React from "react";
 import { Link } from "react-router-dom";
 import {
   Activity, ArrowLeft, BarChart3, CalendarDays, CreditCard, Database, FileSearch, Gauge, Gift, Images,
-  LayoutDashboard, RefreshCw, ShieldAlert, SlidersHorizontal, Target, Ticket, TicketCheck, Users, Wallet, Zap,
+  LayoutDashboard, RefreshCw, ShieldAlert, ShieldCheck, SlidersHorizontal, Target, Ticket, TicketCheck, Users, Wallet, Zap,
 } from "lucide-react";
 import BrandMark from "@/components/brand/BrandMark";
 import { useAppSettings } from "@/lib/appSettings";
@@ -14,6 +14,7 @@ export const ADMIN_SECTIONS = [
     items: [
       { key: "today", label: "Jogos de hoje", icon: CalendarDays },
       { key: "audit-games", label: "Auditoria de jogos", icon: FileSearch },
+      { key: "results", label: "Revisão de resultados", icon: ShieldCheck },
     ],
   },
   {

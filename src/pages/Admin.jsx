@@ -6,6 +6,7 @@ import AdminShell from "@/components/admin/AdminShell";
 import AdminExecutiveDashboard from "@/components/admin/AdminExecutiveDashboard";
 import AdminMatches from "@/components/admin/AdminMatches";
 import AdminAudit from "@/components/admin/AdminAudit";
+import ManualResultReview from "@/components/admin/football/ManualResultReview";
 import FootballCentral from "@/components/admin/FootballCentral";
 import AdminOpenBets from "@/components/admin/AdminOpenBets";
 import AdminMarkets from "@/components/admin/AdminMarkets";
@@ -27,6 +28,7 @@ const SECTION_COMPONENTS = {
   overview: () => <AdminExecutiveDashboard />,
   today: () => <AdminMatches mode="today" />,
   "audit-games": () => <AdminAudit />,
+  results: () => <ManualResultReview />,
   "api-monitor": () => <FootballCentral />,
   "open-bets": () => <AdminOpenBets mode="open" />,
   "closed-bets": () => <AdminOpenBets mode="closed" />,
