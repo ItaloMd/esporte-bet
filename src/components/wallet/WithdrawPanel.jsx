@@ -1,25 +1,13 @@
 import React, { useState } from "react";
-import { CheckCircle2, Clock, Loader2 } from "lucide-react";
+import { CheckCircle2, Loader2 } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatCurrency } from "@/lib/format";
 import { formatCpf } from "@/lib/cpf";
-import KycForm from "@/components/wallet/KycForm";
 
-export default function WithdrawPanel({
-  minWithdrawal,
-  enabled,
-  rolloverPending,
-  kycApproved,
-  kycLatest,
-  userId,
-  userEmail,
-  profile,
-  onRequested,
-  onKycSubmitted,
-}) {
+export default function WithdrawPanel({ minWithdrawal, enabled, rolloverPending, profile, onRequested }) {
   const [amount, setAmount] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -56,36 +44,6 @@ export default function WithdrawPanel({
           Saques desativados
         </Button>
       </div>
-    );
-  }
-
-  if (!kycApproved) {
-    if (kycLatest?.status === "pending") {
-      return (
-        <div className="space-y-3 text-center">
-          <span className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-amber-500/15">
-            <Clock className="h-6 w-6 text-amber-400" aria-hidden="true" />
-          </span>
-          <p className="font-semibold">Verificação em análise</p>
-          <p className="text-sm text-muted-foreground">
-            Recebemos as suas imagens. Assim que a análise for concluída, o saque é liberado automaticamente e você não
-            precisa reenviar nada.
-          </p>
-        </div>
-      );
-    }
-    return (
-      <KycForm
-        userId={userId}
-        userEmail={userEmail}
-        profile={profile}
-        rejectedNote={
-          kycLatest?.status === "rejected"
-            ? kycLatest.reviewer_note || "A verificação anterior não foi aprovada. Reenvie as imagens com boa iluminação."
-            : ""
-        }
-        onSubmitted={onKycSubmitted}
-      />
     );
   }
 

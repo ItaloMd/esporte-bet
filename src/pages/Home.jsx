@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { BarChart3, Flame, History, Star, TrendingUp } from "lucide-react";
+import { Flame, History, Search, Star, Trophy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import EventFilters from "@/components/odds/EventFilters";
@@ -13,32 +13,28 @@ import BannerCarousel from "@/components/banners/BannerCarousel";
 import AppDownloadPrompt from "@/components/common/AppDownloadPrompt";
 import { CardListSkeleton } from "@/components/state/LoadingBlocks";
 import useEventFeed from "@/lib/useEventFeed";
-import useCompetitions from "@/lib/useCompetitions";
+import useFootballCompetitions from "@/lib/useFootballCompetitions";
 import { useAppSettings } from "@/lib/appSettings";
 import { buildEventFilter, sortEventsByRelevance } from "@/lib/eventQueries";
-import { SPORTS } from "@/lib/sports";
 import { dayRangeFromInput } from "@/lib/format";
 
 const PAST = { status: "finished" };
 
-function CompetitionChips() {
-  const { competitions, loading } = useCompetitions({ featured: true, limit: 8 });
-  if (loading) return <div className="h-9 w-full animate-pulse rounded-lg bg-secondary" />;
+function CompetitionChips({ competitions, loading }) {
+  if (loading) return <div className="h-9 w-full animate-pulse rounded-xl bg-secondary" />;
   if (!competitions.length) {
-    return <p className="text-xs text-muted-foreground">Competições em destaque aparecerão aqui quando cadastradas.</p>;
+    return <p className="text-xs text-muted-foreground">As competições aparecem aqui conforme os jogos são importados.</p>;
   }
   return (
     <div className="hide-scrollbar -mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
       {competitions.map((competition) => (
         <Link
-          key={competition.id}
-          to={`/competicoes?competition=${competition.id}`}
-          className="shrink-0 rounded-lg border border-border bg-card px-3 py-2 text-sm transition-colors hover:border-primary/50"
+          key={competition.name}
+          to={`/competicoes?competition=${encodeURIComponent(competition.name)}`}
+          className="shrink-0 rounded-xl border border-border bg-card px-3.5 py-2.5 text-sm transition-colors hover:border-primary/50"
         >
-          <span className="block font-medium">{competition.name}</span>
-          <span className="text-[11px] text-muted-foreground">
-            {competition.country || "Internacional"} · {competition.season || "temporada atual"}
-          </span>
+          <span className="block max-w-[13rem] truncate font-medium">{competition.name}</span>
+          <span className="text-[11px] text-muted-foreground">{competition.count} jogos</span>
         </Link>
       ))}
     </div>
@@ -48,61 +44,53 @@ function CompetitionChips() {
 export default function Home() {
   const settings = useAppSettings();
   const navigate = useNavigate();
-  const [filters, setFilters] = useState({ search: "", sport: "", country: "", competition: "", date: "" });
-  const { competitions } = useCompetitions({ limit: 50 });
+  const [filters, setFilters] = useState({ search: "", country: "", competition: "", date: "" });
+  const { competitions, countries, loading: competitionsLoading } = useFootballCompetitions({ limit: 150 });
 
   // Marca o instante da montagem: a partir dele nenhuma partida já iniciada
   // entra nas listas de próximos jogos.
   const nowIso = useMemo(() => new Date().toISOString(), []);
-  const featuredFilter = useMemo(
-    () => ({ status: "scheduled", is_featured: true, start_time: { $gte: nowIso } }),
-    [nowIso],
-  );
-
-  const featuredFeed = useEventFeed(featuredFilter, { limit: 4, sort: "start_time" });
   const resultsFeed = useEventFeed(PAST, { limit: 4, sort: "-start_time" });
 
   const feedFilter = useMemo(
     () =>
       buildEventFilter({
-        sportSlug: filters.sport,
-        competitionId: filters.competition,
+        sportSlug: "futebol",
+        competitionName: filters.competition,
         country: filters.country,
         dayRange: dayRangeFromInput(filters.date),
         status: "scheduled",
         from: nowIso,
       }),
-    [filters.sport, filters.competition, filters.country, filters.date, nowIso],
+    [filters.competition, filters.country, filters.date, nowIso],
   );
-  const feed = useEventFeed(feedFilter, { limit: 10 });
+  const feed = useEventFeed(feedFilter, { limit: 12 });
 
-  const featured = featuredFeed.events;
   // Próximos jogos ordenados pela relevância calculada no backend.
   const upcoming = useMemo(() => sortEventsByRelevance(feed.events), [feed.events]);
 
   return (
     <div className="space-y-7">
-      <section className="card-surface relative overflow-hidden px-4 py-5 md:px-6 md:py-7">
-        <div className="absolute inset-0 -z-10 bg-[radial-gradient(35rem_18rem_at_85%_0%,hsl(var(--primary)/0.16),transparent)]" />
-        <Badge variant="outline" className="border-primary/40 text-primary">
-          Acompanhamento esportivo
+      <section className="relative overflow-hidden rounded-2xl border border-border bg-card px-5 py-6 md:px-7 md:py-8">
+        <div className="pointer-events-none absolute -right-16 -top-24 h-56 w-56 rounded-full bg-primary/20 blur-3xl" />
+        <Badge variant="outline" className="border-primary/50 bg-primary/10 text-primary">
+          Futebol · odds informativas
         </Badge>
-        <h1 className="mt-3 text-2xl font-semibold md:text-3xl">
-          {settings.brand_name} — odds informativas de vários esportes
+        <h1 className="mt-3 max-w-2xl font-display text-3xl font-semibold uppercase leading-none tracking-tight md:text-4xl">
+          {settings.brand_name}
         </h1>
-        <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-          {settings.tagline ||
-            "Acompanhe partidas, competições e mercados em um só lugar, com odds atualizadas."}
+        <p className="mt-2 max-w-xl text-sm text-muted-foreground">
+          {settings.tagline || "Calendário, mercados e cotações de futebol em um só lugar."}
         </p>
-        <div className="mt-4 flex flex-wrap gap-2">
+        <div className="mt-5 flex flex-wrap gap-2">
           <Button asChild>
-            <Link to="/esportes">
-              <BarChart3 className="mr-2 h-4 w-4" /> Todos os esportes
+            <Link to="/competicoes">
+              <Trophy className="mr-2 h-4 w-4" /> Competições
             </Link>
           </Button>
           <Button variant="outline" asChild>
-            <Link to="/competicoes">
-              <Star className="mr-2 h-4 w-4" /> Competições
+            <Link to="/busca">
+              <Search className="mr-2 h-4 w-4" /> Buscar time
             </Link>
           </Button>
         </div>
@@ -116,39 +104,22 @@ export default function Home() {
         <EventFilters
           filters={filters}
           onChange={setFilters}
-          sports={SPORTS}
           competitions={competitions}
+          countries={countries}
           onSubmitSearch={(term) => navigate(term ? `/busca?q=${encodeURIComponent(term)}` : "/busca")}
         />
       </section>
 
       <section>
-        <SectionHeading
-          icon={Star}
-          title="Eventos em destaque"
-          subtitle="Principais ligas e torneios monitorados"
-          to="/competicoes"
-          actionLabel="Competições"
-        />
-        {featuredFeed.loading ? (
-          <CardListSkeleton count={2} />
-        ) : featured.length ? (
-          <EventGrid events={featured} oddsByEvent={featuredFeed.oddsByEvent} />
-        ) : (
-          <p className="text-sm text-muted-foreground">Nenhum evento em destaque disponível no momento.</p>
-        )}
-      </section>
-
-      <section>
-        <SectionHeading icon={TrendingUp} title="Principais ligas e competições" to="/competicoes" />
-        <CompetitionChips />
+        <SectionHeading icon={Star} title="Competições na base" to="/competicoes" actionLabel="Ver todas" />
+        <CompetitionChips competitions={competitions.slice(0, 8)} loading={competitionsLoading} />
       </section>
 
       <section>
         <SectionHeading
           icon={Flame}
           title="Próximos jogos"
-          subtitle="Horários no fuso de Brasília · escolha o dia para ver os jogos futuros"
+          subtitle="Horários de Brasília · escolha o dia para filtrar"
         />
         <div className="mb-3">
           <DateStrip value={filters.date} onChange={(date) => setFilters((current) => ({ ...current, date }))} />
@@ -160,7 +131,7 @@ export default function Home() {
           error={feed.error}
           onRetry={feed.reload}
           emptyTitle="Nenhuma partida encontrada"
-          emptyDescription="Ajuste esporte, competição ou data para ver outros eventos."
+          emptyDescription="Ajuste competição, país ou data para ver outros jogos."
         />
         {feed.hasMore && (
           <div className="mt-3 flex justify-center">

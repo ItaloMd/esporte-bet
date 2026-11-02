@@ -78,8 +78,12 @@ const AuthenticatedApp = () => {
           <Route path="/indique-e-ganhe" element={<Affiliate />} />
           <Route path="/perfil" element={<Profile />} />
           <Route path="/configuracoes" element={<SettingsPage />} />
-          <Route path="/admin" element={<Admin />} />
         </Route>
+      </Route>
+
+      {/* Painel administrativo em tela cheia, fora do layout da plataforma. */}
+      <Route element={<ProtectedRoute unauthenticatedElement={<Navigate to="/login" replace />} />}>
+        <Route path="/admin" element={<Admin />} />
       </Route>
 
       <Route path="*" element={<PageNotFound />} />

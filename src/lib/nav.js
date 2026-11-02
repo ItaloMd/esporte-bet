@@ -1,12 +1,11 @@
 import {
-  Home, CircleDot, BarChart3,
-  Ticket, Gift, UserRound, Settings, Wallet,
+  Home, CircleDot, Ticket, Gift, UserRound, Settings, Wallet,
 } from "lucide-react";
 
 export const NAV_ITEMS = [
   { path: "/", label: "Início", icon: Home },
-  { path: "/esporte/futebol", label: "Futebol", icon: CircleDot },
-  { path: "/competicoes", label: "Competições", icon: BarChart3 },
+  { path: "/esportes", label: "Futebol", icon: CircleDot },
+  { path: "/competicoes", label: "Competições", icon: Ticket },
   { path: "/minhas-simulacoes", label: "Minhas simulações", icon: Ticket },
   { path: "/carteira", label: "Carteira", icon: Wallet },
   { path: "/indique-e-ganhe", label: "Indique e ganhe", icon: Gift },
@@ -16,7 +15,8 @@ export const NAV_ITEMS = [
 
 export const BOTTOM_ITEMS = [
   { path: "/", label: "Início", icon: Home },
-  { path: "/esportes", label: "Esportes", icon: CircleDot },
-  { path: "/minhas-simulacoes", label: "Simulações", icon: Ticket },
+  { path: "/competicoes", label: "Competições", icon: CircleDot },
+  { path: "/minhas-simulacoes", label: "Apostas", icon: Ticket },
+  { path: "/carteira", label: "Carteira", icon: Wallet },
   { path: "/perfil", label: "Perfil", icon: UserRound },
 ];

@@ -1,32 +1,37 @@
 import React, { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { ArrowLeft, Trophy } from "lucide-react";
+import { ArrowLeft, Search, Trophy } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import EventGrid from "@/components/odds/EventGrid";
 import useEventFeed from "@/lib/useEventFeed";
-import useCompetitions from "@/lib/useCompetitions";
+import useFootballCompetitions from "@/lib/useFootballCompetitions";
 import { buildEventFilter } from "@/lib/eventQueries";
-import { SPORTS, sportName } from "@/lib/sports";
+import { formatNumber } from "@/lib/format";
 
+/**
+ * Competições realmente presentes na base de eventos (somente futebol).
+ * A lista e o filtro usam o mesmo campo gravado no jogo (competition_name),
+ * então toda competição listada tem jogos para mostrar.
+ */
 export default function Competitions() {
   const [params, setParams] = useSearchParams();
   const selected = params.get("competition") || "";
-  const [sport, setSport] = useState("");
-  const { competitions, loading } = useCompetitions({ sportSlug: sport, limit: 60 });
+  const [term, setTerm] = useState("");
+  const { competitions, loading } = useFootballCompetitions({ limit: 150 });
 
   const nowIso = useMemo(() => new Date().toISOString(), []);
   const filter = useMemo(
-    () => buildEventFilter({ competitionId: selected, sportSlug: sport, status: "scheduled", from: nowIso }),
-    [selected, sport, nowIso],
+    () => buildEventFilter({ sportSlug: "futebol", competitionName: selected, status: "scheduled", from: nowIso }),
+    [selected, nowIso],
   );
-  const feed = useEventFeed(filter, { limit: 10, enabled: Boolean(selected) });
+  const feed = useEventFeed(filter, { limit: 12, enabled: Boolean(selected) });
 
-  const selectedCompetition = competitions.find((item) => item.id === selected);
-
-  const chooseSport = (slug) => {
-    setSport(slug);
-    setParams({});
-  };
+  const filtered = useMemo(() => {
+    const needle = term.trim().toLowerCase();
+    if (!needle) return competitions;
+    return competitions.filter((item) => item.name.toLowerCase().includes(needle));
+  }, [competitions, term]);
 
   return (
     <div className="space-y-5">
@@ -36,7 +41,9 @@ export default function Competitions() {
         </span>
         <div>
           <h1 className="text-xl font-semibold">Competições</h1>
-          <p className="text-xs text-muted-foreground">Ligas, campeonatos e torneios monitorados</p>
+          <p className="text-xs text-muted-foreground">
+            {formatNumber(competitions.length)} competições de futebol com jogos na base
+          </p>
         </div>
       </header>
 
@@ -44,14 +51,8 @@ export default function Competitions() {
         <section className="space-y-3">
           <div className="card-surface flex items-center justify-between gap-3 px-4 py-3">
             <div className="min-w-0">
-              <p className="truncate text-sm font-semibold">
-                {selectedCompetition?.name || "Competição selecionada"}
-              </p>
-              <p className="truncate text-[11px] text-muted-foreground">
-                {sportName(selectedCompetition?.sport_slug)} ·{" "}
-                {selectedCompetition?.country || "Internacional"} ·{" "}
-                {selectedCompetition?.season || "temporada atual"}
-              </p>
+              <p className="truncate text-sm font-semibold">{selected}</p>
+              <p className="truncate text-[11px] text-muted-foreground">Próximos jogos desta competição</p>
             </div>
             <Button variant="outline" size="sm" onClick={() => setParams({})}>
               <ArrowLeft className="mr-1.5 h-3.5 w-3.5" /> Trocar
@@ -65,8 +66,8 @@ export default function Competitions() {
             error={feed.error}
             onRetry={feed.reload}
             showCompetition={false}
-            emptyTitle="Sem eventos agendados"
-            emptyDescription="Esta competição não possui partidas futuras na fonte de dados."
+            emptyTitle="Sem jogos futuros"
+            emptyDescription="Esta competição não tem partidas futuras na base."
           />
           {feed.hasMore && (
             <div className="flex justify-center">
@@ -78,24 +79,15 @@ export default function Competitions() {
         </section>
       ) : (
         <>
-          <div className="hide-scrollbar flex gap-2 overflow-x-auto pb-1">
-            <button
-              type="button"
-              onClick={() => chooseSport("")}
-              className={`shrink-0 rounded-lg border px-3 py-1.5 text-sm ${sport === "" ? "border-primary text-primary" : "border-border text-muted-foreground"}`}
-            >
-              Todos
-            </button>
-            {SPORTS.map((item) => (
-              <button
-                key={item.slug}
-                type="button"
-                onClick={() => chooseSport(item.slug)}
-                className={`shrink-0 rounded-lg border px-3 py-1.5 text-sm ${sport === item.slug ? "border-primary text-primary" : "border-border text-muted-foreground"}`}
-              >
-                {item.name}
-              </button>
-            ))}
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+            <Input
+              value={term}
+              onChange={(event) => setTerm(event.target.value)}
+              placeholder="Filtrar competição (ex.: Brasileirão)"
+              className="h-10 pl-9"
+              aria-label="Filtrar competição"
+            />
           </div>
 
           {loading ? (
@@ -103,29 +95,24 @@ export default function Competitions() {
               <div className="card-surface h-16 animate-pulse" />
               <div className="card-surface h-16 animate-pulse" />
             </div>
-          ) : competitions.length ? (
+          ) : filtered.length ? (
             <div className="grid gap-2 sm:grid-cols-2">
-              {competitions.map((competition) => (
+              {filtered.map((competition) => (
                 <button
-                  key={competition.id}
+                  key={competition.name}
                   type="button"
-                  onClick={() => setParams({ competition: competition.id })}
-                  className="card-surface px-4 py-3 text-left transition-colors hover:border-primary/40"
+                  onClick={() => setParams({ competition: competition.name })}
+                  className="card-surface flex items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:border-primary/50"
                 >
-                  <span className="flex items-center justify-between gap-2">
-                    <span className="truncate text-sm font-medium">{competition.name}</span>
-                    <span className="shrink-0 rounded-full border border-border px-2 py-0.5 text-[10px] text-muted-foreground">
-                      {sportName(competition.sport_slug)}
-                    </span>
-                  </span>
-                  <span className="mt-0.5 block text-[11px] text-muted-foreground">
-                    {competition.country || "Internacional"} · {competition.season || "temporada atual"}
+                  <span className="min-w-0 truncate text-sm font-medium">{competition.name}</span>
+                  <span className="score-num shrink-0 rounded-lg bg-secondary px-2 py-0.5 text-xs text-muted-foreground">
+                    {competition.count}
                   </span>
                 </button>
               ))}
             </div>
           ) : (
-            <p className="text-sm text-muted-foreground">Nenhuma competição cadastrada para este filtro.</p>
+            <p className="text-sm text-muted-foreground">Nenhuma competição encontrada para este filtro.</p>
           )}
         </>
       )}

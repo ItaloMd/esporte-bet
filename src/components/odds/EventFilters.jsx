@@ -1,20 +1,15 @@
-import React, { useMemo } from "react";
+import React from "react";
 import { CalendarDays, Filter, Search, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 
-export default function EventFilters({ filters, onChange, sports, competitions, onSubmitSearch }) {
+/**
+ * Filtros da listagem de jogos. `competitions` e `countries` vêm da base de
+ * eventos (nome + quantidade), então o filtro casa exatamente com o que existe.
+ */
+export default function EventFilters({ filters, onChange, competitions = [], countries = [], onSubmitSearch }) {
   const update = (patch) => onChange({ ...filters, ...patch });
-  const hasExtra = Boolean(filters.sport || filters.competition || filters.date || filters.country);
-
-  const countries = useMemo(() => {
-    const scoped = filters.sport ? competitions.filter((item) => item.sport_slug === filters.sport) : competitions;
-    return [...new Set(scoped.map((item) => item.country).filter(Boolean))].sort((a, b) => a.localeCompare(b, "pt-BR"));
-  }, [competitions, filters.sport]);
-
-  const competitionOptions = filters.country
-    ? competitions.filter((item) => item.country === filters.country)
-    : competitions;
+  const hasExtra = Boolean(filters.competition || filters.date || filters.country);
 
   return (
     <div className="card-surface flex flex-col gap-3 p-3.5">
@@ -30,28 +25,15 @@ export default function EventFilters({ filters, onChange, sports, competitions, 
           <Input
             value={filters.search || ""}
             onChange={(event) => update({ search: event.target.value })}
-            placeholder="Buscar equipe ou competição"
+            placeholder="Buscar time ou competição"
             className="h-10 pl-9"
-            aria-label="Buscar equipe ou competição"
+            aria-label="Buscar time ou competição"
           />
         </div>
         <Button type="submit" className="h-10">Buscar</Button>
       </form>
 
       <div className="flex flex-wrap gap-2">
-        <label className="sr-only" htmlFor="filter-sport">Esporte</label>
-        <select
-          id="filter-sport"
-          value={filters.sport || ""}
-          onChange={(event) => update({ sport: event.target.value, competition: "", country: "" })}
-          className="h-9 rounded-lg border border-border bg-secondary/60 px-2.5 text-sm"
-        >
-          <option value="">Todos os esportes</option>
-          {sports.map((sport) => (
-            <option key={sport.slug} value={sport.slug}>{sport.name}</option>
-          ))}
-        </select>
-
         <label className="sr-only" htmlFor="filter-country">País</label>
         <select
           id="filter-country"
@@ -61,7 +43,9 @@ export default function EventFilters({ filters, onChange, sports, competitions, 
         >
           <option value="">Todos os países</option>
           {countries.map((country) => (
-            <option key={country} value={country}>{country}</option>
+            <option key={country.name} value={country.name}>
+              {country.name} ({country.count})
+            </option>
           ))}
         </select>
 
@@ -70,11 +54,13 @@ export default function EventFilters({ filters, onChange, sports, competitions, 
           id="filter-competition"
           value={filters.competition || ""}
           onChange={(event) => update({ competition: event.target.value })}
-          className="h-9 max-w-[13rem] rounded-lg border border-border bg-secondary/60 px-2.5 text-sm"
+          className="h-9 max-w-[15rem] rounded-lg border border-border bg-secondary/60 px-2.5 text-sm"
         >
           <option value="">Todas as competições</option>
-          {competitionOptions.map((competition) => (
-            <option key={competition.id} value={competition.id}>{competition.name}</option>
+          {competitions.map((competition) => (
+            <option key={competition.name} value={competition.name}>
+              {competition.name} ({competition.count})
+            </option>
           ))}
         </select>
 

@@ -1,6 +1,6 @@
 import React from "react";
 import { Link } from "react-router-dom";
-import { Bell, Gift, LogOut, Settings as SettingsIcon, ShieldCheck, Ticket } from "lucide-react";
+import { Bell, Gift, LogOut, Settings as SettingsIcon, Ticket } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import ProfileSetupForm from "@/components/profile/ProfileSetupForm";
 import { formatNumber, formatDateTime } from "@/lib/format";
@@ -9,13 +9,6 @@ import { useAuth } from "@/lib/AuthContext";
 import { sportName } from "@/lib/sports";
 import { base44 } from "@/api/base44Client";
 import { useEffect, useState } from "react";
-
-const STATUS = {
-  verified: { label: "Identidade verificada", className: "border-primary/40 text-primary" },
-  pending: { label: "Verificação pendente", className: "border-amber-500/40 text-amber-400" },
-  rejected: { label: "Verificação recusada", className: "border-destructive/40 text-destructive" },
-  unverified: { label: "Não verificada", className: "border-border text-muted-foreground" },
-};
 
 function InfoRow({ label, value }) {
   return (
@@ -73,18 +66,12 @@ export default function Profile() {
     );
   }
 
-  const status = STATUS[profile.identity_status] || STATUS.unverified;
-
   return (
     <div className="space-y-5">
       <header className="card-surface flex flex-wrap items-center justify-between gap-4 px-4 py-4">
         <div>
           <h1 className="text-xl font-semibold">{profile.display_name || profile.full_name}</h1>
           <p className="text-xs text-muted-foreground">{user?.email}</p>
-          <span className={`mt-2 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] ${status.className}`}>
-            <ShieldCheck className="h-3 w-3" aria-hidden="true" />
-            {status.label}
-          </span>
         </div>
         <div className="grid grid-cols-2 gap-2 text-center">
           <div className="rounded-lg border border-border px-3 py-2">

@@ -18,7 +18,7 @@ const WITHDRAWAL_STATUS = {
 };
 
 export default function WithdrawPage() {
-  const { loading, user, wallet, withdrawals, settings, kycLatest, kycApproved, profile, load } = useWalletData();
+  const { loading, wallet, withdrawals, settings, profile, load } = useWalletData();
 
   if (loading) return <CardListSkeleton count={2} />;
 
@@ -63,13 +63,8 @@ export default function WithdrawPage() {
           minWithdrawal={Number(settings.min_withdrawal ?? 30)}
           enabled={settings.withdrawals_enabled !== false}
           rolloverPending={rolloverPending}
-          kycApproved={kycApproved}
-          kycLatest={kycLatest}
-          userId={user?.id}
-          userEmail={user?.email}
           profile={profile}
           onRequested={load}
-          onKycSubmitted={load}
         />
       </section>
 

@@ -4,21 +4,21 @@ import { Switch } from "@/components/ui/switch";
 import { toast } from "@/components/ui/use-toast";
 import { logAdminAction } from "@/lib/adminAudit";
 import { formatNumber } from "@/lib/format";
-import { sportName } from "@/lib/sports";
 
 export default function AdminCatalog({ actor }) {
   const [state, setState] = useState({ loading: true, sports: [], competitions: [], counts: {} });
 
   const load = async () => {
     setState((current) => ({ ...current, loading: true }));
+    // Plataforma exclusivamente de futebol: o catálogo lista só esta modalidade.
     const [sports, competitions, aggregate] = await Promise.all([
-      base44.entities.Sport.filter({}, { sort: "sort_order", limit: 50 }),
-      base44.entities.Competition.filter({}, { sort: "name", limit: 100 }),
-      base44.entities.Event.aggregate({ query: {}, groupBy: "competition_id" }),
+      base44.entities.Sport.filter({ slug: "futebol" }, { sort: "sort_order", limit: 10 }),
+      base44.entities.Competition.filter({ sport_slug: "futebol" }, { sort: "name", limit: 200 }),
+      base44.entities.Event.aggregate({ query: { sport_slug: "futebol" }, groupBy: "competition_name" }),
     ]);
     const counts = {};
     (aggregate.rows || []).forEach((row) => {
-      counts[row.competition_id] = row.count;
+      counts[row.competition_name] = row.count;
     });
     setState({ loading: false, sports: sports.items || [], competitions: competitions.items || [], counts });
   };
@@ -71,8 +71,7 @@ export default function AdminCatalog({ actor }) {
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium">{competition.name}</p>
                 <p className="text-[11px] text-muted-foreground">
-                  {sportName(competition.sport_slug)} · {competition.country || "Internacional"} ·{" "}
-                  {formatNumber(state.counts[competition.id] || 0)} eventos
+                  {competition.country || "Internacional"} · {formatNumber(state.counts[competition.name] || 0)} eventos na base
                 </p>
               </div>
               <div className="flex items-center gap-4">

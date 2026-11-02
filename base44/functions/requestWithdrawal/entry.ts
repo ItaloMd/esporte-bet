@@ -119,20 +119,6 @@ export default async function (req) {
       return Response.json({ status: 'pending', kind: 'affiliate', withdrawal });
     }
 
-    // Primeiro saque do jogador: exige a verificação de identidade aprovada
-    // (foto do rosto, foto da identidade e foto segurando a identidade).
-    const kycPage = await service.KycSubmission.filter({ user_id: user.id, status: 'approved' }, { limit: 1 });
-    if (!kycPage.items?.length) {
-      return Response.json(
-        {
-          error:
-            'Conclua a verificação de identidade para liberar o saque: envie a foto do seu rosto, a foto da identidade e uma foto segurando a identidade.',
-          code: 'kyc_required',
-        },
-        { status: 403 },
-      );
-    }
-
     const page = await service.Wallet.filter({ user_id: user.id }, { limit: 1 });
     const wallet = page.items?.[0];
     if (!wallet) return Response.json({ error: 'Você ainda não tem saldo para sacar.' }, { status: 400 });

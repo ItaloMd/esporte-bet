@@ -5,7 +5,7 @@ import { BOTTOM_ITEMS } from "@/lib/nav";
 export default function BottomNav() {
   return (
     <nav
-      className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden"
+      className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl md:hidden"
       aria-label="Navegação principal"
     >
       <ul className="grid grid-cols-5">
@@ -20,8 +20,18 @@ export default function BottomNav() {
                 }`
               }
             >
-              <item.icon className="h-5 w-5" aria-hidden="true" />
-              {item.label}
+              {({ isActive }) => (
+                <>
+                  <span
+                    className={`grid h-8 w-12 place-items-center rounded-full transition-colors ${
+                      isActive ? "bg-primary/15" : "bg-transparent"
+                    }`}
+                  >
+                    <item.icon className="h-[1.15rem] w-[1.15rem]" aria-hidden="true" />
+                  </span>
+                  {item.label}
+                </>
+              )}
             </NavLink>
           </li>
         ))}

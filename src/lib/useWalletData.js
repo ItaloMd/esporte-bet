@@ -10,11 +10,11 @@ import { useWallet } from "@/lib/WalletProvider";
 export function useWalletData() {
   const { user, isAuthenticated, isLoadingAuth, authChecked, navigateToLogin } = useAuth();
   const { reload: reloadBalance } = useWallet();
-  const [state, setState] = useState({ loading: true, wallet: null, deposits: [], withdrawals: [], transactions: [], settings: {}, kycLatest: null, kycApproved: false, profile: null });
+  const [state, setState] = useState({ loading: true, wallet: null, deposits: [], withdrawals: [], transactions: [], settings: {}, profile: null });
 
   const load = useCallback(async () => {
     if (!user?.id) return;
-    const [walletPage, depositPage, withdrawalPage, transactionPage, settingsPage, kycPage, kycApprovedPage, profilePage] = await Promise.all([
+    const [walletPage, depositPage, withdrawalPage, transactionPage, settingsPage, profilePage] = await Promise.all([
       base44.entities.Wallet.filter({ user_id: user.id }, { limit: 1 }),
       base44.entities.Deposit.filter({ user_id: user.id }, { sort: "-created_date", limit: 10 }),
       base44.entities.Withdrawal.filter(
@@ -23,8 +23,6 @@ export function useWalletData() {
       ),
       base44.entities.WalletTransaction.filter({ user_id: user.id }, { sort: "-created_date", limit: 15 }),
       base44.entities.AppSettings.list({ limit: 1 }),
-      base44.entities.KycSubmission.filter({ user_id: user.id }, { sort: "-created_date", limit: 1 }),
-      base44.entities.KycSubmission.filter({ user_id: user.id, status: "approved" }, { limit: 1 }),
       base44.entities.UserProfile.filter({ user_id: user.id }, { limit: 1 }),
     ]);
     setState({
@@ -34,8 +32,6 @@ export function useWalletData() {
       withdrawals: withdrawalPage.items || [],
       transactions: transactionPage.items || [],
       settings: settingsPage.items?.[0] || {},
-      kycLatest: kycPage.items?.[0] || null,
-      kycApproved: Boolean(kycApprovedPage.items?.length),
       profile: profilePage.items?.[0] || null,
     });
     reloadBalance();

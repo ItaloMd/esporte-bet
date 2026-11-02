@@ -1,53 +1,101 @@
-import React, { useEffect, useState } from "react";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import React, { useCallback, useEffect, useState } from "react";
+import { ChevronDown, ChevronUp, Search } from "lucide-react";
 import { base44 } from "@/api/base44Client";
+import { Input } from "@/components/ui/input";
 import { formatCurrency } from "@/lib/format";
 import UserDetail from "@/components/admin/users/UserDetail";
 
-const STATUS_STYLE = {
-  verified: "border-primary/40 text-primary",
-  pending: "border-amber-500/40 text-amber-400",
-  rejected: "border-destructive/40 text-destructive",
-  unverified: "border-border text-muted-foreground",
-};
+const PAGE_SIZE = 50;
 
 export default function AdminUsers() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [openId, setOpenId] = useState(null);
+  const [term, setTerm] = useState("");
+  const [searchTerm, setSearchTerm] = useState("");
 
-  const load = async () => {
+  // Busca no servidor: nome, CPF ou e-mail encontram o jogador sem depender de
+  // a lista inteira ter sido carregada na tela.
+  const load = useCallback(async (needle) => {
     setLoading(true);
-    const [profiles, users, wallets] = await Promise.all([
-      base44.entities.UserProfile.filter({}, { sort: "-created_date", limit: 100 }),
+    const clean = String(needle || "").trim();
+    const digits = clean.replace(/\D/g, "");
+    const conditions = [];
+    if (clean) {
+      conditions.push({ full_name: { $regex: clean, $options: "i" } });
+      conditions.push({ display_name: { $regex: clean, $options: "i" } });
+      conditions.push({ cpf_masked: { $regex: clean, $options: "i" } });
+      if (digits.length >= 3) conditions.push({ cpf: { $regex: digits, $options: "i" } });
+    }
+    const [emailMatches, users] = await Promise.all([
+      clean.includes("@")
+        ? base44.entities.User.filter({ email: { $regex: clean, $options: "i" } }, { limit: 50 }).catch(() => ({ items: [] }))
+        : Promise.resolve({ items: [] }),
       base44.entities.User.list(),
-      base44.entities.Wallet.filter({}, { limit: 200 }),
     ]);
+    // Busca por e-mail resolve a conta e localiza o perfil pelo usuário.
+    if (emailMatches.items?.length) {
+      conditions.push({ user_id: { $in: emailMatches.items.map((item) => item.id) } });
+    }
+    const profileFilter = conditions.length ? { $or: conditions } : {};
+    const profiles = await base44.entities.UserProfile.filter(profileFilter, {
+      sort: "-created_date",
+      limit: PAGE_SIZE,
+    });
     const accountById = new Map((users || []).map((item) => [item.id, item]));
+    const matched = (profiles.items || []).filter((profile) => {
+      if (!clean) return true;
+      const account = accountById.get(profile.user_id);
+      const haystack = `${profile.full_name || ""} ${account?.email || ""}`.toLowerCase();
+      return haystack.includes(clean.toLowerCase()) || Boolean(profile.cpf || profile.cpf_masked);
+    });
+    const userIds = matched.map((profile) => profile.user_id);
+    const wallets = userIds.length
+      ? await base44.entities.Wallet.filter({ user_id: { $in: userIds } }, { limit: 200 })
+      : { items: [] };
     const walletByUser = new Map((wallets.items || []).map((wallet) => [wallet.user_id, wallet]));
     setRows(
-      (profiles.items || []).map((profile) => ({
+      matched.map((profile) => ({
         ...profile,
         account: accountById.get(profile.user_id) || null,
         wallet: walletByUser.get(profile.user_id) || null,
       })),
     );
     setLoading(false);
-  };
-
-  useEffect(() => {
-    load().catch(() => setLoading(false));
   }, []);
 
-  if (loading) return <div className="card-surface h-40 animate-pulse" />;
+  useEffect(() => {
+    load("").catch(() => setLoading(false));
+  }, [load]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setSearchTerm(term), 350);
+    return () => clearTimeout(timer);
+  }, [term]);
+
+  useEffect(() => {
+    load(searchTerm).catch(() => setLoading(false));
+  }, [searchTerm, load]);
 
   return (
     <div className="space-y-3">
+      <div className="relative max-w-md">
+        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+        <Input
+          value={term}
+          onChange={(event) => setTerm(event.target.value)}
+          placeholder="Buscar por nome, CPF ou e-mail"
+          className="h-10 pl-9"
+          aria-label="Buscar jogador"
+        />
+      </div>
       <p className="text-xs text-muted-foreground">
-        Gestão de contas: histórico de depósitos, apostas e saques, rollover atual e ajuste de saldo. A verificação de
-        identidade (KYC) fica na aba própria.
+        {loading ? "Carregando jogadores…" : `${rows.length} jogador(es) ${searchTerm ? "encontrado(s)" : "recentes"}`}
       </p>
-      {rows.length ? (
+
+      {loading ? (
+        <div className="card-surface h-40 animate-pulse" />
+      ) : rows.length ? (
         rows.map((row) => (
           <div key={row.id} className="card-surface px-4 py-3">
             <button
@@ -58,31 +106,26 @@ export default function AdminUsers() {
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium">{row.full_name}</p>
                 <p className="truncate text-[11px] text-muted-foreground">
-                  {row.account?.email || "e-mail não disponível"} · CPF {row.cpf_masked}
+                  {row.account?.email || "e-mail não disponível"} · CPF {row.cpf_masked || "não vinculado"}
                 </p>
                 <p className="text-[11px] text-muted-foreground">
                   Saldo {formatCurrency(row.wallet?.balance)} · rollover {formatCurrency(row.wallet?.rollover_completed)} de{" "}
                   {formatCurrency(row.wallet?.rollover_required)}
                 </p>
               </div>
-              <div className="flex shrink-0 items-center gap-2">
-                <span
-                  className={`rounded-full border px-2 py-0.5 text-[11px] ${STATUS_STYLE[row.identity_status] || STATUS_STYLE.unverified}`}
-                >
-                  {row.identity_status}
-                </span>
-                {openId === row.user_id ? (
-                  <ChevronUp className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-                ) : (
-                  <ChevronDown className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-                )}
-              </div>
+              {openId === row.user_id ? (
+                <ChevronUp className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+              ) : (
+                <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+              )}
             </button>
-            {openId === row.user_id && <UserDetail row={row} onAdjusted={load} />}
+            {openId === row.user_id && <UserDetail row={row} onAdjusted={() => load(searchTerm)} />}
           </div>
         ))
       ) : (
-        <p className="text-sm text-muted-foreground">Nenhum cadastro concluído até agora.</p>
+        <p className="text-sm text-muted-foreground">
+          {searchTerm ? "Nenhum jogador encontrado para esta busca." : "Nenhum cadastro concluído até agora."}
+        </p>
       )}
     </div>
   );

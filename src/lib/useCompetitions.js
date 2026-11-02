@@ -15,8 +15,9 @@ export default function useCompetitions({ sportSlug, featured, limit = 50 } = {}
       return;
     }
     let active = true;
-    const filter = {};
-    if (sportSlug && sportSlug !== "outros") filter.sport_slug = sportSlug;
+    // A plataforma é exclusivamente de futebol: o catálogo nunca traz outra
+    // modalidade, mesmo que exista registro antigo de outro esporte.
+    const filter = { sport_slug: sportSlug && sportSlug !== "outros" ? sportSlug : "futebol" };
     if (featured) filter.featured = true;
     base44.entities.Competition.filter(filter, { sort: "name", limit })
       .then((page) => {

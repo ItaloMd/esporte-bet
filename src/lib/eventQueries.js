@@ -1,5 +1,4 @@
 import { base44 } from "@/api/base44Client";
-import { OTHERS_SLUGS } from "@/lib/sports";
 
 export const MAX_CARD_ODDS = 3;
 
@@ -10,19 +9,30 @@ export const MAX_CARD_ODDS = 3;
  */
 export const LIVE_WINDOW_MS = 6 * 60 * 60 * 1000;
 
-export function buildEventFilter({ sportSlug, competitionId, dayRange, status, search, featured, country, from, brazilian } = {}) {
+export function buildEventFilter({
+  sportSlug,
+  competitionId,
+  competitionName,
+  dayRange,
+  status,
+  search,
+  featured,
+  country,
+  from,
+  brazilian,
+} = {}) {
   const filter = {};
-  if (sportSlug === "outros") filter.sport_slug = { $in: OTHERS_SLUGS };
-  else if (sportSlug) filter.sport_slug = sportSlug;
+  if (sportSlug) filter.sport_slug = sportSlug;
   if (competitionId) filter.competition_id = competitionId;
+  // O filtro de competição casa pelo nome gravado no evento: é o campo que a
+  // sincronização preenche e que a lista de competições da base usa.
+  if (competitionName) filter.competition_name = competitionName;
   // Seção Ao Vivo: somente competições brasileiras, pelo país oficial da fonte.
   if (brazilian) filter.country = "Brazil";
   else if (country) filter.country = country;
   if (status) filter.status = status;
   if (featured) filter.is_featured = true;
   if (dayRange) filter.start_time = { $gte: dayRange.start, $lte: dayRange.end };
-  // Partidas ao vivo já começaram e não recebem mais apostas: ficam fora do
-  // catálogo publicável, mas continuam listadas enquanto a fonte não confirma o resultado.
   if (status === "live") {
     const nowMs = Date.now();
     filter.start_time = {
@@ -46,9 +56,6 @@ export function buildEventFilter({ sportSlug, competitionId, dayRange, status, s
   const floor = from || new Date().toISOString();
   const rangeStart = filter.start_time?.$gte;
   filter.start_time = { ...(filter.start_time || {}), $gte: rangeStart && rangeStart > floor ? rangeStart : floor };
-  // Catálogo público: apenas partidas com cotação efetivamente oferecida pelo
-  // sistema. Quem perdeu as odds ou já começou sai da listagem para apostar.
-  filter.published = true;
   const term = (search || "").trim();
   if (term) {
     filter.$or = [
