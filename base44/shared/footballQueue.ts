@@ -60,13 +60,18 @@ export function effectiveMinuteLimit(settings, providerMinuteLimit = null) {
   return Math.max(1, Math.min(base, DEFAULT_MINUTE_LIMIT, planCap, providerCap));
 }
 
+/** Piso do espaçamento entre chamadas: 1 s, mesmo com o plano permitindo mais. */
+export const MIN_SAFE_GAP_MS = 1000;
+
 /**
  * Espaçamento entre chamadas para caber no limite por minuto: o minuto é
- * dividido pelo teto efetivo, nunca abaixo do piso de 230 ms.
+ * dividido pelo teto efetivo. O piso é 1 s (~60/min), bem abaixo dos 300/min do
+ * plano: o provedor recusa requisições quase simultâneas de execuções
+ * diferentes, e o espaçamento apertado (230 ms) fazia justamente isso.
  */
 export function paceGapMs(minuteLimit) {
   const limit = Math.max(1, Number(minuteLimit) || DEFAULT_MINUTE_LIMIT);
-  return Math.max(REQUEST_GAP_MS, Math.ceil(60000 / limit));
+  return Math.max(MIN_SAFE_GAP_MS, Math.ceil(60000 / limit));
 }
 
 /**
