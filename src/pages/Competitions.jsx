@@ -3,10 +3,10 @@ import { useSearchParams } from "react-router-dom";
 import { ArrowLeft, Search, Trophy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import EventGrid from "@/components/odds/EventGrid";
+import EventRows from "@/components/odds/EventRows";
 import useEventFeed from "@/lib/useEventFeed";
 import useFootballCompetitions from "@/lib/useFootballCompetitions";
-import { buildEventFilter } from "@/lib/eventQueries";
+import { buildEventFilter, groupEventsByCompetition } from "@/lib/eventQueries";
 import { formatNumber } from "@/lib/format";
 
 /**
@@ -59,23 +59,24 @@ export default function Competitions() {
             </Button>
           </div>
 
-          <EventGrid
-            events={feed.events}
-            oddsByEvent={feed.oddsByEvent}
-            loading={feed.loading}
-            error={feed.error}
-            onRetry={feed.reload}
-            showCompetition={false}
-            emptyTitle="Sem jogos futuros"
-            emptyDescription="Esta competição não tem partidas futuras na base."
-          />
-          {feed.hasMore && (
-            <div className="flex justify-center">
-              <Button variant="outline" onClick={feed.loadMore} disabled={feed.loading}>
-                Carregar mais partidas
-              </Button>
-            </div>
-          )}
+          <section className="panel">
+            <EventRows
+              groups={groupEventsByCompetition(feed.events)}
+              oddsByEvent={feed.oddsByEvent}
+              loading={feed.loading}
+              error={feed.error}
+              onRetry={feed.reload}
+              emptyTitle="Sem jogos futuros"
+              emptyDescription="Esta competição não tem partidas futuras na base."
+            />
+            {feed.hasMore && (
+              <div className="border-t border-border p-3 text-center">
+                <Button variant="outline" size="sm" onClick={feed.loadMore} disabled={feed.loading}>
+                  Carregar mais partidas
+                </Button>
+              </div>
+            )}
+          </section>
         </section>
       ) : (
         <>

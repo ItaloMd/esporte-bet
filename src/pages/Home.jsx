@@ -1,141 +1,125 @@
 import React, { useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { Flame, History, Search, Star, Trophy } from "lucide-react";
+import { Link } from "react-router-dom";
+import { CalendarDays, History } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import EventFilters from "@/components/odds/EventFilters";
+import BannerCarousel from "@/components/banners/BannerCarousel";
+import SuperOddsStrip from "@/components/odds/SuperOddsStrip";
+import CompetitionPills from "@/components/odds/CompetitionPills";
 import DateStrip from "@/components/odds/DateStrip";
-import EventGrid from "@/components/odds/EventGrid";
+import EventRows from "@/components/odds/EventRows";
 import ResultRow from "@/components/odds/ResultRow";
 import SectionHeading from "@/components/common/SectionHeading";
-import PixActions from "@/components/wallet/PixActions";
-import BannerCarousel from "@/components/banners/BannerCarousel";
 import AppDownloadPrompt from "@/components/common/AppDownloadPrompt";
 import { CardListSkeleton } from "@/components/state/LoadingBlocks";
 import useEventFeed from "@/lib/useEventFeed";
 import useFootballCompetitions from "@/lib/useFootballCompetitions";
-import { useAppSettings } from "@/lib/appSettings";
-import { buildEventFilter, sortEventsByRelevance } from "@/lib/eventQueries";
-import { dayRangeFromInput } from "@/lib/format";
+import { buildEventFilter, groupEventsByCompetition, sortEventsByRelevance } from "@/lib/eventQueries";
+import { dayRangeFromInput, formatNumber, toDateInputValue } from "@/lib/format";
 
 const PAST = { status: "finished" };
-
-function CompetitionChips({ competitions, loading }) {
-  if (loading) return <div className="h-9 w-full animate-pulse rounded-xl bg-secondary" />;
-  if (!competitions.length) {
-    return <p className="text-xs text-muted-foreground">As competições aparecem aqui conforme os jogos são importados.</p>;
-  }
-  return (
-    <div className="hide-scrollbar -mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
-      {competitions.map((competition) => (
-        <Link
-          key={competition.name}
-          to={`/competicoes?competition=${encodeURIComponent(competition.name)}`}
-          className="shrink-0 rounded-xl border border-border bg-card px-3.5 py-2.5 text-sm transition-colors hover:border-primary/50"
-        >
-          <span className="block max-w-[13rem] truncate font-medium">{competition.name}</span>
-          <span className="text-[11px] text-muted-foreground">{competition.count} jogos</span>
-        </Link>
-      ))}
-    </div>
-  );
-}
+const TABS = [
+  { key: "proximos", label: "Próximos" },
+  { key: "hoje", label: "Hoje" },
+];
 
 export default function Home() {
-  const settings = useAppSettings();
-  const navigate = useNavigate();
-  const [filters, setFilters] = useState({ search: "", country: "", competition: "", date: "" });
-  const { competitions, countries, loading: competitionsLoading } = useFootballCompetitions({ limit: 150 });
+  const { competitions, loading: competitionsLoading } = useFootballCompetitions({ limit: 150 });
+  const [tab, setTab] = useState("proximos");
+  const [date, setDate] = useState("");
+  const [competition, setCompetition] = useState("");
 
-  // Marca o instante da montagem: a partir dele nenhuma partida já iniciada
-  // entra nas listas de próximos jogos.
+  const today = useMemo(() => toDateInputValue(new Date()), []);
   const nowIso = useMemo(() => new Date().toISOString(), []);
+  const activeDate = tab === "hoje" ? today : date;
+
   const resultsFeed = useEventFeed(PAST, { limit: 4, sort: "-start_time" });
 
   const feedFilter = useMemo(
     () =>
       buildEventFilter({
         sportSlug: "futebol",
-        competitionName: filters.competition,
-        country: filters.country,
-        dayRange: dayRangeFromInput(filters.date),
+        competitionName: competition,
+        dayRange: dayRangeFromInput(activeDate),
         status: "scheduled",
         from: nowIso,
       }),
-    [filters.competition, filters.country, filters.date, nowIso],
+    [competition, activeDate, nowIso],
   );
-  const feed = useEventFeed(feedFilter, { limit: 12 });
-
-  // Próximos jogos ordenados pela relevância calculada no backend.
+  const feed = useEventFeed(feedFilter, { limit: 18 });
   const upcoming = useMemo(() => sortEventsByRelevance(feed.events), [feed.events]);
 
+  const groups = useMemo(() => groupEventsByCompetition(upcoming), [upcoming]);
+
+  const pickDate = (value) => {
+    setDate(value);
+    setTab(value && value === today ? "hoje" : "proximos");
+  };
+
   return (
-    <div className="space-y-7">
-      <section className="relative overflow-hidden rounded-2xl border border-border bg-card px-5 py-6 md:px-7 md:py-8">
-        <div className="pointer-events-none absolute -right-16 -top-24 h-56 w-56 rounded-full bg-primary/20 blur-3xl" />
-        <Badge variant="outline" className="border-primary/50 bg-primary/10 text-primary">
-          Futebol · odds informativas
-        </Badge>
-        <h1 className="mt-3 max-w-2xl font-display text-3xl font-semibold uppercase leading-none tracking-tight md:text-4xl">
-          {settings.brand_name}
-        </h1>
-        <p className="mt-2 max-w-xl text-sm text-muted-foreground">
-          {settings.tagline || "Calendário, mercados e cotações de futebol em um só lugar."}
-        </p>
-        <div className="mt-5 flex flex-wrap gap-2">
-          <Button asChild>
-            <Link to="/competicoes">
-              <Trophy className="mr-2 h-4 w-4" /> Competições
-            </Link>
-          </Button>
-          <Button variant="outline" asChild>
-            <Link to="/busca">
-              <Search className="mr-2 h-4 w-4" /> Buscar time
-            </Link>
-          </Button>
-        </div>
-      </section>
+    <div className="space-y-5">
+      <SuperOddsStrip />
 
       <BannerCarousel />
 
-      <PixActions />
-
-      <section>
-        <EventFilters
-          filters={filters}
-          onChange={setFilters}
-          competitions={competitions}
-          countries={countries}
-          onSubmitSearch={(term) => navigate(term ? `/busca?q=${encodeURIComponent(term)}` : "/busca")}
-        />
-      </section>
-
-      <section>
-        <SectionHeading icon={Star} title="Competições na base" to="/competicoes" actionLabel="Ver todas" />
-        <CompetitionChips competitions={competitions.slice(0, 8)} loading={competitionsLoading} />
-      </section>
-
-      <section>
-        <SectionHeading
-          icon={Flame}
-          title="Próximos jogos"
-          subtitle="Horários de Brasília · escolha o dia para filtrar"
-        />
-        <div className="mb-3">
-          <DateStrip value={filters.date} onChange={(date) => setFilters((current) => ({ ...current, date }))} />
+      <section className="panel">
+        <div className="flex items-center gap-2 border-b border-border px-3">
+          <div className="flex items-center gap-1">
+            {TABS.map((item) => {
+              const active = tab === item.key;
+              return (
+                <button
+                  key={item.key}
+                  type="button"
+                  onClick={() => {
+                    setTab(item.key);
+                    if (item.key === "proximos") setDate("");
+                  }}
+                  className={`relative px-3 py-3 text-sm font-semibold transition-colors ${
+                    active ? "text-foreground" : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {item.label}
+                  {active && <span className="absolute inset-x-2 -bottom-px h-0.5 rounded-full bg-primary" />}
+                </button>
+              );
+            })}
+          </div>
+          <div className="ml-auto flex items-center gap-2">
+            <span className="hidden text-[11px] uppercase tracking-wide text-muted-foreground sm:inline">
+              {formatNumber(upcoming.length)} jogos
+            </span>
+            <Link
+              to="/competicoes"
+              className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:border-primary/60 hover:text-foreground"
+            >
+              <CalendarDays className="h-3.5 w-3.5" aria-hidden="true" /> Competições
+            </Link>
+          </div>
         </div>
-        <EventGrid
-          events={upcoming}
+
+        <div className="space-y-2.5 border-b border-border px-3 py-3">
+          <CompetitionPills
+            competitions={competitions}
+            value={competition}
+            onChange={setCompetition}
+            loading={competitionsLoading}
+          />
+          <DateStrip value={activeDate} onChange={pickDate} />
+        </div>
+
+        <EventRows
+          groups={groups}
           oddsByEvent={feed.oddsByEvent}
           loading={feed.loading}
           error={feed.error}
           onRetry={feed.reload}
           emptyTitle="Nenhuma partida encontrada"
-          emptyDescription="Ajuste competição, país ou data para ver outros jogos."
+          emptyDescription="Ajuste a competição ou a data para ver outros jogos."
         />
+
         {feed.hasMore && (
-          <div className="mt-3 flex justify-center">
-            <Button variant="outline" onClick={feed.loadMore} disabled={feed.loading}>
+          <div className="border-t border-border p-3 text-center">
+            <Button variant="outline" size="sm" onClick={feed.loadMore} disabled={feed.loading}>
               Carregar mais partidas
             </Button>
           </div>

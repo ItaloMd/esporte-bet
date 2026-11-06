@@ -2,9 +2,9 @@ import React, { useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import EventGrid from "@/components/odds/EventGrid";
+import EventRows from "@/components/odds/EventRows";
 import useEventFeed from "@/lib/useEventFeed";
-import { buildEventFilter } from "@/lib/eventQueries";
+import { buildEventFilter, groupEventsByCompetition } from "@/lib/eventQueries";
 
 export default function SearchPage() {
   const [params, setParams] = useSearchParams();
@@ -32,7 +32,7 @@ export default function SearchPage() {
         <Input
           name="q"
           defaultValue={term}
-          placeholder="Ex.: Flamengo, Champions League, NBA"
+          placeholder="Ex.: Flamengo, Champions League, Libertadores"
           className="h-11 pl-9"
           aria-label="Buscar partidas"
         />
@@ -45,15 +45,17 @@ export default function SearchPage() {
           <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
             Resultados para “{term}”
           </h2>
-          <EventGrid
-            events={feed.events}
-            oddsByEvent={feed.oddsByEvent}
-            loading={feed.loading}
-            error={feed.error}
-            onRetry={feed.reload}
-            emptyTitle="Nenhuma partida encontrada"
-            emptyDescription="Verifique a grafia ou tente outro nome."
-          />
+          <div className="panel">
+            <EventRows
+              groups={groupEventsByCompetition(feed.events)}
+              oddsByEvent={feed.oddsByEvent}
+              loading={feed.loading}
+              error={feed.error}
+              onRetry={feed.reload}
+              emptyTitle="Nenhuma partida encontrada"
+              emptyDescription="Verifique a grafia ou tente outro nome."
+            />
+          </div>
         </section>
       )}
     </div>

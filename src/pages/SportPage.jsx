@@ -3,10 +3,10 @@ import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import EventFilters from "@/components/odds/EventFilters";
 import DateStrip from "@/components/odds/DateStrip";
-import EventGrid from "@/components/odds/EventGrid";
+import EventRows from "@/components/odds/EventRows";
 import useEventFeed from "@/lib/useEventFeed";
 import useFootballCompetitions from "@/lib/useFootballCompetitions";
-import { buildEventFilter } from "@/lib/eventQueries";
+import { buildEventFilter, groupEventsByCompetition } from "@/lib/eventQueries";
 import { dayRangeFromInput } from "@/lib/format";
 
 export default function SportPage() {
@@ -56,23 +56,24 @@ export default function SportPage() {
 
       <DateStrip value={filters.date} onChange={(date) => setFilters((current) => ({ ...current, date }))} />
 
-      <EventGrid
-        events={feed.events}
-        oddsByEvent={feed.oddsByEvent}
-        loading={feed.loading}
-        error={feed.error}
-        onRetry={feed.reload}
-        emptyTitle="Nenhum jogo agendado"
-        emptyDescription="Não há partidas para os filtros escolhidos."
-      />
-
-      {feed.hasMore && (
-        <div className="flex justify-center">
-          <Button variant="outline" onClick={feed.loadMore} disabled={feed.loading}>
-            Carregar mais partidas
-          </Button>
-        </div>
-      )}
+      <section className="panel">
+        <EventRows
+          groups={groupEventsByCompetition(feed.events)}
+          oddsByEvent={feed.oddsByEvent}
+          loading={feed.loading}
+          error={feed.error}
+          onRetry={feed.reload}
+          emptyTitle="Nenhum jogo agendado"
+          emptyDescription="Não há partidas para os filtros escolhidos."
+        />
+        {feed.hasMore && (
+          <div className="border-t border-border p-3 text-center">
+            <Button variant="outline" size="sm" onClick={feed.loadMore} disabled={feed.loading}>
+              Carregar mais partidas
+            </Button>
+          </div>
+        )}
+      </section>
     </div>
   );
 }

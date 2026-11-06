@@ -101,6 +101,17 @@ export function sortEventsByRelevance(events = []) {
   });
 }
 
+/** Agrupa partidas por competição preservando a ordem recebida da lista. */
+export function groupEventsByCompetition(events = []) {
+  const map = new Map();
+  events.forEach((event) => {
+    const key = event.competition_name || "Outras competições";
+    if (!map.has(key)) map.set(key, { name: key, country: event.country, events: [] });
+    map.get(key).events.push(event);
+  });
+  return [...map.values()];
+}
+
 export function decorateOdd(odd, event) {
   if (!event) return odd;
   return {
