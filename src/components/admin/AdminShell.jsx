@@ -2,7 +2,7 @@ import React from "react";
 import { Link } from "react-router-dom";
 import {
   Activity, ArrowLeft, BarChart3, CalendarDays, CreditCard, Database, FileSearch, Gauge, Gift, Images,
-  LayoutDashboard, RefreshCw, ShieldAlert, ShieldCheck, SlidersHorizontal, Target, Ticket, TicketCheck, Users, Wallet, Zap,
+  Layers, LayoutDashboard, RefreshCw, ShieldAlert, ShieldCheck, SlidersHorizontal, Target, Ticket, TicketCheck, Users, Wallet, Zap,
 } from "lucide-react";
 import BrandMark from "@/components/brand/BrandMark";
 import { useAppSettings } from "@/lib/appSettings";
@@ -45,6 +45,7 @@ export const ADMIN_SECTIONS = [
     items: [
       { key: "banners", label: "Banners", icon: Images },
       { key: "super-odds", label: "Super odds", icon: Zap },
+      { key: "super-multiples", label: "Super múltiplas", icon: Layers },
     ],
   },
   {

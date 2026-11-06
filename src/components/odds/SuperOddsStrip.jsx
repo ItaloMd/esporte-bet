@@ -67,9 +67,7 @@ export default function SuperOddsStrip() {
         <h2 className="flex items-center gap-1.5 text-sm font-bold uppercase tracking-wide">
           <Zap className="h-4 w-4 text-primary" aria-hidden="true" /> Super odds
         </h2>
-        <Link to="/competicoes" className="text-[11px] font-semibold uppercase tracking-wide text-primary hover:underline">
-          Ver todas
-        </Link>
+        <span className="text-[11px] uppercase tracking-wide text-muted-foreground">Turbinadas do dia</span>
       </div>
       <div className="hide-scrollbar flex gap-2 overflow-x-auto pb-1">
         {cards.map(({ odd, event }) => {

@@ -4,6 +4,7 @@ import { CalendarDays, History } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import BannerCarousel from "@/components/banners/BannerCarousel";
 import SuperOddsStrip from "@/components/odds/SuperOddsStrip";
+import SuperMultiples from "@/components/odds/SuperMultiples";
 import CompetitionPills from "@/components/odds/CompetitionPills";
 import DateStrip from "@/components/odds/DateStrip";
 import EventRows from "@/components/odds/EventRows";
@@ -58,6 +59,8 @@ export default function Home() {
   return (
     <div className="space-y-5">
       <SuperOddsStrip />
+
+      <SuperMultiples />
 
       <BannerCarousel />
 
