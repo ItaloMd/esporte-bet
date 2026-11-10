@@ -17,6 +17,7 @@ import Home from '@/pages/Home';
 import SportsIndex from '@/pages/SportsIndex';
 import SportPage from '@/pages/SportPage';
 import Competitions from '@/pages/Competitions';
+import Casino from '@/pages/Casino';
 import EventDetail from '@/pages/EventDetail';
 import SearchPage from '@/pages/SearchPage';
 import MySimulations from '@/pages/MySimulations';
@@ -65,6 +66,7 @@ const AuthenticatedApp = () => {
         <Route path="/esportes" element={<SportsIndex />} />
         <Route path="/esporte/:slug" element={<SportPage />} />
         <Route path="/competicoes" element={<Competitions />} />
+        <Route path="/cassino" element={<Casino />} />
         <Route path="/partida/:id" element={<EventDetail />} />
         <Route path="/busca" element={<SearchPage />} />
         <Route path="/termos" element={<Terms />} />

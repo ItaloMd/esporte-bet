@@ -1,0 +1,110 @@
+{
+  "name": "GamingGame",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "provider_name": {
+      "type": "string",
+      "description": "Provedor de origem do jogo (PG Soft, Pragmatic Play, Evolution...)."
+    },
+    "provider_code": {
+      "type": "string"
+    },
+    "game_code": {
+      "type": "string",
+      "description": "C\u00f3digo do jogo na GSC+, usado ao solicitar o link de lan\u00e7amento."
+    },
+    "category": {
+      "type": "string",
+      "enum": [
+        "slots",
+        "live",
+        "crash",
+        "tables",
+        "fishing",
+        "virtuals",
+        "sports"
+      ],
+      "default": "slots",
+      "enumColors": [
+        "blue",
+        "purple",
+        "yellow",
+        "green",
+        "pink",
+        "gray",
+        "red"
+      ]
+    },
+    "image_url": {
+      "type": "string"
+    },
+    "launch_url": {
+      "type": "string",
+      "description": "Link de lan\u00e7amento devolvido pela GSC+. Quando vazio, o jogo aparece no cat\u00e1logo mas n\u00e3o pode ser aberto."
+    },
+    "demo_enabled": {
+      "type": "boolean",
+      "default": false
+    },
+    "real_enabled": {
+      "type": "boolean",
+      "default": false
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "published",
+        "archived"
+      ],
+      "default": "draft",
+      "enumColors": [
+        "gray",
+        "green",
+        "red"
+      ]
+    },
+    "popularity": {
+      "type": "number",
+      "default": 0
+    },
+    "sort_order": {
+      "type": "number",
+      "default": 0
+    },
+    "external_id": {
+      "type": "string"
+    },
+    "synced_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "note": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "rls": {
+    "read": {},
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

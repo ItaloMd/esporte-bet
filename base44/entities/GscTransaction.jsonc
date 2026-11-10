@@ -1,0 +1,94 @@
+{
+  "name": "GscTransaction",
+  "type": "object",
+  "properties": {
+    "user_id": {
+      "type": "string"
+    },
+    "user_email": {
+      "type": "string"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "bet",
+        "win",
+        "rollback",
+        "adjustment"
+      ],
+      "default": "bet",
+      "enumColors": [
+        "yellow",
+        "green",
+        "blue",
+        "gray"
+      ]
+    },
+    "amount": {
+      "type": "number"
+    },
+    "currency": {
+      "type": "string",
+      "default": "BRL"
+    },
+    "game_name": {
+      "type": "string"
+    },
+    "round_id": {
+      "type": "string",
+      "description": "Identificador da rodada no provedor: chave de idempot\u00eancia das opera\u00e7\u00f5es de carteira."
+    },
+    "provider_tx_id": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "settled",
+        "divergent",
+        "rejected"
+      ],
+      "default": "pending",
+      "enumColors": [
+        "yellow",
+        "green",
+        "red",
+        "gray"
+      ]
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "note": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "kind",
+    "amount"
+  ],
+  "rls": {
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

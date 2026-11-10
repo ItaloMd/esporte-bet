@@ -1,7 +1,7 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import {
-  Activity, ArrowLeft, BarChart3, CalendarDays, CreditCard, Database, FileSearch, Gauge, Gift, Images,
+  Activity, ArrowLeft, BarChart3, CalendarDays, CreditCard, Database, FileSearch, Gauge, Gamepad2, Gift, Images,
   Layers, LayoutDashboard, RefreshCw, ShieldAlert, ShieldCheck, SlidersHorizontal, Target, Ticket, TicketCheck, Users, Wallet, Zap,
 } from "lucide-react";
 import BrandMark from "@/components/brand/BrandMark";
@@ -47,6 +47,10 @@ export const ADMIN_SECTIONS = [
       { key: "super-odds", label: "Super odds", icon: Zap },
       { key: "super-multiples", label: "Super múltiplas", icon: Layers },
     ],
+  },
+  {
+    group: "Cassino",
+    items: [{ key: "gsc", label: "Conexão GSC+", icon: Gamepad2 }],
   },
   {
     group: "API-Football",

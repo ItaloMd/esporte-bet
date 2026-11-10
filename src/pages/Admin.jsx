@@ -17,6 +17,7 @@ import AdminAffiliates from "@/components/admin/AdminAffiliates";
 import AdminBanners from "@/components/admin/AdminBanners";
 import AdminSuperOdds from "@/components/admin/AdminSuperOdds";
 import AdminSuperMultiples from "@/components/admin/AdminSuperMultiples";
+import AdminGsc from "@/components/admin/AdminGsc";
 import AdminRisk from "@/components/admin/AdminRisk";
 import AdminSettings from "@/components/admin/AdminSettings";
 import AdminFootball from "@/components/admin/AdminFootball";
@@ -41,6 +42,7 @@ const SECTION_COMPONENTS = {
   banners: (user) => <AdminBanners actor={user} />,
   "super-odds": () => <AdminSuperOdds />,
   "super-multiples": () => <AdminSuperMultiples />,
+  gsc: () => <AdminGsc />,
   reports: () => <AdminRisk />,
   platform: (user) => <AdminSettings actor={user} />,
   "api-football": (user) => <AdminFootball actor={user} />,
